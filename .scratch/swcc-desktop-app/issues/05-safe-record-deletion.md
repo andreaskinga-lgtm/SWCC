@@ -4,7 +4,7 @@
 
 **Blocked by:** 04: Retain, inspect, and repair managed evidence files.
 
-**Status:** claimed
+**Status:** resolved
 
 - [ ] Deleting a goal removes only that goal and its activity links. Its activities, evidence notes/links, reflections, and managed files survive, including activities linked to another goal or now supplementary.
 - [ ] Activity deletion requires explicit confirmation explaining that its links and evidence records/files will be removed. Cancelling changes nothing; shared goals and other activities' evidence are unaffected.
@@ -19,4 +19,6 @@
 
 - Implemented confirmed goal, activity, and year deletion with scoped evidence staging/recovery, stable references, revision isolation, and flush-before-delete confirmation flows. Added real-storage operation tests and Electron UI tests.
 - Validation after merging `integration/swcc-desktop-app` (already up to date at `4d1968a`): `npm test` passed (40 tests); `npm run typecheck`, `npm run lint`, and `npm run build` passed; `npm run test:desktop -- tests/desktop/deletions.spec.ts tests/desktop/evidence.spec.ts` passed (7 tests). Build reports the existing large-chunk warning.
-- Ticket remains claimed for merger resolution.
+- At implementation handoff, the ticket remained claimed pending merger resolution.
+- Merged `ticket/05` commit `9498bfc` into `integration/swcc-desktop-app` with `--no-ff` as `68417f9`; verified the integration base `4d1968a` was an ancestor and both worktrees were clean before merging.
+- Full post-merge verification passed: `npm test` (40 tests), `npm run typecheck`, `npm run lint`, `npm run build`, and `npx playwright test` (25 tests). The build completed with Vite's large-chunk size warning.
