@@ -41,6 +41,32 @@ async function render(pdf: PDFDocumentProxy, number: number) {
   return canvas;
 }
 
+async function sourceRender(number: number) {
+  const source = await getDocument({ data: new Uint8Array(readFileSync('OCSWSSW-CCP-Assess-Tool-2026-English.pdf')),
+    useSystemFonts: true }).promise;
+  try { return await render(source, number); }
+  finally { await source.destroy(); }
+}
+
+async function inspectLayout(pdf: PDFDocumentProxy, number: number, source: Awaited<ReturnType<typeof render>>,
+  rects: readonly (readonly number[])[], extra: readonly (readonly number[])[] = []) {
+  const generated = await render(pdf, number).catch(error => {
+    throw new Error(`Render page ${number} of ${pdf.numPages}: ${String(error)}`);
+  });
+  const before = source.getContext('2d').getImageData(0, 0, source.width, source.height).data;
+  const after = generated.getContext('2d').getImageData(0, 0, generated.width, generated.height).data;
+  const allowed = [...rects, ...extra, [78, 62, 400, 78]];
+  let unexpected = 0;
+  for (let y = 0; y < source.height; y++) for (let x = 0; x < source.width; x++) {
+    if (allowed.some(rect => x / 1.5 >= rect[0] - 1 && x / 1.5 <= rect[2] + 1
+      && 612 - y / 1.5 >= rect[1] - 1 && 612 - y / 1.5 <= rect[3] + 1)) continue;
+    const at = (y * source.width + x) * 4;
+    if (Math.abs(before[at] - after[at]) > 40) unexpected++;
+  }
+  expect(unexpected, `no changes outside measured fields / continuation label, page ${number}`).toBe(0);
+  return generated;
+}
+
 test('empty drafts require acknowledgement then export a real flattened checklist, SAT and PDP with independent dates', async () => {
   const root = storage();
   const destination = resolve(root, 'draft.pdf');
@@ -224,25 +250,209 @@ test('long words and URLs wrap completely within the measured source fields at 1
   } finally { app.close(); }
 });
 
-test.each(['SAT strengths', 'PDP reflection'])('%s that cannot fit fails explicitly without truncating or replacing an existing file', async area => {
+const satRects = [
+  [79.8549, 126.325, 192.437, 405.163],
+  [211.419, 126.325, 310.256, 404.508],
+  [331.201, 125.016, 432.002, 404.508],
+  [572.075, 126.325, 710.839, 403.854],
+] as const;
+const pdpRects = [
+  [84.4367, 124.361, 232.365, 422.181],
+  [253.31, 122.398, 390.111, 421.526],
+  [412.365, 124.361, 547.857, 421.526],
+  [569.457, 123.052, 715.421, 421.526],
+] as const;
+async function column(pdf: PDFDocumentProxy, number: number, rect: readonly number[]) {
+  const content = await (await pdf.getPage(number)).getTextContent();
+  return content.items.filter(item => 'str' in item && item.str
+    && item.transform[4] >= rect[0] && item.transform[4] < rect[2]
+    && item.transform[5] > rect[1] && item.transform[5] < rect[3])
+    .flatMap(item => 'str' in item ? [item] : []);
+}
+const compact = (text: string) => text.replace(/\s/gu, '');
+function narrative(lines: { str: string }[]) {
+  return lines.filter(line => !/^[AG]\d+ \(continued\)$/u.test(line.str)).map(line => line.str).join('');
+}
+
+test('SAT continuations carry each full annual narrative and goal once at readable size in the original layout', async () => {
+  const root = storage();
+  const destination = resolve(root, 'sat-stress.pdf');
+  const app = openApplication(root, {}, undefined, undefined, formsSystem(destination));
+  const strengths = Array.from({ length: 28 }, (_, n) => `Force${n}: café, écoute — “précision”.`).join('\n\n');
+  const feedback = `Une seule voix.\n\ncafe\u0301; e\u0301coute; office, affinité.\n${'À bientôt; progrès! '.repeat(110)}FIN-AVIS`;
+  const needs = `Besoin initial.\n\nhttps://example.org/${'AbCdÉf'.repeat(95)}\n${'MotIninterrompu'.repeat(32)}\nFIN-BESOINS`;
+  try {
+    let pkg = value(await app.operations.createYear(2024));
+    pkg = value(await app.operations.saveDraft({ packageId: pkg.id, expectedRevision: pkg.contentRevision,
+      draft: { assessmentDate: '2024-01-20', planDate: '2024-02-01', strengths, peerFeedback: feedback,
+        learningNeeds: needs, annualStandards: ['principle-viii'] } }));
+    for (let n = 1; n <= 12; n++) pkg = value(await app.operations.createGoal({
+      packageId: pkg.id, expectedRevision: pkg.contentRevision, title: `Objectif unique ${n}`,
+      description: n === 1 ? 'Première description. '.repeat(100) : `Description ${n} — fin.`,
+    }));
+    const result = value(await app.operations.exportForms({ packageId: pkg.id, confirmDraft: true }));
+    expect(result.cancelled).toBe(false);
+    const original = await sourceRender(8);
+    const pdf = await getDocument({ data: new Uint8Array(readFileSync(destination)), useSystemFonts: true }).promise;
+    try {
+      const pages: number[] = [];
+      for (let n = 2; n <= pdf.numPages; n++) if ((await text(pdf, n)).includes('Self-Assessment')) pages.push(n);
+      expect(pages.length).toBeGreaterThan(2);
+      if (!result.cancelled) expect(result.pageCount).toBe(pdf.numPages);
+      const expected = [strengths, feedback, needs,
+        pkg.goals.map(goal => `${goal.ref} ${goal.title}\n${goal.description}`).join('\n\n')];
+      for (const [index, rect] of satRects.entries()) {
+        let actual = '';
+        for (const n of pages) {
+          const lines = await column(pdf, n, rect);
+          actual += narrative(lines);
+          for (const line of lines) {
+            expect(line.transform[4] + line.width).toBeLessThanOrEqual(rect[2] - 1.9);
+            expect(Math.hypot(line.transform[0], line.transform[1])).toBeGreaterThanOrEqual(10);
+            expect(line.transform[5] + line.height).toBeLessThan(rect[3] - 1);
+            expect(line.transform[5]).toBeGreaterThan(rect[1] + 2);
+          }
+        }
+        expect(compact(actual), `complete SAT column ${index}`).toBe(compact(expected[index]));
+      }
+      for (const n of pages) {
+        expect(await text(pdf, n)).toContain(`CCP 2024 — SAT`);
+        expect(await (await pdf.getPage(n)).getAnnotations()).toEqual([]);
+        expect((await pdf.getPage(n)).view).toEqual([0, 0, 792, 612]);
+      }
+      expect(await pdf.getFieldObjects()).toBeNull();
+      expect(await pdf.getJSActions()).toBeNull();
+      const firstFeedback = await column(pdf, pages[0], satRects[1]);
+      expect(firstFeedback[0].transform[5] - firstFeedback[1].transform[5]).toBeGreaterThan(25);
+      const directory = resolve('.work/forms-continuation-inspection');
+      if (process.env.SWCC_EXPORT_INSPECT === '1') {
+        mkdirSync(directory, { recursive: true });
+        writeFileSync(resolve(directory, 'sat-stress.pdf'), readFileSync(destination));
+        writeFileSync(resolve(directory, 'sat-source.png'), original.toBuffer('image/png'));
+      }
+      for (const n of pages) {
+        const rendered = await inspectLayout(pdf, n, original, satRects,
+          [[106.037, 88.3613, 204.874, 105.38], ...(n === pages[0] ? [[444.78, 216.108, 452.28, 223.608]] : [])]);
+        if (process.env.SWCC_EXPORT_INSPECT === '1')
+          writeFileSync(resolve(directory, `sat-${n - 1}.png`), rendered.toBuffer('image/png'));
+      }
+    } finally { await pdf.destroy(); }
+  } finally { app.close(); }
+}, 30_000);
+
+test('PDP continuations keep uneven activity, evidence and reflection columns on the same record without repeating any content', async () => {
+  const root = storage();
+  const destination = resolve(root, 'pdp-stress.pdf');
+  const evidenceFile = resolve(root, 'attestation-présence.txt');
+  writeFileSync(evidenceFile, 'Exact managed evidence bytes.');
+  const app = openApplication(root, { today: () => '2026-10-31' }, undefined,
+    { chooseFile: async () => evidenceFile, openPath: async () => '' }, formsSystem(destination));
+  const url = `https://example.org/${'UrlÉnormeSansSéparateur'.repeat(60)}`;
+  const inputs = Array.from({ length: 12 }, (_, index) => ({
+    title: `Atelier unique ${index + 1} — café`,
+    description: index === 1 ? 'Description ample, étape suivante. '.repeat(100) : `Description brève ${index + 1}.`,
+    evidenceDescription: index === 1 ? 'Preuve détaillée.\n\n'.repeat(28) : `Preuve unique ${index + 1}.`,
+    evidenceLinks: index === 1 ? [url, `http://example.org/${'Word'.repeat(65)}`] : [],
+    applicationToPractice: index === 0 ? 'Réflexion vaste — “élargir”. '.repeat(150)
+      : index === 2 ? 'Premier paragraphe.\n\nDeuxième paragraphe: naïve, coöperation, œil; ponctuation…\nDernière ligne.'
+      : `Réflexion brève ${index + 1}.`,
+  }));
+  try {
+    let pkg = value(await app.operations.createYear(2024));
+    for (let n = 1; n <= 14; n++) pkg = value(await app.operations.createGoal({
+      packageId: pkg.id, expectedRevision: pkg.contentRevision, title: `But distinct ${n}`, description: `Récit du but ${n}.`,
+    }));
+    for (const [index, input] of inputs.entries()) {
+      pkg = value(await app.operations.createActivity({ ...input, packageId: pkg.id, expectedRevision: pkg.contentRevision,
+        goalIds: index === 0 ? pkg.goals.slice(0, 2).map(goal => goal.id)
+          : index === 2 ? [] : [pkg.goals[index % pkg.goals.length].id],
+        status: 'Completed', completionDate: '2024-03-01' }));
+      if (index === 0) {
+        const imported = value(await app.operations.importEvidence({
+          packageId: pkg.id, expectedRevision: pkg.contentRevision, activityId: pkg.activities[0].id,
+        }));
+        if (imported.cancelled) throw new Error('Evidence fixture cancelled');
+        pkg = imported.package;
+      }
+    }
+    const result = value(await app.operations.exportForms({ packageId: pkg.id, confirmDraft: true }));
+    const original = await sourceRender(11);
+    const pdf = await getDocument({ data: new Uint8Array(readFileSync(destination)), useSystemFonts: true }).promise;
+    try {
+      const pages: number[] = [];
+      for (let n = 2; n <= pdf.numPages; n++) if ((await text(pdf, n)).includes('Development')) pages.push(n);
+      expect(pages.length).toBeGreaterThan(3);
+      if (!result.cancelled) expect(result.pageCount).toBe(pdf.numPages);
+      const expected = [
+        Array.from({ length: 14 }, (_, i) => `G${i + 1} But distinct ${i + 1}\nRécit du but ${i + 1}.`).join('\n\n'),
+        inputs.map((input, i) => `A${i + 1} ${input.title}\n${input.description}\nCompleted — 2024-03-01\n${
+          i === 0 ? 'Linked goals: G1, G2' : i === 2 ? 'No linked goal' : `Linked goals: G${i + 1}`}`).join('\n\n'),
+        inputs.map((input, i) => [`A${i + 1}`, input.evidenceDescription, ...input.evidenceLinks,
+          ...(i === 0 ? ['E1 attestation-présence.txt'] : [])].join('\n')).join('\n\n'),
+        inputs.map((input, i) => `A${i + 1}\n${input.applicationToPractice}`).join('\n\n'),
+      ];
+      for (const [index, rect] of pdpRects.entries()) {
+        let actual = '';
+        for (const n of pages) {
+          const lines = await column(pdf, n, rect);
+          actual += narrative(lines);
+          for (const line of lines) {
+            expect(line.transform[4]).toBeGreaterThanOrEqual(rect[0] + 1.9);
+            expect(line.transform[4] + line.width).toBeLessThanOrEqual(rect[2] - 1.9);
+            expect(Math.hypot(line.transform[0], line.transform[1])).toBeGreaterThanOrEqual(10);
+            expect(line.transform[5]).toBeGreaterThan(rect[1] + 2);
+            expect(line.transform[5] + line.height).toBeLessThan(rect[3] - 1);
+          }
+        }
+        expect(compact(actual), `complete PDP column ${index}`).toBe(compact(expected[index]));
+      }
+      for (const n of pages) {
+        const columns = await Promise.all(pdpRects.slice(1).map(rect => column(pdf, n, rect)));
+        // A new record must start at the same row in all three narrative columns.
+        for (let i = 1; i <= inputs.length; i++) {
+          const starts = columns.map(lines => lines.find(line => new RegExp(`^A${i}(?: |$)`).test(line.str)
+            && !line.str.includes('(continued)')));
+          if (starts.some(Boolean)) {
+            expect(starts.every(Boolean), `A${i} starts together on page ${n}`).toBe(true);
+            const rows = starts.map((line, index) => pdpRects[index + 1][3] - line!.transform[5]);
+            expect(Math.max(...rows) - Math.min(...rows), `A${i} aligned rows on page ${n}`).toBeLessThan(1);
+          }
+        }
+        expect(await (await pdf.getPage(n)).getAnnotations()).toEqual([]);
+        expect(await text(pdf, n)).toContain('CCP 2024 — PDP');
+      }
+      expect(await pdf.getFieldObjects()).toBeNull();
+      expect(await pdf.getJSActions()).toBeNull();
+      expect(await pdf.getAttachments()).toBeNull();
+      const directory = resolve('.work/forms-continuation-inspection');
+      if (process.env.SWCC_EXPORT_INSPECT === '1') {
+        mkdirSync(directory, { recursive: true });
+        writeFileSync(resolve(directory, 'pdp-stress.pdf'), readFileSync(destination));
+        writeFileSync(resolve(directory, 'pdp-source.png'), original.toBuffer('image/png'));
+      }
+      for (const n of pages) {
+        const rendered = await inspectLayout(pdf, n, original, pdpRects, [[111.273, 88.3613, 208.146, 105.38]]);
+        if (process.env.SWCC_EXPORT_INSPECT === '1')
+          writeFileSync(resolve(directory, `pdp-${n - pages[0] + 1}.png`), rendered.toBuffer('image/png'));
+      }
+    } finally { await pdf.destroy(); }
+  } finally { app.close(); }
+}, 30_000);
+
+test('unsupported glyphs fail explicitly without silently changing the narrative or replacing a complete file', async () => {
   const root = storage();
   const destination = resolve(root, 'existing.pdf');
   writeFileSync(destination, 'Previous complete export');
   const app = openApplication(root, {}, undefined, undefined, formsSystem(destination));
   try {
     let pkg = value(await app.operations.createYear(2024));
-    if (area === 'SAT strengths') {
-      pkg = value(await app.operations.saveDraft({
-        packageId: pkg.id, expectedRevision: pkg.contentRevision,
-        draft: { assessmentDate: '', planDate: '', strengths: 'A long paragraph with accents café. '.repeat(500),
-          peerFeedback: '', learningNeeds: '', annualStandards: [] },
-      }));
-    } else {
-      pkg = value(await app.operations.createActivity({ packageId: pkg.id, expectedRevision: pkg.contentRevision,
-        title: 'Learning', applicationToPractice: `https://example.org/${'longunbroken'.repeat(500)}` }));
-    }
+    pkg = value(await app.operations.saveDraft({
+      packageId: pkg.id, expectedRevision: pkg.contentRevision,
+      draft: { assessmentDate: '', planDate: '', strengths: 'Keep this unsupported character: 🧠',
+        peerFeedback: '', learningNeeds: '', annualStandards: [] },
+    }));
     const result = await app.operations.exportForms({ packageId: pkg.id, confirmDraft: true });
-    expect(result).toMatchObject({ ok: false, error: { code: 'OVERFLOW', message: expect.stringMatching(/continuation/i) } });
+    expect(result).toMatchObject({ ok: false, error: { code: 'EXPORT', message: expect.stringMatching(/not supported.*🧠/u) } });
     expect(readFileSync(destination, 'utf8')).toBe('Previous complete export');
     expect(readdirSync(root).some(name => name.endsWith('.partial'))).toBe(false);
   } finally { app.close(); }

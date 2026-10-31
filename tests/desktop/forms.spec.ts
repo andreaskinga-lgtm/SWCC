@@ -120,6 +120,77 @@ test('failed draft flush retains edits and prevents stale export; retry exports 
   } finally { await pdf.destroy(); }
 });
 
+test('long edited narratives export through the same desktop action with readable continuations and recoverable glyph errors', async () => {
+  test.setTimeout(60_000);
+  const path = resolve(root, 'continuations.pdf');
+  await destination(path);
+  const strengths = Array.from({ length: 45 }, (_, i) => `Force${i}: café — écoute attentive.`).join('\n\n');
+  const reflection = `${'Appliquer une réflexion différente. '.repeat(90)}FIN-REFLEXION`;
+  await page.getByRole('navigation').getByRole('button', { name: 'Self-assessment', exact: true }).click();
+  await page.getByLabel('Strengths', { exact: true }).fill(`${strengths}\n🧠`);
+  await page.getByRole('navigation').getByRole('button', { name: 'Year overview', exact: true }).click();
+  await page.getByRole('button', { name: 'Record an activity', exact: true }).click();
+  const activity = page.getByRole('dialog', { name: 'Record an activity' });
+  await activity.getByLabel('Activity title').fill('Atelier partagé — unique');
+  await activity.getByRole('button', { name: 'Save activity', exact: true }).click();
+  const editor = page.getByRole('article', { name: 'Activity editor A1' });
+  for (const title of ['Premier but', 'Deuxième but']) {
+    await editor.getByRole('button', { name: 'Create and link a goal', exact: true }).click();
+    const goal = page.getByRole('dialog', { name: 'Create a shared learning goal' });
+    await goal.getByLabel('Goal title').fill(title);
+    await goal.getByRole('button', { name: 'Create goal', exact: true }).click();
+    await expect(goal).toHaveCount(0);
+  }
+  await editor.getByLabel('Evidence notes').fill('Une seule preuve conservée.');
+  await editor.getByLabel('Application to practice').fill(reflection);
+  await page.getByRole('navigation').getByRole('button', { name: 'Year overview', exact: true }).click();
+  await page.getByRole('button', { name: 'Export Forms PDF', exact: true }).click();
+  const warning = page.getByRole('dialog', { name: 'Export annual forms' });
+  await expect(warning).toContainText('readable continuation pages');
+  await warning.getByRole('button', { name: 'Export draft PDF', exact: true }).click();
+  await expect(warning.getByRole('alert')).toContainText('not supported');
+  await expect(page.getByRole('status').filter({ hasText: 'Forms PDF written' })).toHaveCount(0);
+  expect(existsSync(path)).toBe(false);
+  await warning.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  await page.getByRole('navigation').getByRole('button', { name: 'Self-assessment', exact: true }).click();
+  await expect(page.getByLabel('Strengths', { exact: true })).toHaveValue(`${strengths}\n🧠`);
+  await page.getByLabel('Strengths', { exact: true }).fill(strengths);
+  // Deliberately consume the edit immediately, without waiting for debounce.
+  await page.getByRole('navigation').getByRole('button', { name: 'Year overview', exact: true }).click();
+  await page.getByRole('button', { name: 'Export Forms PDF', exact: true }).click();
+  await warning.getByRole('button', { name: 'Export draft PDF', exact: true }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Forms PDF written' })).toBeVisible();
+  const pdf = await getDocument({ data: new Uint8Array(readFileSync(path)), useSystemFonts: true }).promise;
+  try {
+    expect(pdf.numPages).toBeGreaterThan(5);
+    let actualStrengths = '';
+    let actualReflection = '';
+    let pdp = '';
+    for (let n = 2; n <= pdf.numPages; n++) {
+      const content = (await (await pdf.getPage(n)).getTextContent()).items.flatMap(item => 'str' in item ? [item] : []);
+      const sat = content.some(item => item.str.includes('Self-Assessment'));
+      const rect = sat ? [79.8549, 126.325, 192.437, 405.163] : [569.457, 123.052, 715.421, 421.526];
+      const lines = content.filter(item => item.transform[4] >= rect[0] && item.transform[4] < rect[2]
+        && item.transform[5] > rect[1] && item.transform[5] < rect[3]);
+      const narrative = lines.filter(item => !/^A1(?: \(continued\))?$/u.test(item.str)).map(item => item.str).join('');
+      if (sat) actualStrengths += narrative;
+      else {
+        actualReflection += narrative;
+        pdp += content.map(item => item.str).join(' ');
+      }
+      for (const line of lines) expect(Math.hypot(line.transform[0], line.transform[1])).toBeGreaterThanOrEqual(10);
+      expect(await (await pdf.getPage(n)).getAnnotations()).toEqual([]);
+    }
+    const compact = (text: string) => text.replace(/\s/gu, '');
+    expect(compact(actualStrengths)).toBe(compact(strengths));
+    expect(compact(actualReflection)).toBe(compact(reflection));
+    expect(pdp.split('Atelier partagé —')).toHaveLength(2);
+    expect(pdp.split('Une seule preuve')).toHaveLength(2);
+    expect(pdp).toContain('G1, G2');
+    expect(await pdf.getFieldObjects()).toBeNull();
+  } finally { await pdf.destroy(); }
+});
+
 test('normal close waits for an in-flight forms export to finish publishing the complete PDF', async () => {
   const path = resolve(root, 'before-close.pdf');
   await desktop.evaluate(({ dialog }, filePath) => {

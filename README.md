@@ -1,6 +1,6 @@
 # SWCC desktop
 
-The offline Electron app includes durable annual assessment drafts, independent annual standards, shared learning goals and activities, managed evidence files with integrity checks and repair, activity notes/links and reflections, per-year standards review, explicit annual step completion and external declaration records, short-content annual Forms PDF export, and full-app backup. The production shell follows approved C / Learning map reference at commit `5477044`; prototype samples and simulated operations are not shipped.
+The offline Electron app includes durable annual assessment drafts, independent annual standards, shared learning goals and activities, managed evidence files with integrity checks and repair, activity notes/links and reflections, per-year standards review, explicit annual step completion and external declaration records, annual Forms PDF export with readable continuations, and full-app backup. The production shell follows approved C / Learning map reference at commit `5477044`; prototype samples and simulated operations are not shipped.
 
 ## Run and check
 
@@ -82,7 +82,7 @@ Startup refuses corrupt, empty, missing-from-an-existing-dataset, future-schema,
 | `src/shared/forms.ts`, `src/main/export/forms.ts` | Draft-export warnings, measured source-template projection, local font appearances, flattening and complete PDF publication |
 | `src/renderer/backup-screen.tsx` | C's full-backup action, quiet status, progress/cancellation and distinct unavailable restore entry |
 
-Export/backup implementations belong in **main-process modules**, not renderer/file-system bridges. The dashboard's **Export Forms PDF** action invokes the narrowly typed `exportForms` operation. Continuation pages, portfolio archives, and recoverable replacement remain later slices. Record deletion, managed evidence and repair, readiness, manual completion, external declaration recording, and full-app backup are implemented. Ready never means manually Completed.
+Export/backup implementations belong in **main-process modules**, not renderer/file-system bridges. The dashboard's **Export Forms PDF** action invokes the narrowly typed `exportForms` operation, including continuation pages. Portfolio archives and recoverable replacement remain later slices. Record deletion, managed evidence and repair, readiness, manual completion, external declaration recording, full-app backup and validated restore preview are implemented. Ready never means manually Completed.
 
 Public operations return `Result<T>`, not success-shaped failures. `createYear` returns a stable package and persists selection. A duplicate returns `DUPLICATE_YEAR` with `existingPackageId` for actionable opening. `openYear` persists selection without advancing content/data revisions. `saveDraft` accepts a **complete `Draft`** plus package ID and expected content revision; unknown draft fields, malformed dates, and stale revisions are rejected without overwriting the saved record.
 
@@ -185,7 +185,7 @@ Current manual completion requires matching relevant/completed revisions. Assess
 
 A year is Complete only with all three current manual confirmations and a declaration date. Dashboard and year-list status refresh after actions and survive restart. C's independent annual checklist, declaration and forms export controls sit beside the relationship board, with labelled keyboard actions, readable blockers and the source-edition/application-readiness caveat. Forms export remains available for incomplete years after explicit draft acknowledgement.
 
-## Annual Forms PDF — short-content slice
+## Annual Forms PDF — original layouts and readable continuations
 
 Choose **Export Forms PDF** beside the annual workflow, review the missing readiness/manual-completion/declaration items, then explicitly choose **Export draft PDF** when incomplete. Empty drafts still emit the checklist, one SAT and one PDP; missing fields remain blank. An OS save dialog chooses the destination. Cancellation is not success; generation and storage errors remain visible and retryable.
 
@@ -197,18 +197,25 @@ Each selected page is filled in an isolated template document, its appearances u
 
 Noto Sans Regular is bundled under `resources/fonts/`, unmodified, with its SIL Open Font License and pinned upstream revision. No font fetch occurs at runtime. Actual field rectangles, 1–2 pt padding, font metrics and 10 pt body text drive line wrapping, including long unbroken words/URLs. Unsupported glyphs fail explicitly rather than disappear.
 
-**Ticket 09 continuation pages are not implemented.** If any field cannot fit at 10 pt, export returns an actionable `OVERFLOW` error and publishes nothing. Do not shorten text automatically or treat this short-content slice as the completed long-content export delivery gate. Complete Portfolio ZIP is also not implemented here.
+The same Forms PDF operation paginates all SAT/PDP narratives at **10 pt**, without shrinking or a narrative-length cutoff. Each continuation is another isolated, filled and flattened copy of the same source page. A quiet footer identifies year, SAT/PDP and logical page/continuation number. Dates and selected annual standards appear on the first page only; continuation checkboxes are blank. Missing or already-emitted narratives remain blank.
+
+SAT columns advance independently; split goals repeat only their G reference with `(continued)`, not their title/description. PDP goals likewise advance through their own column. The three activity/evidence/reflection columns reserve corresponding rows for one A record until **all three** have emitted its remaining content; shorter columns stay blank rather than displaying another activity against the previous record. An unfinished column starts its next page with only the A reference and `(continued)`. All linked G references and **No linked goal** appear once in the activity narrative. Blank space is intentional navigation, not omitted text.
+
+Wrapping uses bundled-font widths and grapheme boundaries, including unbroken words and HTTP/HTTPS URLs. Paragraph/newline breaks, composed and decomposed accents, and supported punctuation are retained; CRLF/CR become line breaks and tabs become four spaces. Unsupported glyphs fail explicitly without changing saved text or publishing output. A grapheme that cannot physically fit the field at 10 pt still produces an actionable `OVERFLOW`, never clipping. Complete Portfolio ZIP is not implemented here.
 
 The entire PDF is generated before writing a unique private partial file beside the destination. The file is completely written, flushed and closed before rename publishes it. Errors preserve any previous complete destination, and success is reported only after publication. A forms export is **not** a restorable full-app backup.
 
-`tests/forms-export.test.ts` exercises public operations with real SQLite, managed evidence and actual templates. It checks flattened content/reference counts, synchronous snapshot consistency, cancellation/failures, overflow, raster checklist/standard alignment, and wrapped text inside measured fields at ≥10 pt. To inspect the generated example locally:
+`tests/forms-export.test.ts` exercises public operations with real SQLite, managed evidence and actual templates. It checks complete extracted column narratives (ignoring extraction whitespace, excluding only explicit continuation metadata), stable references, uneven split-record row alignment, paragraph spacing, synchronous snapshot consistency, cancellation/failures, unsupported glyphs, raster checklist/standard alignment, and text inside measured fields at ≥10 pt. Every stress SAT/PDP page is rendered and pixel-compared with its source outside the measured fields/footer; this also verifies that SAT selections do not recur on continuations. To retain generated inspection examples locally:
 
 ```sh
 SWCC_EXPORT_INSPECT=1 npm test -- tests/forms-export.test.ts
 # .work/forms-inspection/{annual.pdf,checklist.png,sat.png,pdp.png}
+# .work/forms-continuation-inspection/{sat-stress.pdf,pdp-stress.pdf,sat-*.png,pdp-*.png}
 ```
 
 `tests/desktop/forms.spec.ts` exercises the production offline Electron renderer, keyboard draft confirmation, destination cancellation, busy/error feedback, and failed-save retention followed by exporting the latest text. OS chooser responses and injected disk errors are controlled system-boundary fixtures; generated PDFs and renderer actions are real.
+
+Ticket 09 verification on October 31, 2026, macOS 26.6.2 / arm64: all **87 public-operation tests**, typecheck, lint and build passed. **18 targeted real Electron desktop checks** (forms, backup, drafts and completion) passed against production offline `file://` assets, including a new long-content export with shared goals, both-session flush consumption, an explicit unsupported-glyph failure with retained edits, correction and successful complete PDF retry. SAT stress emitted 8 logical SAT pages; PDP stress emitted 20 logical PDP pages. All 28 stress form pages passed raster fidelity / bounds / readable-size checks; first, split-transition and final renders were visually inspected alongside the retained ticket 08 examples. No dependencies or backup/restore contracts changed. This is available-host desktop verification, not installer, Windows/Intel macOS/macOS 14 acceptance. Vite retains its existing large-chunk advisory; npm reports existing locked dependency advisories.
 
 Ticket 08 verification on October 31, 2026, macOS 26.6.2 / arm64: `npm ci`, all 75 public-operation tests, typecheck, lint, build, and 13 targeted desktop forms/completion/draft checks passed. The actual checklist/SAT/PDP sources and generated raster layouts were visually inspected. `package:dir` also passed, and all four forms renderer checks passed offline against the resulting unsigned app bundle with its bundled PDFs/font, including normal-close protection during export. This was an app-bundle smoke, not a DMG installation or Windows/macOS Intel acceptance; those targets were not exercised for this slice. Vite retains its existing large-chunk advisory.
 
