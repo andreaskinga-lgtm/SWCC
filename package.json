@@ -1,16 +1,27 @@
 {
-  "name": "swcc-desktop-ui-prototype",
-  "version": "0.0.0",
+  "name": "swcc-desktop",
+  "productName": "SWCC",
+  "version": "0.1.0",
   "private": true,
+  "description": "Private offline continuing competence year portfolios",
+  "author": "SWCC",
   "type": "module",
   "scripts": {
-    "prototype": "vite --host 127.0.0.1",
-    "prototype:check": "tsc --noEmit",
-    "prototype:build": "tsc --noEmit && vite build"
+    "dev": "node scripts/dev.mjs",
+    "start": "electron .",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.main.json --noEmit",
+    "lint": "eslint src tests scripts *.ts *.mjs",
+    "build": "tsc -p tsconfig.main.json && vite build",
+    "test": "node scripts/test.mjs",
+    "test:desktop": "npm run build && playwright test",
+    "package:dir": "npm run build && electron-builder --dir",
+    "package:mac": "npm run build && electron-builder --mac dmg --arm64",
+    "postinstall": "electron-builder install-app-deps"
   },
+  "main": "dist/main/index.js",
   "dependencies": {
     "lucide-react": "1.66.0",
-    "pdfjs-dist": "6.4.299",
+    "better-sqlite3": "12.11.1",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },
@@ -18,7 +29,30 @@
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.2",
-    "typescript": "7.0.2",
+    "@types/better-sqlite3": "9.6.0",
+    "@types/node": "22.20.5",
+    "@playwright/test": "1.64.1",
+    "electron": "38.8.6",
+    "electron-builder": "26.18.1",
+    "eslint": "10.14.0",
+    "typescript-eslint": "8.72.1",
+    "vitest": "4.1.12",
+    "typescript": "6.0.3",
     "vite": "8.3.5"
+  },
+  "build": {
+    "appId": "org.swcc.desktop",
+    "productName": "SWCC",
+    "directories": { "output": "release" },
+    "files": ["dist/**/*", "package.json"],
+    "extraResources": [
+      { "from": "Code-of-Ethics-and-Standards-of-Practice-September-7-2018 (1).pdf", "to": "sources/ethics-2018.pdf" },
+      { "from": "Step One SWCC.pdf", "to": "sources/step-one.pdf" },
+      { "from": "OCSWSSW-CCP-Assess-Tool-2026-English.pdf", "to": "sources/assessment-2026.pdf" }
+    ],
+    "asarUnpack": ["node_modules/better-sqlite3/**/*"],
+    "mac": { "target": "dmg", "category": "public.app-category.productivity", "minimumSystemVersion": "14.0", "identity": null },
+    "win": { "target": "nsis" },
+    "nsis": { "perMachine": false }
   }
 }
