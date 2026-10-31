@@ -29,37 +29,87 @@ const fieldLabels: Record<string, string> = {
   Date44_af_date: 'Assessment date', Date43_af_date: 'Plan date',
 };
 
-function fieldLines(text: string, width: number, capacity: number, font: PDFFont, label: string): string[] {
-  const normalized = text.replace(/\r\n?/g, '\n').replace(/\t/g, '    ').normalize('NFC');
+function fieldLines(text: string, width: number, font: PDFFont, label: string): string[] {
+  const normalized = text.replace(/\r\n?/g, '\n').replace(/\t/g, '    ');
   const supported = new Set(font.getCharacterSet());
   for (const character of normalized) {
     if (character !== '\n' && !supported.has(character.codePointAt(0)!))
       throw new Error(`${label} contains a character not supported by the bundled font (${character}). Replace it before retrying; it has not been silently omitted.`);
   }
   const lines: string[] = [];
-  function add(line: string) {
-    lines.push(line);
-    if (lines.length > capacity) throw new FormsOverflow(
-      `${label} does not fit the source layout at 10 pt. Continuation pages are not available yet (ticket 09). Shorten this content or wait for continuation support. No output was published.`,
-    );
-  }
+  const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
   for (const paragraph of normalized.split('\n')) {
-    const characters = Array.from(paragraph);
-    if (!characters.length) add('');
-    while (characters.length) {
+    const characters = Array.from(segmenter.segment(paragraph), entry => entry.segment);
+    if (!characters.length) lines.push('');
+    let offset = 0;
+    while (offset < characters.length) {
       let count = 1;
-      if (font.widthOfTextAtSize(characters[0], 10) > width) throw new FormsOverflow(`${label} cannot fit a character at 10 pt. Continuation support is required. No output was published.`);
-      while (count < characters.length && font.widthOfTextAtSize(characters.slice(0, count + 1).join(''), 10) <= width) count++;
-      if (count < characters.length) {
+      if (font.widthOfTextAtSize(characters[offset], 10) > width)
+        throw new FormsOverflow(`${label} contains a grapheme that cannot fit the source field at 10 pt. No output was published.`);
+      while (offset + count < characters.length && font.widthOfTextAtSize(characters.slice(offset, offset + count + 1).join(''), 10) <= width) count++;
+      if (offset + count < characters.length) {
         let whitespace = -1;
-        for (let index = 0; index < count; index++) if (/\s/u.test(characters[index])) whitespace = index;
-        if (whitespace > 0) count = whitespace;
+        for (let index = 0; index < count; index++) if (/\s/u.test(characters[offset + index])) whitespace = index;
+        if (whitespace > 0) count = whitespace + 1;
       }
-      add(characters.splice(0, count).join(''));
-      while (characters.length && /^\s$/u.test(characters[0])) characters.shift();
+      lines.push(characters.slice(offset, offset + count).join(''));
+      offset += count;
     }
   }
   return lines;
+}
+
+interface TextRecord { text: string; ref?: string }
+interface FieldGeometry { width: number; height: number; padding: number; lineHeight: number; capacity: number }
+function paginate(records: TextRecord[], geometry: FieldGeometry, font: PDFFont, label: string): string[][] {
+  const pages: string[][] = [[]];
+  for (const record of records) {
+    const lines = fieldLines(record.text, geometry.width - geometry.padding * 2, font, label);
+    let offset = 0;
+    let page = pages[pages.length - 1];
+    if (page.length) {
+      if (geometry.capacity - page.length < Math.min(lines.length + 1, 3)) pages.push(page = []);
+      else page.push('');
+    }
+    while (offset < lines.length) {
+      if (page.length === geometry.capacity) pages.push(page = []);
+      if (!page.length && offset && record.ref) page.push(`${record.ref} (continued)`);
+      const count = Math.min(geometry.capacity - page.length, lines.length - offset);
+      page.push(...lines.slice(offset, offset + count));
+      offset += count;
+    }
+  }
+  return pages;
+}
+
+function paginateActivities(records: { ref: string; texts: string[] }[], geometries: FieldGeometry[], font: PDFFont): string[][][] {
+  const capacity = Math.min(...geometries.map(geometry => geometry.capacity));
+  const pages: string[][][] = [[[], [], []]];
+  for (const record of records) {
+    const lines = record.texts.map((text, index) =>
+      fieldLines(text, geometries[index].width - geometries[index].padding * 2, font, fieldLabels[`Text${40 + index}`]));
+    const offsets = [0, 0, 0];
+    let page = pages[pages.length - 1];
+    if (page[0].length) {
+      if (capacity - page[0].length < Math.min(Math.max(...lines.map(column => column.length)) + 1, 3))
+        pages.push(page = [[], [], []]);
+      else page.forEach(column => column.push(''));
+    }
+    while (lines.some((column, index) => offsets[index] < column.length)) {
+      if (page[0].length === capacity) pages.push(page = [[], [], []]);
+      const continued = offsets.some(offset => offset > 0);
+      const remaining = lines.map((column, index) => column.length - offsets[index]);
+      const count = Math.min(capacity - page[0].length - Number(continued), Math.max(...remaining));
+      // Reserve the same rows until every column of this activity is exhausted.
+      page.forEach((column, index) => {
+        if (continued) column.push(remaining[index] ? `${record.ref} (continued)` : '');
+        const part = lines[index].slice(offsets[index], offsets[index] + count);
+        column.push(...part, ...Array<string>(count - part.length).fill(''));
+        offsets[index] += part.length;
+      });
+    }
+  }
+  return pages;
 }
 
 export async function exportAnnualForms(snapshot: AnnualFormsSnapshot, system: FormsSystem, fail: Fail): Promise<FormsExportOutcome> {
@@ -70,7 +120,8 @@ export async function exportAnnualForms(snapshot: AnnualFormsSnapshot, system: F
   }
   if (!destination) return { cancelled: true };
   let bytes: Uint8Array;
-  try { bytes = await generateForms(snapshot, system); }
+  let pageCount: number;
+  try { ({ bytes, pageCount } = await generateForms(snapshot, system)); }
   catch (error) {
     if (error instanceof FormsOverflow) fail('OVERFLOW', error.message);
     fail('EXPORT', `Forms PDF could not be generated: ${error instanceof Error ? error.message : String(error)}. No output was published.`);
@@ -84,10 +135,10 @@ export async function exportAnnualForms(snapshot: AnnualFormsSnapshot, system: F
   } catch (error) {
     fail('STORAGE', `Forms PDF could not be completely written: ${error instanceof Error ? error.message : String(error)}. Check destination permissions and available disk space, then retry. No output was published.`);
   } finally { await rm(partial, { force: true }).catch(() => {}); }
-  return { cancelled: false, fileName: basename(destination), pageCount: 3 };
+  return { cancelled: false, fileName: basename(destination), pageCount };
 }
 
-async function generateForms(snapshot: AnnualFormsSnapshot, system: FormsSystem): Promise<Uint8Array> {
+async function generateForms(snapshot: AnnualFormsSnapshot, system: FormsSystem): Promise<{ bytes: Uint8Array; pageCount: number }> {
   const output = await PDFDocument.create();
   const checklist = await PDFDocument.load(system.readChecklist());
   const [checklistPage] = await output.copyPages(checklist, [0]);
@@ -111,59 +162,89 @@ async function generateForms(snapshot: AnnualFormsSnapshot, system: FormsSystem)
     });
   });
   const pkg = snapshot.package;
-  const goals = pkg.goals.map(goal => [`${goal.ref} ${goal.title}`, goal.description].filter(Boolean).join('\n')).join('\n\n');
-  const activities = pkg.activities.map(activity => [
-    `${activity.ref} ${activity.title}`, activity.description,
-    `${activity.status}${activity.completionDate ? ` — ${activity.completionDate}` : ''}`,
-    activity.goalIds.length ? `Linked goals: ${pkg.goals.filter(goal => activity.goalIds.includes(goal.id)).map(goal => goal.ref).join(', ')}` : 'No linked goal',
-  ].filter(Boolean).join('\n')).join('\n\n');
-  const evidence = pkg.activities.map(activity => [
-    activity.ref, activity.evidenceDescription, ...activity.evidenceLinks,
-    ...snapshot.attachments.filter(entry => entry.activityId === activity.id).map(entry =>
-      `${entry.ref} ${entry.originalName}${entry.integrity === 'readable' ? '' : ` [${entry.integrity}; repair required]`}`),
-  ].filter(Boolean).join('\n')).join('\n\n');
-  const reflections = pkg.activities.map(activity => [activity.ref, activity.applicationToPractice].filter(Boolean).join('\n')).join('\n\n');
-  const layouts: { page: number; fields: Record<string, string> }[] = [
-    { page: 7, fields: { Text35: pkg.strengths, Text36: pkg.peerFeedback, Text37: pkg.learningNeeds,
-      Text38: goals, Date44_af_date: pkg.assessmentDate } },
-    { page: 10, fields: { Text39: goals, Text40: activities, Text41: evidence, Text42: reflections, Date43_af_date: pkg.planDate } },
+  const goals = pkg.goals.map(goal => ({
+    ref: goal.ref, text: [`${goal.ref} ${goal.title}`, goal.description].filter(Boolean).join('\n'),
+  }));
+  const activities = pkg.activities.map(activity => ({
+    ref: activity.ref,
+    texts: [
+      [`${activity.ref} ${activity.title}`, activity.description,
+        `${activity.status}${activity.completionDate ? ` — ${activity.completionDate}` : ''}`,
+        activity.goalIds.length ? `Linked goals: ${pkg.goals.filter(goal => activity.goalIds.includes(goal.id)).map(goal => goal.ref).join(', ')}` : 'No linked goal',
+      ].filter(Boolean).join('\n'),
+      [activity.ref, activity.evidenceDescription, ...activity.evidenceLinks,
+        ...snapshot.attachments.filter(entry => entry.activityId === activity.id).map(entry =>
+          `${entry.ref} ${entry.originalName}${entry.integrity === 'readable' ? '' : ` [${entry.integrity}; repair required]`}`),
+      ].filter(Boolean).join('\n'),
+      [activity.ref, activity.applicationToPractice].filter(Boolean).join('\n'),
+    ],
+  }));
+  const layouts: { page: number; kind: string; dateField: string; date: string; fields: Record<string, TextRecord[]> }[] = [
+    { page: 7, kind: 'SAT', dateField: 'Date44_af_date', date: pkg.assessmentDate,
+      fields: { Text35: [{ text: pkg.strengths }], Text36: [{ text: pkg.peerFeedback }],
+        Text37: [{ text: pkg.learningNeeds }], Text38: goals } },
+    { page: 10, kind: 'PDP', dateField: 'Date43_af_date', date: pkg.planDate,
+      fields: { Text39: goals, Text40: [], Text41: [], Text42: [] } },
   ];
   for (const layout of layouts) {
-    const source = await PDFDocument.load(template);
-    source.registerFontkit(fontkit);
-    const font = await source.embedFont(fontBytes, { subset: true });
-    const form = source.getForm();
-    ANNUAL_STANDARDS.forEach((standard, index) => {
-      const field = form.getCheckBox(`Check Box ${index + 14}`);
-      if (layout.page === 7 && pkg.annualStandards.includes(standard.id)) field.check();
-      else field.uncheck();
-    });
-    form.updateFieldAppearances(font);
-    for (const [name, text] of Object.entries(layout.fields)) {
-      const field = form.getTextField(name);
-      field.setText(text);
-      field.setFontSize(10);
-      field.updateAppearances(font, (_field, widget) => {
-        const { width, height } = widget.getRectangle();
-        const padding = name.startsWith('Date') ? 1 : 2;
-        const lineHeight = font.heightAtSize(10) * 1.1;
-        const capacity = Math.floor((height - padding * 2 - font.heightAtSize(10)) / lineHeight) + 1;
-        const lines = fieldLines(text, width - padding * 2, capacity, font, fieldLabels[name]);
-        return drawLinesOfText(lines.map(line => font.encodeText(line)), {
-          color: rgb(0, 0, 0), font: font.name, size: 10, lineHeight,
-          x: padding, y: height - padding - font.heightAtSize(10, { descender: false }),
-          rotate: degrees(0), xSkew: degrees(0), ySkew: degrees(0),
+    const measurement = await PDFDocument.load(template);
+    measurement.registerFontkit(fontkit);
+    const measuredFont = await measurement.embedFont(fontBytes, { subset: true });
+    const geometry: Record<string, FieldGeometry> = {};
+    for (const name of [...Object.keys(layout.fields), layout.dateField]) {
+      const { width, height } = measurement.getForm().getTextField(name).acroField.getWidgets()[0].getRectangle();
+      const padding = name.startsWith('Date') ? 1 : 2;
+      const lineHeight = measuredFont.heightAtSize(10) * 1.1;
+      geometry[name] = { width, height, padding, lineHeight,
+        capacity: Math.floor((height - padding * 2 - measuredFont.heightAtSize(10)) / lineHeight) + 1 };
+    }
+    const columns = Object.fromEntries(Object.entries(layout.fields).map(([name, records]) =>
+      [name, paginate(records, geometry[name], measuredFont, fieldLabels[name])]));
+    if (layout.page === 10) {
+      const grouped = paginateActivities(activities, [geometry.Text40, geometry.Text41, geometry.Text42], measuredFont);
+      ['Text40', 'Text41', 'Text42'].forEach((name, index) => { columns[name] = grouped.map(page => page[index]); });
+    }
+    const count = Math.max(1, ...Object.values(columns).map(pages => pages.length));
+    const dateLines = fieldLines(layout.date, geometry[layout.dateField].width - 2, measuredFont, fieldLabels[layout.dateField]);
+    if (dateLines.length > geometry[layout.dateField].capacity) throw new FormsOverflow('The date does not fit the source field. No output was published.');
+    for (let index = 0; index < count; index++) {
+      const source = await PDFDocument.load(template);
+      source.registerFontkit(fontkit);
+      const font = await source.embedFont(fontBytes, { subset: true });
+      const form = source.getForm();
+      ANNUAL_STANDARDS.forEach((standard, standardIndex) => {
+        const field = form.getCheckBox(`Check Box ${standardIndex + 14}`);
+        if (layout.page === 7 && !index && pkg.annualStandards.includes(standard.id)) field.check();
+        else field.uncheck();
+      });
+      form.updateFieldAppearances(font);
+      const fields = { ...Object.fromEntries(Object.entries(columns).map(([name, pages]) => [name, pages[index] ?? []])),
+        [layout.dateField]: index ? [] : dateLines };
+      for (const [name, lines] of Object.entries(fields)) {
+        const field = form.getTextField(name);
+        field.setText('');
+        field.setFontSize(10);
+        field.updateAppearances(font, () => {
+          const { height, padding, lineHeight } = geometry[name];
+          return drawLinesOfText(lines.map(line => font.encodeText(line)), {
+            color: rgb(0, 0, 0), font: font.name, size: 10, lineHeight,
+            x: padding, y: height - padding - font.heightAtSize(10, { descender: false }),
+            rotate: degrees(0), xSkew: degrees(0), ySkew: degrees(0),
+          });
         });
+      }
+      form.flatten({ updateFieldAppearances: false });
+      const [page] = await output.copyPages(source, [layout.page]);
+      output.addPage(page);
+      page.drawText(`CCP ${pkg.year} — ${layout.kind} — ${index ? 'continuation ' : 'page '}${index + 1} of ${count}`, {
+        font: checklistFont, size: 10, x: 80, y: 65, color: rgb(0.25, 0.25, 0.25),
       });
     }
-    form.flatten({ updateFieldAppearances: false });
-    const [page] = await output.copyPages(source, [layout.page]);
-    output.addPage(page);
   }
   for (const page of output.getPages()) {
     page.node.delete(PDFName.of('Annots'));
     page.node.delete(PDFName.of('AA'));
   }
   output.setTitle(`CCP ${pkg.year} — annual forms`);
-  return output.save();
+  return { bytes: await output.save(), pageCount: output.getPageCount() };
 }
