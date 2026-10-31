@@ -96,6 +96,15 @@ if (startupFailure) {
           if (result.canceled || !result.filePath) return null;
           return result.filePath.endsWith('.swcc-backup.zip') ? result.filePath : `${result.filePath}.swcc-backup.zip`;
         },
+      }, {
+        chooseArchive: async () => {
+          const options = {
+            title: 'Preview a full-app backup', properties: ['openFile'] as ['openFile'],
+            filters: [{ name: 'Full backup ZIP', extensions: ['zip'] }, { name: 'All files', extensions: ['*'] }],
+          };
+          const result = window ? await dialog.showOpenDialog(window, options) : await dialog.showOpenDialog(options);
+          return result.canceled ? null : result.filePaths[0] ?? null;
+        },
       });
       if (app.isPackaged) {
         for (const document of SOURCE_DOCUMENTS) {
@@ -134,6 +143,8 @@ if (startupFailure) {
       });
       const operations = application.operations;
       const channels: Record<string, keyof ApplicationOperations> = {
+        'swcc:inspect-full-backup': 'inspectFullBackup', 'swcc:get-restore-progress': 'getRestoreProgress',
+        'swcc:cancel-restore-preview': 'cancelRestorePreview',
         'swcc:export-forms': 'exportForms',
         'swcc:create-full-backup': 'createFullBackup', 'swcc:get-backup-progress': 'getBackupProgress',
         'swcc:cancel-full-backup': 'cancelFullBackup',
@@ -189,6 +200,12 @@ if (startupFailure) {
         if (!progress.ok || progress.value.phase !== 'idle') return {
           ok: false, error: { code: 'BUSY', message: 'A full backup is still running. Wait for it to finish or cancel it, then close SWCC deliberately.' },
         };
+        const restore = await operations.getRestoreProgress();
+        if (!restore.ok || !['idle', 'preview'].includes(restore.value.phase)) return {
+          ok: false, error: { code: 'BUSY', message: 'Backup inspection is still running. Wait for it or cancel inspection, then close SWCC deliberately.' },
+        };
+        const cancelled = await operations.cancelRestorePreview();
+        if (!cancelled.ok) return cancelled;
         approvedClose = true;
         // Allow the IPC acknowledgement to reach the renderer before destruction.
         setImmediate(() => app.quit());

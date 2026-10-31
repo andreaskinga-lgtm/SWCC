@@ -15,5 +15,15 @@
 .backup-progress { margin-top: 22px; padding: 18px; background: var(--leaf); border-radius: 8px; font-size: 13px; }
 .backup-progress progress { width: 100%; accent-color: var(--accent); }
 .backup-note { font-size: 12px; }
+.restore-dialog { max-width: 720px; }
+.restore-compare { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid #d7deca; margin: 25px 0; border-radius: 6px; }
+.restore-compare > section { padding: 20px; min-width: 0; }
+.restore-compare > section + section { border-left: 1px solid #d7deca; background: var(--background); }
+.restore-compare h3 { font-size: 14px; margin-bottom: 15px; }
+.restore-compare p { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
 @media (max-width: 1100px) { .backup-layout { grid-template-columns: 1fr; } }
 @media (max-width: 700px) { .backup-main { padding: 24px; } .backup-illustration { padding: 22px 25px; } }
+@media (max-width: 600px) {
+  .restore-compare { grid-template-columns: 1fr; }
+  .restore-compare > section + section { border-left: 0; border-top: 1px solid #d7deca; }
+}

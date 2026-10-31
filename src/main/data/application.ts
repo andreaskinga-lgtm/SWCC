@@ -22,6 +22,10 @@ import type { FormsSystem } from '../export/forms.js';
 import { createFullBackup } from './backup.js';
 import type { BackupSystem } from './backup.js';
 import type { BackupProgress } from '../../shared/backup.js';
+import { datasetSummary, inspectArchive, RestoreCleanupFailure } from './restore.js';
+import type { RestoreSystem } from './restore.js';
+import type { RestoreProgress } from '../../shared/restore.js';
+import { rm } from 'node:fs/promises';
 
 class ApplicationFailure extends Error {
   constructor(readonly detail: OperationError) { super(detail.message); }
@@ -92,6 +96,7 @@ export function openApplication(
   evidenceSystem?: EvidenceSystem,
   formsSystem?: FormsSystem,
   backupSystem?: BackupSystem,
+  restoreSystem?: RestoreSystem,
 ) {
   const paths = storageLayout(storageRoot);
   const dataset = paths.dataset;
@@ -197,10 +202,60 @@ export function openApplication(
     phase: 'idle', filesCompleted: 0, filesTotal: 0, bytesCompleted: 0, bytesTotal: 0,
   });
   let backupProgress = idleProgress();
+  let restoreController: AbortController | null = null;
+  let restoreDirectory: string | null = null;
+  const idleRestore = (): RestoreProgress => ({ phase: 'idle', filesCompleted: 0, filesTotal: 0, bytesCompleted: 0, bytesTotal: 0 });
+  let restoreProgress = idleRestore();
+  let inspecting: Promise<Result<import('../../shared/restore.js').RestoreInspectionOutcome>> | null = null;
   const mutations = new Set<Promise<unknown>>();
   const operations: ApplicationOperations = {
+    inspectFullBackup: () => {
+      if (restoreController || restoreDirectory || backupController) return operation(() => fail('BUSY', 'Finish or cancel the current backup inspection or full backup before choosing another archive.'));
+      restoreController = new AbortController();
+      const controller = restoreController;
+      restoreProgress = { ...idleRestore(), phase: 'choosing' };
+      inspecting = operation(async () => {
+        try {
+          if (!restoreSystem) fail('VALIDATION', 'The backup archive dialog is unavailable.');
+          const archive = await restoreSystem.chooseArchive();
+          if (!archive || controller.signal.aborted) return { cancelled: true as const };
+          const inspected = await inspectArchive(archive, paths, () => datasetSummary(database), controller.signal,
+            progress => { restoreProgress = progress; });
+          restoreDirectory = inspected.directory;
+          restoreProgress = { ...restoreProgress, phase: 'preview' };
+          return { cancelled: false as const, preview: inspected.preview };
+        } catch (error) {
+          if (error instanceof RestoreCleanupFailure) {
+            restoreDirectory = error.directory;
+            restoreProgress = { ...restoreProgress, phase: 'cleanup' };
+            fail('STORAGE', error.message);
+          }
+          if (controller.signal.aborted) return { cancelled: true as const };
+          fail('VALIDATION', `Backup inspection failed: ${error instanceof Error ? error.message : String(error)} Live records have not been replaced. Choose a complete, compatible full backup.`);
+        } finally {
+          restoreController = null;
+          inspecting = null;
+          if (!restoreDirectory) restoreProgress = idleRestore();
+        }
+      });
+      return inspecting;
+    },
+    getRestoreProgress: () => operation(() => ({ ...restoreProgress })),
+    cancelRestorePreview: () => operation(async () => {
+      restoreController?.abort();
+      if (inspecting) await inspecting;
+      if (restoreDirectory) {
+        try { await rm(restoreDirectory, { recursive: true, force: true }); }
+        catch (error) {
+          restoreProgress = { ...restoreProgress, phase: 'cleanup' };
+          fail('STORAGE', new RestoreCleanupFailure(restoreDirectory, error).message);
+        }
+        restoreDirectory = null;
+      }
+      restoreProgress = idleRestore();
+    }),
     createFullBackup: () => operation(async () => {
-      if (backupController) fail('BUSY', 'A full backup is already running. Wait for it to finish.');
+      if (backupController || restoreController) fail('BUSY', 'A backup or inspection is already running. Wait for it to finish.');
       backupController = new AbortController();
       backupProgress = { ...idleProgress(), phase: 'choosing' };
       try {
@@ -502,8 +557,10 @@ export function openApplication(
   for (const key of protectedOperations) {
     const original = operations[key] as (input: unknown) => Promise<Result<unknown>>;
     const guarded = async (input: unknown): Promise<Result<unknown>> => {
-      if (backupController) return {
-        ok: false, error: { code: 'BUSY', message: 'A full backup is collecting your records and evidence. Wait for it to finish, then retry; your edit has not been applied.' },
+      if (backupController || restoreController) return {
+        ok: false, error: { code: 'BUSY', message: backupController
+          ? 'A full backup is collecting your records and evidence. Wait for it to finish, then retry; your edit has not been applied.'
+          : 'Backup inspection is running. Wait for it or cancel inspection, then retry; your edit has not been applied.' },
       };
       const running = original(input);
       mutations.add(running);
@@ -514,6 +571,7 @@ export function openApplication(
   }
   return { operations, close: () => {
     if (backupController) throw new Error('Wait for the full backup to finish before closing local records.');
+    if (restoreController || restoreDirectory) throw new Error('Cancel the restore inspection or preview before closing local records.');
     database.close();
   } };
 }
