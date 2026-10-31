@@ -100,7 +100,7 @@ test('creating a goal during activity entry atomically links the shared goal wit
   const operations = open();
   let pkg = value(await operations.createYear(2024));
   pkg = value(await operations.createGoal({ packageId: pkg.id, expectedRevision: pkg.contentRevision, title: 'Retired goal' }));
-  pkg = value(await operations.deleteGoal({ packageId: pkg.id, expectedRevision: pkg.contentRevision, goalId: pkg.goals[0].id }));
+  pkg = value(await operations.deleteGoal({ packageId: pkg.id, expectedRevision: pkg.contentRevision, goalId: pkg.goals[0].id, confirmed: true }));
   pkg = value(await operations.createActivity({ packageId: pkg.id, expectedRevision: pkg.contentRevision, title: 'Consultation' }));
   const before = pkg;
   pkg = value(await operations.createGoal({
@@ -112,7 +112,7 @@ test('creating a goal during activity entry atomically links the shared goal wit
   expect(pkg.assessmentRevision).toBe(before.assessmentRevision + 1);
   expect(pkg.planRevision).toBe(before.planRevision + 1);
   expect(value(await operations.openYear(pkg.id)).goals).toEqual(pkg.goals);
-  pkg = value(await operations.deleteGoal({ packageId: pkg.id, expectedRevision: pkg.contentRevision, goalId: pkg.goals[0].id }));
+  pkg = value(await operations.deleteGoal({ packageId: pkg.id, expectedRevision: pkg.contentRevision, goalId: pkg.goals[0].id, confirmed: true }));
   expect(pkg.activities[0]).toMatchObject({ title: 'Consultation', goalIds: [] });
 });
 

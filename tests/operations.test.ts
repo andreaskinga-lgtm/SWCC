@@ -327,6 +327,7 @@ test('shared learning goals keep stable references and advance both relevant rev
     packageId: firstYear.id,
     goalId: original.id,
     expectedRevision: descriptionUpdated.contentRevision,
+    confirmed: true,
   }));
   expect(deleted).toMatchObject({ goals: [], contentRevision: 5, assessmentRevision: 5, planRevision: 4 });
   const next = value(await app.operations.createGoal({

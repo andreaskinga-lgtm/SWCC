@@ -114,6 +114,7 @@ if (startupFailure) {
         'swcc:save-draft': 'saveDraft', 'swcc:create-goal': 'createGoal', 'swcc:update-goal': 'updateGoal',
         'swcc:delete-goal': 'deleteGoal', 'swcc:acknowledge-storage': 'acknowledgeStorage',
         'swcc:create-activity': 'createActivity', 'swcc:update-activity': 'updateActivity',
+        'swcc:delete-activity': 'deleteActivity', 'swcc:delete-year': 'deleteYear',
         'swcc:get-plan-readiness': 'getPlanReadiness', 'swcc:open-evidence-link': 'openEvidenceLink',
         'swcc:get-evidence': 'getEvidence', 'swcc:import-evidence': 'importEvidence',
         'swcc:replace-evidence': 'replaceEvidence', 'swcc:remove-evidence': 'removeEvidence',

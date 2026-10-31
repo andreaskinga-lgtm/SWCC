@@ -132,7 +132,7 @@ export function GoalDeleteDialog({ goal, session, operations, onClose }: {
       const current = session.getSnapshot().record;
       if (!current) throw new Error('Open a year package before deleting a learning goal.');
       const result = await operations.deleteGoal({
-        packageId: current.id, goalId: goal.id, expectedRevision: current.contentRevision,
+        packageId: current.id, goalId: goal.id, expectedRevision: current.contentRevision, confirmed: true,
       });
       if (!result.ok) throw new Error(result.error.message);
       session.open(result.value);
@@ -146,8 +146,8 @@ export function GoalDeleteDialog({ goal, session, operations, onClose }: {
     try { await session.flush(); }
     catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
   }
-  return <Dialog title={`Delete ${goal.ref}?`} onClose={onClose}>
-    <p>This removes the shared goal from the assessment and plan. Other records are not removed, and the reference will not be reused.</p>
+  return <Dialog title={`Delete ${goal.ref}?`} onClose={() => { if (!busy) onClose(); }}>
+    <p>This removes {goal.ref} and its activity links from the shared goal set. Activities, evidence notes and links, managed files, and reflections stay; activities with no remaining links stay as supplementary learning. The reference will not be reused.</p>
     {error && <p className="goal-validation" role="alert">{error}</p>}
     {draftState.status === 'Not saved' && <div className="goal-retry">
       <p>{draftState.error || 'Some edits remain unsaved.'}</p>
@@ -155,7 +155,7 @@ export function GoalDeleteDialog({ goal, session, operations, onClose }: {
     </div>}
     <div className="goal-dialog-actions">
       <button type="button" className="secondary" disabled={busy} onClick={onClose}>Keep goal</button>
-      <button type="button" disabled={busy} onClick={() => void remove()}>Delete goal</button>
+      <button type="button" className="danger" disabled={busy} onClick={() => void remove()}>Delete goal</button>
     </div>
   </Dialog>;
 }

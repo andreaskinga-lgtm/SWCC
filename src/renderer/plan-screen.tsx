@@ -67,9 +67,10 @@ function ActivityCreateDialog({ pkg, session, onClose, onCreated }: {
   </Dialog>;
 }
 
-function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence, evidenceError, evidenceLoaded, refreshEvidence }: {
+function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence, evidenceError, evidenceLoaded, refreshEvidence, onDeleted, reportError }: {
   activity: Activity; pkg: YearPackage; session: DraftSession; operations: ApplicationOperations; addGoal: () => void;
   evidence: EvidenceAttachment[]; evidenceError: string; evidenceLoaded: boolean; refreshEvidence: () => Promise<EvidenceAttachment[]>;
+  onDeleted: (activityId: string | null) => void; reportError: (message: string) => void;
 }) {
   const [linksText, setLinksText] = useState(activity.evidenceLinks.join('\n'));
   const [openError, setOpenError] = useState('');
@@ -79,6 +80,9 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
   const [preview, setPreview] = useState<EvidencePreview | null>(null);
   const [removing, setRemoving] = useState<EvidenceAttachment | null>(null);
   const [removeError, setRemoveError] = useState('');
+  const [deletingActivity, setDeletingActivity] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
   const error = activityDateError(activity);
   const warning = dateWarning(activity.completionDate, pkg.year);
   const attached = evidence.filter(entry => entry.activityId === activity.id);
@@ -120,6 +124,15 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
       const result = await operations.removeEvidence({
         packageId: pkg.id, activityId: activity.id, evidenceId: removing.id, expectedRevision: current.contentRevision,
       });
+      if (!result.ok && result.error.committed) {
+        const refreshed = await operations.openYear(pkg.id);
+        if (!refreshed.ok) throw new Error(`${result.error.message} Local records could not be refreshed: ${refreshed.error.message}`);
+        session.open(refreshed.value);
+        setRemoving(null);
+        await refreshEvidence();
+        reportError(result.error.message);
+        return;
+      }
       if (!result.ok) throw new Error(result.error.message);
       session.open(result.value);
       setRemoving(null);
@@ -127,6 +140,39 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
     } catch (failure) {
       setRemoveError(failure instanceof Error ? failure.message : String(failure));
     } finally { setFileBusy(false); }
+  }
+  async function deleteActivity() {
+    if (!deletingActivity) return;
+    setDeleteError('');
+    setDeleteBusy(true);
+    try {
+      await session.flush();
+      const current = session.getSnapshot().record;
+      if (!current) throw new Error('Open a year before deleting an activity.');
+      const result = await operations.deleteActivity({
+        packageId: current.id, activityId: activity.id, expectedRevision: current.contentRevision, confirmed: true,
+      });
+      if (!result.ok) {
+        if (result.error.committed) {
+          const refreshed = await operations.openYear(pkg.id);
+          if (refreshed.ok) {
+            session.open(refreshed.value);
+            onDeleted(refreshed.value.activities[0]?.id ?? null);
+            await refreshEvidence().catch(() => {});
+          }
+          reportError(result.error.message);
+          setDeletingActivity(false);
+          return;
+        }
+        throw new Error(result.error.message);
+      }
+      session.open(result.value);
+      onDeleted(result.value.activities[0]?.id ?? null);
+      setDeletingActivity(false);
+      await refreshEvidence();
+    } catch (failure) {
+      setDeleteError(failure instanceof Error ? failure.message : String(failure));
+    } finally { setDeleteBusy(false); }
   }
   async function showPreview(entry: EvidenceAttachment) {
     setFileActionError('');
@@ -160,7 +206,10 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
     catch (failure) { setFileActionError(failure instanceof Error ? failure.message : String(failure)); }
   }
   return <article className="activity-editor" aria-label={`Activity editor ${activity.ref}`}>
-    <div className="activity-editor-header"><span className="goal-reference">{activity.ref}</span><small>One record · all linked goals</small></div>
+    <div className="activity-editor-header"><span className="goal-reference">{activity.ref}</span><small>One record · all linked goals</small>
+      <button type="button" className="text-button delete-record" disabled={fileBusy} aria-label={`Delete activity ${activity.ref}`}
+        onClick={() => { setDeleteError(''); setDeletingActivity(true); }}>Delete</button>
+    </div>
     <label className="field activity-title"><span>Activity title</span><input value={activity.title}
       onChange={event => session.editActivity(activity.id, { title: event.target.value })} /></label>
     {!activity.title.trim() && <p className="goal-validation">An activity title is required before saving.</p>}
@@ -232,6 +281,16 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
     <label className="field narrative"><span>Application to practice</span><textarea aria-label="Application to practice" rows={5} value={activity.applicationToPractice}
       onChange={event => session.editActivity(activity.id, { applicationToPractice: event.target.value })} /></label>
     {preview && <EvidencePreviewDialog preview={preview} onClose={() => setPreview(null)} />}
+    {deletingActivity && <Dialog title={`Delete activity ${activity.ref}?`} onClose={() => { if (!deleteBusy) setDeletingActivity(false); }}>
+      <p className="goal-dialog-copy">This deletes {activity.ref}, its goal links, evidence notes and links, evidence records and managed files, and its application-to-practice reflection. Linked goals, other activities, and their evidence stay.</p>
+      {deleteError && <p role="alert" className="goal-validation">{deleteError}</p>}
+      {session.getSnapshot().status === 'Not saved' && <div className="goal-retry">
+        <p>{session.getSnapshot().error || 'Some edits remain unsaved.'}</p>
+        <button type="button" className="secondary" disabled={deleteBusy} onClick={() => void session.flush().catch(failure => setDeleteError(failure instanceof Error ? failure.message : String(failure)))}>Retry save</button>
+      </div>}
+      <div className="goal-dialog-actions"><button type="button" className="secondary" disabled={deleteBusy} onClick={() => setDeletingActivity(false)}>Keep activity</button>
+        <button type="button" className="danger" disabled={deleteBusy} onClick={() => void deleteActivity()}>Delete {activity.ref}</button></div>
+    </Dialog>}
     {removing && <Dialog title={`Remove evidence ${removing.ref}?`} onClose={() => { if (!fileBusy) setRemoving(null); }}>
       <p className="goal-dialog-copy">This removes {removing.ref} from {activity.ref} and deletes its managed copy. The reference will not be reused.</p>
       {removeError && <p role="alert" className="goal-validation">{removeError}</p>}
@@ -241,10 +300,11 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
   </article>;
 }
 
-export function PlanScreen({ pkg, session, operations, selectedId, select, recordRequested, clearRecordRequest, evidence, evidenceError, evidenceLoaded, refreshEvidence }: {
+export function PlanScreen({ pkg, session, operations, selectedId, select, recordRequested, clearRecordRequest, evidence, evidenceError, evidenceLoaded, refreshEvidence, reportError }: {
   pkg: YearPackage; session: DraftSession; operations: ApplicationOperations; selectedId: string | null;
-  select: (id: string) => void; recordRequested: boolean; clearRecordRequest: () => void;
+  select: (id: string | null) => void; recordRequested: boolean; clearRecordRequest: () => void;
   evidence: EvidenceAttachment[]; evidenceError: string; evidenceLoaded: boolean; refreshEvidence: () => Promise<EvidenceAttachment[]>;
+  reportError: (message: string) => void;
 }) {
   const [creating, setCreating] = useState(recordRequested);
   const [creatingGoal, setCreatingGoal] = useState<{ activityId?: string } | null>(null);
@@ -281,7 +341,7 @@ export function PlanScreen({ pkg, session, operations, selectedId, select, recor
         readableEvidenceActivityIds={new Set(evidence.filter(entry => entry.integrity === 'readable').map(entry => entry.activityId))} /></aside>
       {activity ? <ActivityEditor key={activity.id} activity={activity} pkg={pkg} session={session} operations={operations}
         addGoal={() => setCreatingGoal({ activityId: activity.id })} evidence={evidence} evidenceError={evidenceError}
-        evidenceLoaded={evidenceLoaded} refreshEvidence={refreshEvidence} />
+        evidenceLoaded={evidenceLoaded} refreshEvidence={refreshEvidence} onDeleted={select} reportError={reportError} />
         : <section className="surface empty-editor"><h2>Make room for learning.</h2><p>Record an activity, then connect goals or keep it supplementary.</p></section>}
     </div>
     {creating && <ActivityCreateDialog pkg={pkg} session={session} onClose={closeCreate} onCreated={created} />}

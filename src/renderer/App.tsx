@@ -3,7 +3,7 @@ import { BookOpen, ClipboardList, Home, Layers, HardDrive, Sprout, Network } fro
 import type { AppState, DesktopOperations, EvidenceAttachment, OperationError, Result } from '../shared/application.js';
 import { localDate } from '../shared/application.js';
 import { DraftSession } from './draft-session.js';
-import { AssessmentScreen } from './assessment-screen.js';
+import { AssessmentScreen, Dialog } from './assessment-screen.js';
 import { PlanScreen } from './plan-screen.js';
 import { evaluateAssessmentReadiness } from '../shared/assessment.js';
 import { evaluatePlanReadiness } from '../shared/plan.js';
@@ -37,6 +37,8 @@ export function App({ operations }: { operations: DesktopOperations }) {
   const [busy, setBusy] = useState(false);
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
   const [recordRequested, setRecordRequested] = useState(false);
+  const [deletingYear, setDeletingYear] = useState<{ id: string; year: number } | null>(null);
+  const [yearDeleteError, setYearDeleteError] = useState<string | null>(null);
   const [evidenceByPackage, setEvidenceByPackage] = useState<Record<string, EvidenceAttachment[]>>({});
   const [evidenceErrors, setEvidenceErrors] = useState<Record<string, string>>({});
   const pkg = draft.record;
@@ -120,6 +122,46 @@ export function App({ operations }: { operations: DesktopOperations }) {
       setScreen('overview');
     });
   }
+  async function deleteYear() {
+    if (!deletingYear || busy) return;
+    setBusy(true);
+    setYearDeleteError(null);
+    try {
+      await Promise.all([session.flush(), reviewSession.flush()]);
+      const current = unwrap(await operations.getState());
+      const target = current.years.find(item => item.id === deletingYear.id);
+      if (!target) throw new Error('This year package no longer exists. Refresh the year list before retrying.');
+      const result = await operations.deleteYear({
+        packageId: target.id, expectedRevision: target.contentRevision, confirmed: true,
+      });
+      if (!result.ok) {
+        if (result.error.committed) {
+          const refreshed = await operations.getState();
+          if (refreshed.ok) {
+            setState(refreshed.value);
+            session.open(refreshed.value.selectedPackage);
+            setSelectedActivityId(null);
+            setRecordRequested(false);
+            if (refreshed.value.selectedPackage) await reviewSession.open(refreshed.value.selectedPackage.id);
+            setScreen(refreshed.value.selectedPackage ? 'overview' : 'years');
+            setDeletingYear(null);
+            setError(result.error.message);
+            return;
+          }
+        }
+        throw new Error(result.error.message);
+      }
+      setState(result.value);
+      session.open(result.value.selectedPackage);
+      setSelectedActivityId(null);
+      setRecordRequested(false);
+      if (result.value.selectedPackage) await reviewSession.open(result.value.selectedPackage.id);
+      setDeletingYear(null);
+      setScreen(result.value.selectedPackage ? 'overview' : 'years');
+    } catch (failure) {
+      setYearDeleteError(failure instanceof Error ? failure.message : String(failure));
+    } finally { setBusy(false); }
+  }
   function activityEntry(id: string | null) {
     void run(async () => {
       setSelectedActivityId(id);
@@ -165,7 +207,9 @@ export function App({ operations }: { operations: DesktopOperations }) {
           </form>
           {state?.years.length === 0 && <p className="empty">Start with this year, or create a past year to backfill your records.</p>}
           <ul className="year-list">{state?.years.map(row => <li key={row.id}><div><strong>{row.year}</strong><span>Draft · application completion not yet recorded</span></div>
-            <button disabled={busy} onClick={() => open(row.id)}>Open {row.year}</button></li>)}</ul>
+            <div className="year-actions"><button disabled={busy} onClick={() => open(row.id)}>Open {row.year}</button>
+              <button type="button" className="text-button year-delete" disabled={busy}
+                aria-label={`Delete year ${row.year}`} onClick={() => { setYearDeleteError(null); setDeletingYear(row); }}>Delete</button></div></li>)}</ul>
         </section></>}
       {screen === 'overview' && pkg && <><div className="page-heading map-heading"><div><h1>Connect learning to practice.</h1><p>Your {pkg.year} goals and the experiences that move them forward.</p></div>
         <button type="button" onClick={() => activityEntry(null)}>Record an activity</button></div>
@@ -206,13 +250,22 @@ export function App({ operations }: { operations: DesktopOperations }) {
       {screen === 'plan' && pkg && <PlanScreen key={pkg.id} pkg={pkg} session={session} operations={operations}
         selectedId={selectedActivityId} select={setSelectedActivityId} recordRequested={recordRequested} clearRecordRequest={() => setRecordRequested(false)}
         evidence={packageEvidence} evidenceError={evidenceErrors[pkg.id] ?? ''}
-        evidenceLoaded={Object.hasOwn(evidenceByPackage, pkg.id)} refreshEvidence={() => refreshEvidence(pkg.id)} />}
+        evidenceLoaded={Object.hasOwn(evidenceByPackage, pkg.id)} refreshEvidence={() => refreshEvidence(pkg.id)} reportError={setError} />}
       {screen === 'review' && pkg && <Review packageId={pkg.id} year={pkg.year} operations={operations} session={reviewSession} />}
       {screen === 'backup' && <><div className="page-heading"><h1>Protect your portfolio.</h1><p>Full-app backup and restore are distinct from annual exports.</p></div>
         <section className="surface"><h2>Local storage</h2><p className="storage-path">{state?.storageDirectory}</p>
           <p>Full backup and restore are not available in this foundation build. Until available, quit SWCC after Saved and preserve a copy of the entire dataset folder, including database and evidence. Never copy a database while SWCC is running.</p>
           <p>Last successful full-app backup: {state?.lastBackupAt ?? 'None recorded'}</p><p>{state && state.dataRevision > (state.lastBackupRevision ?? -1) ? 'Local changes have not been backed up by SWCC.' : 'No changes since the last full backup.'}</p>
         </section></>}
+      {deletingYear && <Dialog title={`Delete year ${deletingYear.year}?`} onClose={() => {
+        if (!busy) { setDeletingYear(null); setYearDeleteError(null); }
+      }}>
+        <p className="goal-dialog-copy">The supplied guide advises retaining this portfolio for at least 10 years. SWCC keeps year packages indefinitely unless you explicitly delete them. Deleting {deletingYear.year} removes only that year’s records and managed evidence files; it cannot be undone. Retain any copy you may need before continuing.</p>
+        {yearDeleteError && <p role="alert" className="goal-validation">{yearDeleteError}</p>}
+        <div className="goal-dialog-actions"><button type="button" className="secondary" disabled={busy}
+          onClick={() => { setDeletingYear(null); setYearDeleteError(null); }}>Keep year</button>
+          <button type="button" className="danger" disabled={busy} onClick={() => void deleteYear()}>Delete {deletingYear.year} year package</button></div>
+      </Dialog>}
       {state && <footer className="source-note"><strong>Supplied baseline, not regulatory verification.</strong><p>The ethics document is Second Edition, amended September 2018. The assessment tool references Third Edition / 2023. The same fixed source set applies to every year; SWCC does not verify current-year College compliance.</p></footer>}
     </main></div>
   </div>;

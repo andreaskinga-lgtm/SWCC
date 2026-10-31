@@ -5,6 +5,7 @@ button, input, select, textarea { font: inherit; }
 button { cursor: pointer; border: 1px solid var(--accent); background: var(--accent); color: white; border-radius: 8px; padding: 11px 16px; }
 button:disabled { cursor: wait; opacity: .65; }
 button:hover:not(:disabled) { filter: brightness(.94); }
+.danger { border-color: #7d2e24; background: #7d2e24; color: white; }
 :focus-visible { outline: 3px solid #986621; outline-offset: 4px; }
 p { line-height: 1.65; }
 h1, h2 { margin: 0 0 16px; }
@@ -40,6 +41,8 @@ textarea { resize: vertical; line-height: 1.6; }
 .year-list li { display: flex; align-items: center; gap: 20px; justify-content: space-between; padding: 20px 0; border-top: 1px solid #e0e6d7; }
 .year-list strong { font-size: 25px; }
 .year-list span { display: block; color: var(--muted); font-size: 12px; margin-top: 7px; }
+.year-actions { display: flex; align-items: center; gap: 14px; }
+.year-delete { color: #7d2e24; }
 .map-overview { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 32px; align-items: start; }
 .relationship-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 25px; }
 .goal-panel { background: var(--leaf); border-radius: 12px; padding: 24px; margin-bottom: 24px; }
@@ -77,4 +80,5 @@ textarea { resize: vertical; line-height: 1.6; }
   .surface { padding: 20px; }
   .relationship-columns { grid-template-columns: 1fr; }
   .year-list li { flex-wrap: wrap; }
+  .year-actions { width: 100%; justify-content: flex-start; }
 }
