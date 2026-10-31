@@ -10,6 +10,15 @@ export interface ReviewSystem {
 class ReviewFailure extends Error {
   constructor(readonly code: OperationError['code'], message: string) { super(message); }
 }
+export function readReviewProgress(db: Database.Database, id: string) {
+  const position = db.prepare(`SELECT page, offset, zoom, resources_launched_at AS resourcesLaunchedAt FROM review_states
+    WHERE package_id = ? AND document_id = ?`).get(id, REVIEW_DOCUMENT_ID) as Pick<ReviewState, 'page' | 'offset' | 'zoom' | 'resourcesLaunchedAt'> | undefined;
+  return {
+    ...(position ?? { page: 1, offset: 0, zoom: 100, resourcesLaunchedAt: null }),
+    visitedPages: (db.prepare('SELECT page FROM review_visits WHERE package_id = ? AND document_id = ? ORDER BY page')
+      .all(id, REVIEW_DOCUMENT_ID) as { page: number }[]).map(row => row.page),
+  };
+}
 export function reviewOperations(db: Database.Database, now: () => string, system?: ReviewSystem): ReviewOperations {
   function packageRevision(id: string) {
     if (typeof id !== 'string' || !/^[\da-f-]{36}$/i.test(id)) throw new ReviewFailure('VALIDATION', 'Choose a valid year package.');
@@ -19,13 +28,7 @@ export function reviewOperations(db: Database.Database, now: () => string, syste
   }
   function state(id: string): ReviewState {
     const revision = packageRevision(id);
-    const position = db.prepare(`SELECT page, offset, zoom, resources_launched_at AS resourcesLaunchedAt FROM review_states
-      WHERE package_id = ? AND document_id = ?`).get(id, REVIEW_DOCUMENT_ID) as Pick<ReviewState, 'page' | 'offset' | 'zoom' | 'resourcesLaunchedAt'> | undefined;
-    const progress = {
-      ...(position ?? { page: 1, offset: 0, zoom: 100, resourcesLaunchedAt: null }),
-      visitedPages: (db.prepare('SELECT page FROM review_visits WHERE package_id = ? AND document_id = ? ORDER BY page')
-        .all(id, REVIEW_DOCUMENT_ID) as { page: number }[]).map(row => row.page),
-    };
+    const progress = readReviewProgress(db, id);
     return { ...progress, packageId: id, documentId: REVIEW_DOCUMENT_ID, reviewRevision: revision,
       resourcesAvailable: progress.visitedPages.includes(48), readiness: reviewReadiness(progress) };
   }

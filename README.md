@@ -1,6 +1,6 @@
 # SWCC desktop
 
-The offline Electron app includes durable annual assessment drafts, independent annual standards, shared learning goals and activities, managed evidence files with integrity checks and repair, activity notes/links and reflections, and per-year standards review. The production shell follows approved C / Learning map reference at commit `5477044`; prototype samples and simulated operations are not shipped.
+The offline Electron app includes durable annual assessment drafts, independent annual standards, shared learning goals and activities, managed evidence files with integrity checks and repair, activity notes/links and reflections, per-year standards review, explicit annual step completion and external declaration records. The production shell follows approved C / Learning map reference at commit `5477044`; prototype samples and simulated operations are not shipped.
 
 ## Run and check
 
@@ -57,6 +57,7 @@ Startup refuses corrupt, empty, missing-from-an-existing-dataset, future-schema,
 | `src/shared/application.ts` | Typed operations/results, assessment/goal/activity/evidence records, annual standard choices, date-only validation, fixed source identity |
 | `src/shared/assessment.ts` | Step 2 readiness rules and missing-item descriptions |
 | `src/shared/plan.ts` | Single Step 3 readiness implementation, completion-date and HTTP/HTTPS evidence-link validation |
+| `src/shared/workflow.ts` | Independent step feedback, relevant-revision/current-completion rules and annual package status |
 | `src/main/data/application.ts` | Public SQLite operations used by IPC and integration tests |
 | `src/main/data/activities.ts` | Activity persistence, stable A references, same-year unique links, Step 3 revisions |
 | `src/main/data/evidence.ts` | Main-owned file chooser/open actions, managed copies, stable E references, SHA-256 integrity and repair |
@@ -71,16 +72,17 @@ Startup refuses corrupt, empty, missing-from-an-existing-dataset, future-schema,
 | `src/main/data/review.ts` | Durable per-year review operations and the fixed resources browser action |
 | `src/renderer/Review.tsx`, `PdfReader.tsx`, `review-session.ts` | C checklist, real local PDF.js worker/viewport tracking, serialized review writes and flush |
 | `src/renderer/App.tsx` | C shell, years, navigation, local storage acknowledgement, honest later-feature destinations |
+| `src/renderer/annual-workflow.tsx` | C's adjacent annual checklist, declaration entry/warnings and honest export information |
 
-Future export/backup implementations belong in **main-process modules**, not renderer/file-system bridges. Introduce only their narrowly typed public operations when implemented. Activity/year deletion, manual completion, declaration, exports, and archives remain for later slices. Managed evidence import, preview/open, integrity checking, replacement and removal are implemented. Annual standards, shared goals/activities, and Step 1/2/3 readiness are implemented; Ready never means manually Completed.
+Future export/backup implementations belong in **main-process modules**, not renderer/file-system bridges. Introduce only their narrowly typed public operations when implemented. Exports and archives remain for later slices; the dashboard's export information action explains that no file is generated. Record deletion, managed evidence and repair, readiness, manual completion, and external declaration recording are implemented. Ready never means manually Completed.
 
 Public operations return `Result<T>`, not success-shaped failures. `createYear` returns a stable package and persists selection. A duplicate returns `DUPLICATE_YEAR` with `existingPackageId` for actionable opening. `openYear` persists selection without advancing content/data revisions. `saveDraft` accepts a **complete `Draft`** plus package ID and expected content revision; unknown draft fields, malformed dates, and stale revisions are rejected without overwriting the saved record.
 
 Dates are `YYYY-MM-DD` strings, never converted through local instants. Blank dates remain saveable drafts; nonblank malformed dates fail. Assessment and plan dates initialize separately to today's local date. Out-of-year dates warn but persist. Operational timestamps are UTC ISO instants.
 
-Meaningful draft changes advance package `contentRevision` and app `dataRevision` once, with independent `assessmentRevision` / `planRevision`. No-op saves and year navigation do not advance them. Later completion commands should compare their relevant revisions; adding goals must affect both assessment and plan revisions. Add fields/tables through a new migration, never edit the shipped migration in place.
+Meaningful draft changes advance package `contentRevision` and app `dataRevision` once, with independent `assessmentRevision` / `planRevision`. No-op saves and year navigation do not advance them. Completion commands compare their relevant revisions; adding goals affects both assessment and plan revisions. Add fields/tables through a new migration, never edit the shipped migration in place.
 
-The integrated schema is version 6: foundation (1), annual standards (2), goals (3), review (4), activities and unique same-package links (5), and managed evidence metadata (6). Existing foundation, assessment/goals and integrated review datasets upgrade transactionally without changing their records or revisions. The parallel ticket 06 review-only version-2 layout is explicitly recognized and gains the missing standards/goals/activity/evidence tables while preserving review visits, position, launch timestamps and revisions. Ambiguous version-2 layouts fail rather than silently losing progress or inventing a replacement dataset.
+The integrated schema is version 7: foundation (1), annual standards (2), goals (3), review (4), activities and unique same-package links (5), managed evidence metadata (6), and manual completions/declaration fields (7). Existing datasets upgrade transactionally without changing their records or revisions or inferring completion from readiness. The parallel ticket 06 review-only version-2 layout is explicitly recognized and gains the missing standards/goals/activity/evidence/completion tables while preserving review visits, position, launch timestamps and revisions. Ambiguous version-2 layouts fail rather than silently losing progress or inventing a replacement dataset.
 
 Each package owns `reference_counters` for `G`, `A`, and `E`, initialized at 1. Allocate and advance the counter **in the same immediate transaction** as insertion. Never derive references from record counts or decrement/recycle them after deletion. Keep record foreign keys and same-package relationship ownership enforced. No premature reference-allocation operation is exposed.
 
@@ -88,7 +90,7 @@ Each package owns `reference_counters` for `G`, `A`, and `E`, initialized at 1. 
 
 `DraftSession.edit()` retains text immediately. Autosave debounces 400 ms and serializes writes. Keystrokes during a save remain visible; returned revisions advance underneath them, and the newest draft is saved next.
 
-**Every renderer action that consumes or leaves edited records must first flush both `DraftSession` and `ReviewSession`**: navigation now, and completion/export/backup callers later. Resolution means all edits present during the flush have committed. Rejection means pending changes remain visible, status is **Not saved**, and the consuming action must not continue. Never swallow a rejected flush and report Saved/success. Retrying saves the retained changes; revision conflicts must not silently overwrite newer saved data.
+**Every renderer action that consumes or leaves edited records must first flush both `DraftSession` and `ReviewSession`**: navigation, completion, declaration entry, and future export/backup callers. Resolution means all edits present during the flush have committed. Rejection means pending changes remain visible, status is **Not saved**, and the consuming action must not continue. Never swallow a rejected flush and report Saved/success. Retrying saves the retained changes; revision conflicts must not silently overwrite newer saved data.
 
 Normal window close, app Quit, Windows session-end query, and macOS shutdown notification request that same renderer flush. Main permits termination only after a successful renderer acknowledgement. Failed flush keeps the window open with actionable status and Retry save. A retry after a failed close saves without silently closing; the worker can then close deliberately.
 
@@ -126,9 +128,19 @@ A page qualifies only **after its actual canvas render finishes**, in a visible/
 
 `getReview`, `recordReviewVisits`, `saveReviewPosition`, `resetReviewSection`, `launchReviewResources`, and `resetReviewResources` persist state per package and the fixed `ethics-2018` document. Reader position is the physical page, scroll offset divided by rendered page height, and zoom (75–200%). Pending writes are serialized and participate in navigation/close flush; storage failures retain the pending visits/position and expose Retry review save.
 
-`reviewRevision` advances only when a reset actually removes mapped visits or a recorded resources launch. Rereading, new automatic checks, page/position/zoom changes and year navigation do not invalidate Step 1. Review writes do not advance assessment/plan/content revisions; durable review changes advance app `dataRevision` for future backup tracking. **Manual Complete Step is intentionally not implemented here** (ticket 07); Ready is not Completed.
+`reviewRevision` advances only when a reset actually removes mapped visits or a recorded resources launch. Rereading, new automatic checks, page/position/zoom changes and year navigation do not invalidate Step 1. Review writes do not advance assessment/plan/content revisions; durable review changes advance app `dataRevision` for future backup tracking. Ready is not Completed; review has an explicit Complete Step 1 action.
 
 Only actually displaying physical page 48 exposes Other required resources. Explicit action invokes main-process `shell.openExternal` with the fixed plain College URL, and checks the item only after OS launch succeeds and the timestamp commits. Browser failures report the OS error and leave an unchecked item unchecked. Internet is needed to view the website; launch success proves neither loading nor reading. An explicit reset clears the timestamp.
+
+## Annual completion and declarations
+
+`getWorkflow(packageId)` returns independent readiness/missing-item lists and Draft/In Progress, Ready or Completed feedback, using the existing review/assessment/plan domain rules. `completeStep({ packageId, step, expectedRevision })` expects that **step's relevant revision**, checks fresh readiness (including managed evidence integrity) in an immediate transaction, and records its revision/UTC timestamp only on success. Incomplete, stale and failed writes leave the previous confirmation unchanged. Repeating a current confirmation is idempotent. The renderer flushes both editing sessions first; incoming operation results preserve edits typed while the operation is running.
+
+Current manual completion requires matching relevant/completed revisions. Assessment text/date/standards affect Step 2; goal creation/edit/deletion affects Steps 2 and 3; plan/activity/status/date/link/evidence/reflection changes affect Step 3; review/resources resets affect Step 1. Rereading, navigation, zoom, previews/opens and unchanged saves preserve confirmations. Changes remain isolated to their year. Activity completion and computed readiness never complete an annual step.
+
+`recordDeclaration({ packageId, date, expectedRevision, confirmIncomplete? })` stores the date-only **actual external submission date** and a separate app-entry UTC timestamp. It expects the package content revision. If any manual completion is not current, it requires acknowledgement of the incomplete-steps warning (`confirmIncomplete: true`); historical declarations are allowed. Entry or correction advances content/data revisions but no step's relevant revision. An unchanged date preserves the entry timestamp. Later edits or reopening steps preserve both declaration fields; no external submission history is reconstructed and SWCC neither submits nor verifies declarations.
+
+A year is Complete only with all three current manual confirmations and a declaration date. Dashboard and year-list status refresh after actions and survive restart. C's independent annual checklist, declaration and export information sit beside the relationship board, with labelled keyboard actions, readable blockers and the source-edition/application-readiness caveat. Export information remains available for incomplete years; exports/backup are not implemented by this ticket.
 
 ## Fixed read-only source set
 
@@ -188,3 +200,11 @@ Repeat packaged checks after building/installing:
 ```sh
 SWCC_PACKAGED_EXECUTABLE="/absolute/path/SWCC.app/Contents/MacOS/SWCC" npx playwright test
 ```
+
+Ticket 07 verification on the same macOS arm64 host, October 31, 2026:
+
+- `npm test`: **68** real-SQLite public-operation checks passed, including **28** focused completion/declaration cases, the full invalidation table, evidence/deletion changes, repeated confirmation, historical entry, rollback and version-6 migration.
+- `npm run typecheck`, `npm run lint` and `npm run build`: passed. The existing large-bundle advisory remains.
+- `npm run test:desktop`: **29** real Electron checks passed offline using production `file://` assets, including **4** completion cases. These cover any-order keyboard confirmation, C's adjacent dashboard composition, readable blockers/warnings, declaration date/timezone restart, all actual mapped PDF displays and completed rereading, year isolation and status, and failed draft/review flushes.
+- `npm run package:dir`: unsigned arm64 `.app` produced; all **4** completion renderer checks also passed against `release/mac-arm64/SWCC.app/Contents/MacOS/SWCC` offline. This is packaged-app smoke, not a newly installed DMG certification.
+- These checks do not certify Windows/Intel macOS/macOS 14, installer upgrades or OS-initiated shutdown. OS browser launch is substituted only at `shell.openExternal`; no website loading/reading or regulatory verification is claimed.

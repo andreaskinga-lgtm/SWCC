@@ -51,6 +51,20 @@ textarea { resize: vertical; line-height: 1.6; }
 .map-checklist ul { padding: 0; list-style: none; }
 .map-checklist li { border-bottom: 1px solid #d7deca; padding: 15px 0; }
 .map-checklist small { display: block; color: var(--muted); }
+.annual-step-list { padding: 0; list-style: none; }
+.annual-step-heading { display: flex; align-items: center; gap: 11px; }
+.step-number { display: inline-grid; place-items: center; background: var(--leaf); border-radius: 7px; width: 27px; height: 27px; font-size: 12px; }
+.map-checklist .workflow-missing { padding-left: 18px; margin: 12px 0; list-style: circle; font-size: 12px; line-height: 1.6; color: var(--muted); }
+.map-checklist .workflow-missing li { border: 0; padding: 3px 0; }
+.annual-step > button { margin-top: 12px; }
+.annual-step > p { font-size: 12px; }
+.package-status { display: inline-block; border: 1px solid #bac6a7; border-radius: 15px; padding: 5px 12px; font-size: 12px; }
+.declaration-card { border-top: 1px solid #d7deca; padding-top: 20px; margin: 20px 0; overflow-wrap: anywhere; }
+.declaration-card h3 { font-size: 15px; margin-top: 0; }
+.declaration-card p { font-size: 12px; }
+.workflow-source { font-size: 11px; }
+.declaration-warning { color: #775016; background: #fff5db; border: 1px solid #b68b43; border-radius: 8px; padding: 14px; }
+.operation-feedback { color: var(--accent); background: var(--leaf); border-radius: 8px; padding: 12px 16px; }
 .text-button { border: 0; color: var(--accent); background: none; padding: 6px 0; text-align: left; }
 .secondary { background: white; color: var(--accent); }
 .assessment-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 28px; align-items: start; }

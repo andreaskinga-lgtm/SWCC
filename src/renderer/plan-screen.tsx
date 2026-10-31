@@ -4,21 +4,28 @@ import type {
 } from '../shared/application.js';
 import { dateWarning } from '../shared/application.js';
 import { activityDateError, evaluatePlanReadiness, validEvidenceLink } from '../shared/plan.js';
+import { currentCompletion } from '../shared/workflow.js';
 import type { DraftSession } from './draft-session.js';
 import { DateField, Dialog, GoalCreateDialog, GoalDeleteDialog } from './assessment-screen.js';
 import { EvidencePreviewDialog } from './EvidencePreview.js';
 import './plan.css';
 
-export function PlanReadinessPanel({ pkg, readableEvidenceActivityIds = new Set<string>() }: {
-  pkg: YearPackage; readableEvidenceActivityIds?: ReadonlySet<string>;
+export function PlanReadinessPanel({ pkg, readableEvidenceActivityIds = new Set<string>(), complete, busy }: {
+  pkg: YearPackage; readableEvidenceActivityIds?: ReadonlySet<string>; complete: () => void; busy: boolean;
 }) {
   const readiness = evaluatePlanReadiness(pkg, undefined, readableEvidenceActivityIds);
+  const completed = currentCompletion(pkg, 'plan');
   return <section className={`readiness-panel ${readiness.ready ? 'ready' : ''}`} aria-labelledby="plan-readiness-title">
     <div className="readiness-heading"><h2 id="plan-readiness-title">Step 3 · Development plan</h2>
-      <span className={`readiness-status ${readiness.ready ? 'ready' : ''}`} role="status" aria-label="Step 3 readiness">{readiness.ready ? 'Ready' : 'In progress'}</span></div>
+      <span className={`readiness-status ${readiness.ready ? 'ready' : ''}`} role="status" aria-label="Step 3 readiness">{completed ? 'Completed' : readiness.ready ? 'Ready' : 'In progress'}</span></div>
     {readiness.ready ? <p>All application readiness checks are satisfied. Manual completion is separate.</p>
       : <ul className="readiness-missing" aria-label="Step 3 missing items">{readiness.missing.map(item => <li key={item}>{item}</li>)}</ul>}
     <small>Supplementary activities do not block readiness. Files are optional when notes or a valid link qualify; missing or corrupt files do not count.</small>
+    {completed && <p>You manually confirmed this step. Meaningful goal, plan or activity edits reopen it.</p>}
+    <button type="button" className="secondary" disabled={busy} aria-label="Complete Step 3" onClick={complete}>
+      {completed ? 'Confirm Step 3 again' : 'Complete Step 3'}
+    </button>
+    <small>Application readiness is not College compliance. Completion saves and checks your latest edits.</small>
   </section>;
 }
 
@@ -300,10 +307,11 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
   </article>;
 }
 
-export function PlanScreen({ pkg, session, operations, selectedId, select, recordRequested, clearRecordRequest, evidence, evidenceError, evidenceLoaded, refreshEvidence, reportError }: {
+export function PlanScreen({ pkg, session, operations, selectedId, select, recordRequested, clearRecordRequest, evidence, evidenceError, evidenceLoaded, refreshEvidence, reportError, complete, busy }: {
   pkg: YearPackage; session: DraftSession; operations: ApplicationOperations; selectedId: string | null;
   select: (id: string | null) => void; recordRequested: boolean; clearRecordRequest: () => void;
   evidence: EvidenceAttachment[]; evidenceError: string; evidenceLoaded: boolean; refreshEvidence: () => Promise<EvidenceAttachment[]>;
+  complete: () => void; busy: boolean;
   reportError: (message: string) => void;
 }) {
   const [creating, setCreating] = useState(recordRequested);
@@ -338,7 +346,8 @@ export function PlanScreen({ pkg, session, operations, selectedId, select, recor
       </button>)}</div>
       <DateField pkg={pkg} session={session} field="planDate" label="Plan date" />
       <p className="quiet">Plan date is independent of assessment date.</p><PlanReadinessPanel pkg={pkg}
-        readableEvidenceActivityIds={new Set(evidence.filter(entry => entry.integrity === 'readable').map(entry => entry.activityId))} /></aside>
+        readableEvidenceActivityIds={new Set(evidence.filter(entry => entry.integrity === 'readable').map(entry => entry.activityId))}
+        complete={complete} busy={busy} /></aside>
       {activity ? <ActivityEditor key={activity.id} activity={activity} pkg={pkg} session={session} operations={operations}
         addGoal={() => setCreatingGoal({ activityId: activity.id })} evidence={evidence} evidenceError={evidenceError}
         evidenceLoaded={evidenceLoaded} refreshEvidence={refreshEvidence} onDeleted={select} reportError={reportError} />
