@@ -48,6 +48,8 @@ test('keyboard creation, duplicate recovery and autosaved dates survive producti
   await page.getByRole('navigation').getByRole('button', { name: 'Self-assessment', exact: true }).click();
   await page.getByLabel('Strengths').fill('Café practice — unfinished reflection');
   await page.getByLabel('Assessment date').fill('2024-02-29');
+  await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Saved');
+  await page.getByRole('navigation').getByRole('button', { name: 'Development plan', exact: true }).click();
   await page.getByLabel('Plan date').fill('2023-12-30');
   await expect(page.getByText('This date is outside 2024.')).toBeVisible();
   await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Saved');
@@ -62,6 +64,7 @@ test('keyboard creation, duplicate recovery and autosaved dates survive producti
   await page.getByRole('navigation').getByRole('button', { name: 'Self-assessment', exact: true }).click();
   await expect(page.getByLabel('Strengths')).toHaveValue('Café practice — unfinished reflection');
   await expect(page.getByLabel('Assessment date')).toHaveValue('2024-02-29');
+  await page.getByRole('navigation').getByRole('button', { name: 'Development plan', exact: true }).click();
   await expect(page.getByLabel('Plan date')).toHaveValue('2023-12-30');
   await page.setViewportSize({ width: 620, height: 800 });
   await page.getByRole('button', { name: 'All years', exact: true }).focus();

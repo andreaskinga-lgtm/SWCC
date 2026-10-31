@@ -5,27 +5,43 @@ export const SOURCE_DOCUMENTS = [
   { id: 'assessment-2026', file: 'assessment-2026.pdf', title: '2026 assessment tool — references Third Edition / 2023' },
 ] as const;
 
+export const ANNUAL_STANDARDS = [
+  { id: 'code-of-ethics', label: 'Code of Ethics' },
+  { id: 'meaning-of-client', label: 'Meaning of Client' },
+  { id: 'social-work-scope', label: 'Scope of Practice for Social Work' },
+  { id: 'social-service-work-scope', label: 'Scope of Practice for Social Service Work' },
+  { id: 'principle-i', label: 'Principle I: Relationship with Clients' },
+  { id: 'principle-ii', label: 'Principle II: Competence and Integrity' },
+  { id: 'principle-iii', label: 'Principle III: Responsibility to Clients' },
+  { id: 'principle-iv', label: 'Principle IV: The Social Work and Social Service Work Record' },
+  { id: 'principle-v', label: 'Principle V: Confidentiality' },
+  { id: 'principle-vi', label: 'Principle VI: Fees' },
+  { id: 'principle-vii', label: 'Principle VII: Advertising' },
+  { id: 'principle-viii', label: 'Principle VIII: Sexual Misconduct' },
+] as const;
+export type AnnualStandardId = (typeof ANNUAL_STANDARDS)[number]['id'];
+
 export interface Draft {
   assessmentDate: string;
   planDate: string;
   strengths: string;
   peerFeedback: string;
   learningNeeds: string;
-}
-export interface YearPackage extends Draft {
-  id: string;
-  year: number;
-  sourceSetId: string;
-  contentRevision: number;
-  assessmentRevision: number;
-  planRevision: number;
-  createdAt: string;
-  updatedAt: string;
+  annualStandards: AnnualStandardId[];
 }
 export interface YearSummary {
   id: string;
   year: number;
   contentRevision: number;
+}
+export interface Goal {
+  id: string;
+  packageId: string;
+  ref: string;
+  title: string;
+  description: string;
+  createdAt: string;
+  updatedAt: string;
 }
 export interface AppState {
   years: YearSummary[];
@@ -48,11 +64,43 @@ export interface SaveDraft {
   expectedRevision: number;
   draft: Draft;
 }
+export interface CreateGoal {
+  packageId: string;
+  expectedRevision: number;
+  title: string;
+  description?: string;
+}
+export interface UpdateGoal {
+  packageId: string;
+  goalId: string;
+  expectedRevision: number;
+  title?: string;
+  description?: string;
+}
+export interface DeleteGoal {
+  packageId: string;
+  goalId: string;
+  expectedRevision: number;
+}
+export interface YearPackage extends Draft {
+  id: string;
+  year: number;
+  sourceSetId: string;
+  contentRevision: number;
+  assessmentRevision: number;
+  planRevision: number;
+  createdAt: string;
+  updatedAt: string;
+  goals: Goal[];
+}
 export interface ApplicationOperations {
   getState(): Promise<Result<AppState>>;
   createYear(year: number): Promise<Result<YearPackage>>;
   openYear(packageId: string): Promise<Result<YearPackage>>;
   saveDraft(input: SaveDraft): Promise<Result<YearPackage>>;
+  createGoal(input: CreateGoal): Promise<Result<YearPackage>>;
+  updateGoal(input: UpdateGoal): Promise<Result<YearPackage>>;
+  deleteGoal(input: DeleteGoal): Promise<Result<YearPackage>>;
   acknowledgeStorage(): Promise<Result<AppState>>;
 }
 export interface DesktopOperations extends ApplicationOperations {

@@ -1,8 +1,9 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { BookOpen, ClipboardList, Home, Layers, HardDrive, Sprout, Network } from 'lucide-react';
 import type { AppState, DesktopOperations, OperationError, Result } from '../shared/application.js';
-import { dateWarning, localDate, SOURCE_DOCUMENTS } from '../shared/application.js';
+import { localDate, SOURCE_DOCUMENTS } from '../shared/application.js';
 import { DraftSession } from './draft-session.js';
+import { AssessmentScreen, PlanScreen } from './assessment-screen.js';
 
 type Screen = 'years' | 'overview' | 'assessment' | 'plan' | 'review' | 'backup';
 function unwrap<T>(result: Result<T>): T {
@@ -75,10 +76,6 @@ export function App({ operations }: { operations: DesktopOperations }) {
       setScreen('overview');
     });
   }
-  const dateField = (key: 'assessmentDate' | 'planDate', label: string) => pkg && <label className="field">
-    <span>{label}</span><input type="date" value={pkg[key]} onChange={event => session.edit({ [key]: event.target.value })} />
-    {dateWarning(pkg[key], pkg.year) && <small className="warning">{dateWarning(pkg[key], pkg.year)}</small>}
-  </label>;
   return <div className="map-layout">
     <aside className="map-rail" aria-label="Portfolio navigation">
       <div className="map-mark"><Sprout size={29} aria-hidden="true" /><span className="sr-only">SWCC</span></div>
@@ -121,25 +118,19 @@ export function App({ operations }: { operations: DesktopOperations }) {
         </section></>}
       {screen === 'overview' && pkg && <><div className="page-heading"><h1>Connect learning to practice.</h1><p>Your {pkg.year} portfolio begins with reflection.</p></div>
         <div className="map-overview"><section className="relationship-board surface"><div className="relationship-columns">
-          <div className="goal-panel"><h2>Learning goals</h2><p>Goals will connect your assessment and development plan. Goal entry is not available in this foundation build.</p><button className="secondary" onClick={() => navigate('assessment')}>Write your self-assessment</button></div>
-          <div><h2>Activities & experiences</h2><p>No sample records. Activity entry and relationships arrive in a later build.</p><button className="secondary" onClick={() => navigate('plan')}>View development plan</button></div>
+          <div className="goal-panel"><h2>Learning goals</h2>
+            {pkg.goals.length > 0 ? <ul className="overview-goal-list">{pkg.goals.map(goal => <li key={goal.id}><span>{goal.ref}</span><strong>{goal.title}</strong></li>)}</ul>
+              : <p>No goals yet. Add one from self-assessment or development plan.</p>}
+            <button className="secondary" onClick={() => navigate('assessment')}>Write your self-assessment</button>
+          </div>
+          <div><h2>Activities & experiences</h2><p>No sample records. Activity records and their goal relationships will be added in a later build.</p><button className="secondary" onClick={() => navigate('plan')}>View development plan</button></div>
         </div><p className="board-footer">Evidence and reflection will stay with each activity, never with its links.</p></section>
           <aside className="map-checklist"><h2>Close the annual loop</h2><p>Work freely. Complete deliberately.</p>
             <ul>{destinations.slice(1, 4).map(item => <li key={item.screen}><button className="text-button" onClick={() => navigate(item.screen)}>{item.name}</button><small>Draft · completion unavailable</small></li>)}</ul>
             <p>External declaration and annual export are not available yet. This build does not report annual completion.</p>
           </aside></div></>}
-      {screen === 'assessment' && pkg && <><div className="page-heading"><h1>Reflect on your practice.</h1><p>Annual self-assessment · {pkg.year}. Incomplete writing is saved as a draft.</p></div>
-        <div className="assessment-layout"><section className="surface assessment-writing">
-          {dateField('assessmentDate', 'Assessment date')}
-          {(['strengths', 'peerFeedback', 'learningNeeds'] as const).map((key, index) => <label className="field" key={key}>
-            <span>{['Strengths', 'Peer feedback (optional)', 'Learning needs and interests'][index]}</span>
-            <textarea rows={6} value={pkg[key]} onChange={event => session.edit({ [key]: event.target.value })} />
-          </label>)}
-        </section><aside className="goal-panel"><h2>Your development plan date</h2>{dateField('planDate', 'Plan date')}<p>The plan date is independent of the assessment date.</p>
-          <p>Annual standards, shared goals, readiness and manual completion will be added in later builds. Blank narrative fields do not block draft saving.</p></aside></div></>}
-      {screen === 'plan' && pkg && <><div className="page-heading"><h1>Develop your learning plan.</h1><p>Annual development plan · {pkg.year}</p></div>
-        <section className="goal-panel"><h2>Goal connections</h2><p>Goal and activity entry is not available in this build.</p></section>
-        <section className="surface">{dateField('planDate', 'Plan date')}<p>This date is saved independently. Activities, evidence and reflection arrive in a later build.</p></section></>}
+      {screen === 'assessment' && pkg && <AssessmentScreen pkg={pkg} session={session} operations={operations} />}
+      {screen === 'plan' && pkg && <PlanScreen pkg={pkg} session={session} operations={operations} />}
       {screen === 'review' && <><div className="page-heading"><h1>Review the supplied standards.</h1></div><section className="surface">
         <p>The original source PDFs are bundled read-only. The offline reader and page-visit checklist are not available in this foundation build.</p>
         <ul>{SOURCE_DOCUMENTS.map(document => <li key={document.id}>{document.title}</li>)}</ul>

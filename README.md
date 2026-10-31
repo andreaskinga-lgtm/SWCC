@@ -1,6 +1,6 @@
 # SWCC desktop
 
-Ticket 01 foundation: a real offline Electron app with durable annual assessment drafts. The production shell follows the approved C / Learning map reference at commit `5477044`; prototype samples and simulated operations are not shipped.
+The offline Electron foundation includes durable annual assessment drafts, independent annual standards, and shared learning goals in the assessment and development-plan views. The production shell follows approved C / Learning map reference at commit `5477044`; prototype samples and simulated operations are not shipped.
 
 ## Run and check
 
@@ -54,15 +54,17 @@ Startup refuses corrupt, empty, missing-from-an-existing-dataset, future-schema,
 
 | Module / seam | Current responsibility |
 | --- | --- |
-| `src/shared/application.ts` | Small typed operations/results, annual draft/record types, date-only validation, fixed source identity |
-| `src/main/data/application.ts` | Public operations used by both IPC and real SQLite integration tests |
+| `src/shared/application.ts` | Typed operations/results, assessment/goal records, annual standard choices, date-only validation, fixed source identity |
+| `src/shared/assessment.ts` | Step 2 readiness rules and missing-item descriptions |
+| `src/main/data/application.ts` | Public SQLite operations used by IPC and integration tests |
 | `src/main/data/migrations.ts` | Ordered transactional migrations; SQLite `user_version` is schema version |
 | `src/main/data/storage.ts` | Stable dataset/evidence/runtime/staging/journal paths |
 | `src/main/index.ts`, `preload.cts` | Single instance, restricted typed IPC, isolated/sandboxed renderer, navigation/new-window constraints, protected close |
-| `src/renderer/draft-session.ts` | Retained draft, serialized autosave, shared flush contract |
-| `src/renderer/App.tsx` | C shell, years, assessment writing, independent plan date, honest later-feature destinations |
+| `src/renderer/draft-session.ts` | Retained draft and goal edits, serialized autosave, shared flush/failure contract |
+| `src/renderer/assessment-screen.tsx` | C-style assessment writing, annual standards, shared goal editors, Step 2 readiness, and plan goal view |
+| `src/renderer/App.tsx` | C shell, years, navigation, local storage acknowledgement, later-feature destinations |
 
-Future export/backup implementations belong in **main-process modules**, not renderer/file-system bridges. Introduce only their narrowly typed public operations when implemented. Review, standards, goals, activities, evidence import, readiness/completion, declaration, exports, and archives are intentionally not implemented in ticket 01.
+Future export/backup implementations belong in **main-process modules**, not renderer/file-system bridges. Introduce only their narrowly typed public operations when implemented. Review tracking, activities, evidence import, manual completion, declaration, exports, and archives remain for later implementation slices. Annual standards, shared goals, and Step 2 readiness are implemented.
 
 Public operations return `Result<T>`, not success-shaped failures. `createYear` returns a stable package and persists selection. A duplicate returns `DUPLICATE_YEAR` with `existingPackageId` for actionable opening. `openYear` persists selection without advancing content/data revisions. `saveDraft` accepts a **complete `Draft`** plus package ID and expected content revision; unknown draft fields, malformed dates, and stale revisions are rejected without overwriting the saved record.
 
