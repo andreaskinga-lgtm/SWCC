@@ -33,6 +33,7 @@ export interface YearSummary {
   id: string;
   year: number;
   contentRevision: number;
+  status: import('./workflow.js').PackageStatus;
 }
 export interface Goal {
   id: string;
@@ -121,11 +122,12 @@ export interface AppState {
 }
 export interface OperationError {
   code: 'VALIDATION' | 'DUPLICATE_YEAR' | 'NOT_FOUND' | 'CONFLICT' | 'STORAGE' | 'IPC' | 'BROWSER' | 'INACTIVE' | 'CONFIRMATION_REQUIRED'
-    | 'UNSUPPORTED_FILE' | 'FILE_TOO_LARGE' | 'UNREADABLE' | 'EVIDENCE' | 'OPEN';
+    | 'UNSUPPORTED_FILE' | 'FILE_TOO_LARGE' | 'UNREADABLE' | 'EVIDENCE' | 'OPEN' | 'NOT_READY';
   message: string;
   existingPackageId?: string;
   committed?: boolean;
   recoveryPath?: string;
+  missing?: string[];
 }
 export type Result<T> = { ok: true; value: T } | { ok: false; error: OperationError };
 export interface SaveDraft {
@@ -172,12 +174,18 @@ export interface YearPackage extends Draft {
   assessmentRevision: number;
   planRevision: number;
   reviewRevision: number;
+  stepCompletions: Record<import('./workflow.js').AnnualStep, import('./workflow.js').StepCompletion>;
+  declarationDate: string | null;
+  declarationRecordedAt: string | null;
   createdAt: string;
   updatedAt: string;
   goals: Goal[];
   activities: Activity[];
 }
 export interface ApplicationOperations extends ReviewOperations {
+  getWorkflow(packageId: string): Promise<Result<import('./workflow.js').AnnualWorkflow>>;
+  completeStep(input: import('./workflow.js').CompleteStep): Promise<Result<YearPackage>>;
+  recordDeclaration(input: import('./workflow.js').RecordDeclaration): Promise<Result<YearPackage>>;
   getState(): Promise<Result<AppState>>;
   createYear(year: number): Promise<Result<YearPackage>>;
   openYear(packageId: string): Promise<Result<YearPackage>>;

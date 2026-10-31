@@ -8,12 +8,14 @@ import type {
 } from '../../shared/application.js';
 import { migrate, SCHEMA_VERSION } from './migrations.js';
 import { storageLayout } from './storage.js';
-import { reviewOperations } from './review.js';
+import { readReviewProgress, reviewOperations } from './review.js';
 import type { ReviewSystem } from './review.js';
 import { activityOperations, getActivities } from './activities.js';
 import { evaluatePlanReadiness, validEvidenceLink } from '../../shared/plan.js';
 import { evidenceOperations, EvidenceCleanupFailure, recoverEvidenceDeletions } from './evidence.js';
 import type { EvidenceSystem } from './evidence.js';
+import { ANNUAL_STEPS, evaluateWorkflow, packageStatus } from '../../shared/workflow.js';
+import type { AnnualStep, StepCompletion } from '../../shared/workflow.js';
 
 class ApplicationFailure extends Error {
   constructor(readonly detail: OperationError) { super(detail.message); }
@@ -111,7 +113,8 @@ export function openApplication(
   const packageSelect = `SELECT id, year, source_set_id AS sourceSetId, assessment_date AS assessmentDate,
     plan_date AS planDate, strengths, peer_feedback AS peerFeedback, learning_needs AS learningNeeds,
     content_revision AS contentRevision, assessment_revision AS assessmentRevision, plan_revision AS planRevision,
-    review_revision AS reviewRevision, created_at AS createdAt, updated_at AS updatedAt FROM year_packages`;
+    review_revision AS reviewRevision, declaration_date AS declarationDate, declaration_recorded_at AS declarationRecordedAt,
+    created_at AS createdAt, updated_at AS updatedAt FROM year_packages`;
   function getGoals(packageId: string): Goal[] {
     const rows = database.prepare(`SELECT id, package_id AS packageId, reference_number AS referenceNumber,
       title, description, created_at AS createdAt, updated_at AS updatedAt
@@ -124,8 +127,15 @@ export function openApplication(
     if (!record) fail('NOT_FOUND', 'This year package no longer exists. Open All years to choose another.');
     const selected = new Set((database.prepare('SELECT standard_id AS standardId FROM annual_standards WHERE package_id = ?')
       .all(id) as { standardId: string }[]).map(row => row.standardId));
+    const completions = database.prepare(`SELECT step, completed_revision AS completedRevision, completed_at AS completedAt
+      FROM step_completions WHERE package_id = ?`).all(id) as (StepCompletion & { step: AnnualStep })[];
+    const completion = (step: AnnualStep): StepCompletion => {
+      const saved = completions.find(row => row.step === step);
+      return { completedRevision: saved?.completedRevision ?? null, completedAt: saved?.completedAt ?? null };
+    };
     return {
       ...record,
+      stepCompletions: { review: completion('review'), assessment: completion('assessment'), plan: completion('plan') },
       annualStandards: ANNUAL_STANDARDS.filter(standard => selected.has(standard.id)).map(standard => standard.id),
       goals: getGoals(id),
       activities: getActivities(database, id),
@@ -147,7 +157,10 @@ export function openApplication(
       data_revision AS dataRevision, last_backup_at AS lastBackupAt, last_backup_revision AS lastBackupRevision FROM app_metadata WHERE id = 1`)
       .get() as { selectedPackageId: string | null } & Omit<AppState, 'years' | 'selectedPackage' | 'schemaVersion' | 'storageDirectory'>;
     return {
-      years: database.prepare('SELECT id, year, content_revision AS contentRevision FROM year_packages ORDER BY year DESC').all() as AppState['years'],
+      years: (database.prepare('SELECT id, year, content_revision AS contentRevision FROM year_packages ORDER BY year DESC')
+        .all() as Omit<AppState['years'][number], 'status'>[]).map(row => ({
+        ...row, status: packageStatus(getPackage(row.id), readReviewProgress(database, row.id)),
+      })),
       selectedPackage: meta.selectedPackageId ? getPackage(meta.selectedPackageId) : null,
       acknowledgedAt: meta.acknowledgedAt,
       dataRevision: meta.dataRevision,
@@ -173,6 +186,48 @@ export function openApplication(
   const evidence = evidenceOperations(database, paths.evidence, getPackage, now, fail, identifier, evidenceSystem);
   const operations: ApplicationOperations = {
     ...reviewOperations(database, now, reviewSystem),
+    getWorkflow: id => operation(() => {
+      identifier(id);
+      return evaluateWorkflow(getPackage(id), readReviewProgress(database, id), today(), evidence.readableActivityIds(id));
+    }),
+    completeStep: input => operation(() => database.transaction(() => {
+      const request = validateGoalRequest(input, ['packageId', 'step', 'expectedRevision']);
+      if (!ANNUAL_STEPS.includes(request.step as AnnualStep)) fail('VALIDATION', 'Choose an annual step to complete.');
+      const record = getPackage(input.packageId);
+      const step = evaluateWorkflow(record, readReviewProgress(database, record.id), today(), evidence.readableActivityIds(record.id)).steps[input.step];
+      if (step.relevantRevision !== input.expectedRevision) fail('CONFLICT', 'This step changed. Review its current readiness before completing it.');
+      if (!step.ready) throw new ApplicationFailure({
+        code: 'NOT_READY', message: `This step is not ready. ${step.missing.join(' ')}`, missing: step.missing,
+      });
+      if (step.status === 'Completed') return record;
+      database.prepare(`INSERT INTO step_completions(package_id, step, completed_revision, completed_at) VALUES(?, ?, ?, ?)
+        ON CONFLICT(package_id, step) DO UPDATE SET completed_revision = excluded.completed_revision, completed_at = excluded.completed_at`)
+        .run(record.id, input.step, step.relevantRevision, now());
+      database.prepare('UPDATE app_metadata SET data_revision = data_revision + 1 WHERE id = 1').run();
+      return getPackage(record.id);
+    }).immediate()),
+    recordDeclaration: input => operation(() => database.transaction(() => {
+      const request = validateGoalRequest(input, ['packageId', 'date', 'expectedRevision', 'confirmIncomplete']);
+      if (typeof request.date !== 'string' || !validDate(request.date))
+        fail('VALIDATION', 'Enter the actual external submission date as a valid YYYY-MM-DD date.');
+      if (request.confirmIncomplete !== undefined && request.confirmIncomplete !== true)
+        fail('VALIDATION', 'Confirm the incomplete-steps warning before recording this date.');
+      const record = getPackage(input.packageId);
+      if (record.contentRevision !== input.expectedRevision) fail('CONFLICT', 'This package changed. Reopen declaration entry before recording the date.');
+      const workflow = evaluateWorkflow(record, readReviewProgress(database, record.id), today(), evidence.readableActivityIds(record.id));
+      const incomplete = ANNUAL_STEPS.filter(step => workflow.steps[step].status !== 'Completed');
+      if (incomplete.length && !input.confirmIncomplete) throw new ApplicationFailure({
+        code: 'CONFIRMATION_REQUIRED',
+        message: 'Your application steps are incomplete. You may still record an external submission that already happened. SWCC does not submit or verify declarations.',
+        missing: incomplete.map(step => `${step} is not manually completed.`),
+      });
+      if (record.declarationDate === input.date) return record;
+      const timestamp = now();
+      database.prepare(`UPDATE year_packages SET declaration_date = ?, declaration_recorded_at = ?,
+        content_revision = content_revision + 1, updated_at = ? WHERE id = ?`).run(input.date, timestamp, timestamp, record.id);
+      database.prepare('UPDATE app_metadata SET data_revision = data_revision + 1 WHERE id = 1').run();
+      return getPackage(record.id);
+    }).immediate()),
     getEvidence: id => operation(() => evidence.getEvidence(id)),
     importEvidence: input => operation(() => evidence.importEvidence(input)),
     replaceEvidence: input => operation(() => evidence.replaceEvidence(input)),

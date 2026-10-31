@@ -236,7 +236,7 @@ export class DraftSession {
     this.savedVersion = this.version;
     this.update({ ...this.current, status: 'Saved', error: null });
   }
-  private applySaved(saved: YearPackage) {
+  acceptSaved(saved: YearPackage) {
     const current = this.current.record;
     if (!current) return;
     const goals = saved.goals.map(goal => this.goalEdits.has(goal.id)
@@ -255,4 +255,5 @@ export class DraftSession {
       : activity);
     this.update({ ...this.current, record: { ...saved, ...draft, goals, activities } });
   }
+  private applySaved(saved: YearPackage) { this.acceptSaved(saved); }
 }

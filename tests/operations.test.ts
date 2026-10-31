@@ -462,6 +462,7 @@ test.each([
   const revision = value(await app.operations.getState()).dataRevision;
   app.close();
   const fixture = new Database(resolve(root, 'dataset/database.sqlite'));
+  fixture.exec('DROP TABLE step_completions; ALTER TABLE year_packages DROP COLUMN declaration_date; ALTER TABLE year_packages DROP COLUMN declaration_recorded_at;');
   fixture.exec('DROP TABLE evidence_attachments; DROP TABLE activity_goal_links; DROP TABLE learning_activities; DROP INDEX goal_package_ownership;');
   if (!reviewOnly && version < 4) {
     fixture.exec('DROP TABLE review_visits; DROP TABLE review_states; ALTER TABLE year_packages DROP COLUMN review_revision;');

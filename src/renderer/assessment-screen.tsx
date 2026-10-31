@@ -4,6 +4,7 @@ import { Plus, Trash2, X } from 'lucide-react';
 import type { ApplicationOperations, Goal, YearPackage } from '../shared/application.js';
 import { ANNUAL_STANDARDS, dateWarning } from '../shared/application.js';
 import { evaluateAssessmentReadiness } from '../shared/assessment.js';
+import { currentCompletion } from '../shared/workflow.js';
 import { DraftSession } from './draft-session.js';
 import './assessment.css';
 
@@ -164,26 +165,33 @@ function useSyncSession(session: DraftSession) {
   return useSyncExternalStore(session.subscribe, session.getSnapshot);
 }
 
-function ReadinessPanel({ pkg }: { pkg: YearPackage }) {
+function ReadinessPanel({ pkg, complete, busy }: { pkg: YearPackage; complete: () => void; busy: boolean }) {
   const readiness = evaluateAssessmentReadiness(pkg);
+  const completed = currentCompletion(pkg, 'assessment');
   return <section className={`readiness-panel ${readiness.ready ? 'ready' : ''}`} aria-labelledby="assessment-readiness-title">
     <div className="readiness-heading"><h2 id="assessment-readiness-title">Step 2 · Self-assessment</h2>
       <span className={`readiness-status ${readiness.ready ? 'ready' : ''}`} role="status" aria-label="Step 2 readiness">
-        {readiness.ready ? 'Ready' : 'In progress'}
+        {completed ? 'Completed' : readiness.ready ? 'Ready' : 'In progress'}
       </span>
     </div>
     <p>{readiness.ready ? 'All Step 2 readiness items are present.' : 'Use this checklist while you work. Drafts remain saveable.'}</p>
     {!readiness.ready && <ul aria-label="Step 2 missing items" className="readiness-missing">
       {readiness.missing.map(item => <li key={item}>{item}</li>)}
     </ul>}
-    <small>Readiness is calculated separately from manual step completion.</small>
+    {completed && <p>You manually confirmed this step. Meaningful assessment or goal edits reopen it.</p>}
+    <button type="button" className="secondary" disabled={busy} aria-label="Complete Step 2" onClick={complete}>
+      {completed ? 'Confirm Step 2 again' : 'Complete Step 2'}
+    </button>
+    <small>Application readiness is not College compliance. Completion checks and saves your latest edits.</small>
   </section>;
 }
 
-export function AssessmentScreen({ pkg, session, operations }: {
+export function AssessmentScreen({ pkg, session, operations, complete, busy }: {
   pkg: YearPackage;
   session: DraftSession;
   operations: ApplicationOperations;
+  complete: () => void;
+  busy: boolean;
 }) {
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState<Goal | null>(null);
@@ -217,7 +225,7 @@ export function AssessmentScreen({ pkg, session, operations }: {
           {pkg.goals.map(goal => <GoalEditor key={goal.id} goal={goal} session={session} onDelete={setDeleting} />)}
           {!pkg.goals.length && <p className="empty">Add a learning goal here or from the development plan.</p>}
         </section>
-        <ReadinessPanel pkg={pkg} />
+        <ReadinessPanel pkg={pkg} complete={complete} busy={busy} />
       </aside>
     </div>
     {creating && <GoalCreateDialog source="assessment" session={session} onClose={() => setCreating(false)} />}

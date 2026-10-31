@@ -5,8 +5,9 @@ import { localDate } from '../shared/application.js';
 import { DraftSession } from './draft-session.js';
 import { AssessmentScreen, Dialog } from './assessment-screen.js';
 import { PlanScreen } from './plan-screen.js';
-import { evaluateAssessmentReadiness } from '../shared/assessment.js';
-import { evaluatePlanReadiness } from '../shared/plan.js';
+import { ANNUAL_STEPS, evaluateWorkflow } from '../shared/workflow.js';
+import type { AnnualStep } from '../shared/workflow.js';
+import { AnnualWorkflowPanel, DeclarationDialog } from './annual-workflow.js';
 import { ReviewSession } from './review-session.js';
 import { Review } from './Review.js';
 
@@ -39,12 +40,22 @@ export function App({ operations }: { operations: DesktopOperations }) {
   const [recordRequested, setRecordRequested] = useState(false);
   const [deletingYear, setDeletingYear] = useState<{ id: string; year: number } | null>(null);
   const [yearDeleteError, setYearDeleteError] = useState<string | null>(null);
+  const [declaring, setDeclaring] = useState(false);
+  const [exportInfo, setExportInfo] = useState(false);
+  const [feedback, setFeedback] = useState('');
   const [evidenceByPackage, setEvidenceByPackage] = useState<Record<string, EvidenceAttachment[]>>({});
   const [evidenceErrors, setEvidenceErrors] = useState<Record<string, string>>({});
   const pkg = draft.record;
   const packageEvidence = pkg ? evidenceByPackage[pkg.id] ?? [] : [];
   const readableEvidenceActivityIds = new Set(packageEvidence
     .filter(entry => entry.integrity === 'readable').map(entry => entry.activityId));
+  const reviewRecord = review.record?.packageId === pkg?.id ? review.record : null;
+  const effectivePackage = pkg ? { ...pkg, reviewRevision: reviewRecord?.reviewRevision ?? pkg.reviewRevision } : null;
+  const workflow = effectivePackage ? evaluateWorkflow(effectivePackage,
+    reviewRecord ?? { visitedPages: [], resourcesLaunchedAt: null }, undefined, readableEvidenceActivityIds) : null;
+  useEffect(() => {
+    if (pkg) void reviewSession.open(pkg.id).catch(() => {});
+  }, [pkg?.id, reviewSession]);
   useEffect(() => {
     void operations.getState().then(result => {
       if (!result.ok) { setError(result.error.message); return; }
@@ -90,6 +101,7 @@ export function App({ operations }: { operations: DesktopOperations }) {
     if (busy) return;
     setBusy(true);
     setError(null);
+    setFeedback('');
     try { await Promise.all([session.flush(), reviewSession.flush()]); await work(); }
     catch (failure) { if (!session.getSnapshot().error && !reviewSession.getSnapshot().error) setError(failure instanceof Error ? failure.message : String(failure)); }
     finally { setBusy(false); }
@@ -169,6 +181,44 @@ export function App({ operations }: { operations: DesktopOperations }) {
       setScreen('plan');
     });
   }
+  function complete(step: AnnualStep) {
+    void run(async () => {
+      const current = session.getSnapshot().record;
+      if (!current) return;
+      const latest = unwrap(await operations.getWorkflow(current.id));
+      const completed = unwrap(await operations.completeStep({
+        packageId: current.id, step, expectedRevision: latest.steps[step].relevantRevision,
+      }));
+      session.acceptSaved(completed);
+      await refreshEvidence(current.id);
+      setState(unwrap(await operations.getState()));
+      setFeedback(`Step ${ANNUAL_STEPS.indexOf(step) + 1} manually confirmed. Application completion is not College compliance.`);
+    });
+  }
+  function openDeclaration() {
+    void run(async () => {
+      const current = session.getSnapshot().record;
+      if (!current) return;
+      session.acceptSaved(unwrap(await operations.openYear(current.id)));
+      setDeclaring(true);
+    });
+  }
+  async function saveDeclaration(date: string, warned: boolean) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await Promise.all([session.flush(), reviewSession.flush()]);
+      const current = session.getSnapshot().record;
+      if (!current) throw new Error('Open a year before recording a declaration.');
+      session.acceptSaved(unwrap(await operations.recordDeclaration({
+        packageId: current.id, expectedRevision: current.contentRevision, date,
+        ...(warned ? { confirmIncomplete: true as const } : {}),
+      })));
+      setState(unwrap(await operations.getState()));
+      setDeclaring(false);
+      setFeedback('External submission date recorded. SWCC has not submitted or verified a declaration.');
+    } finally { setBusy(false); }
+  }
   return <div className="map-layout">
     <aside className="map-rail" aria-label="Portfolio navigation">
       <div className="map-mark"><Sprout size={29} aria-hidden="true" /><span className="sr-only">SWCC</span></div>
@@ -198,6 +248,12 @@ export function App({ operations }: { operations: DesktopOperations }) {
           <button onClick={() => void run(async () => {})} disabled={busy}>Retry save</button></>}
         {duplicate?.existingPackageId && <button onClick={() => open(duplicate.existingPackageId!)} disabled={busy}>Open existing package</button>}
       </section>}
+      {review.error && screen !== 'review' && <section className="error-panel" role="alert"><p>{review.error}</p>
+        {review.status === 'Not saved' && <button disabled={busy} onClick={() => void run(async () => {
+          if (pkg && !reviewSession.getSnapshot().record) await reviewSession.open(pkg.id);
+        })}>Retry review save</button>}
+      </section>}
+      {feedback && <p className="operation-feedback" role="status">{feedback}</p>}
       {!state && !error && <p role="status">Opening local records…</p>}
       {screen === 'years' && <><div className="page-heading"><h1>Your year packages</h1><p>One portfolio per calendar year. Earlier years stay open for editing.</p></div>
         <section className="surface">
@@ -206,7 +262,7 @@ export function App({ operations }: { operations: DesktopOperations }) {
             <button type="submit" disabled={busy || !state}>Create year package</button>
           </form>
           {state?.years.length === 0 && <p className="empty">Start with this year, or create a past year to backfill your records.</p>}
-          <ul className="year-list">{state?.years.map(row => <li key={row.id}><div><strong>{row.year}</strong><span>Draft · application completion not yet recorded</span></div>
+          <ul className="year-list">{state?.years.map(row => <li key={row.id}><div><strong>{row.year}</strong><span>{row.status} · application completion</span></div>
             <div className="year-actions"><button disabled={busy} onClick={() => open(row.id)}>Open {row.year}</button>
               <button type="button" className="text-button year-delete" disabled={busy}
                 aria-label={`Delete year ${row.year}`} onClick={() => { setYearDeleteError(null); setDeletingYear(row); }}>Delete</button></div></li>)}</ul>
@@ -235,23 +291,18 @@ export function App({ operations }: { operations: DesktopOperations }) {
           {!pkg.activities.length && <p>Record an activity and connect it to a goal, or keep it supplementary.</p>}</div>
           <button className="secondary" onClick={() => navigate('plan')}>View development plan</button></div>
         </div><p className="board-footer">Evidence and reflection will stay with each activity, never with its links.</p></section>
-          <aside className="map-checklist"><h2>Close the annual loop</h2><p>Work freely. Complete deliberately.</p>
-            <ul>{destinations.slice(1, 4).map(item => {
-              const readiness = item.screen === 'assessment' ? evaluateAssessmentReadiness(pkg) : item.screen === 'plan'
-                ? evaluatePlanReadiness(pkg, undefined, readableEvidenceActivityIds) : null;
-              return <li key={item.screen}><button className="text-button" onClick={() => navigate(item.screen)}>{item.name}</button>
-                <small>{readiness?.ready ? 'Ready' : 'In progress'} · manual completion not yet available</small>
-                {readiness && !readiness.ready && <ul>{readiness.missing.map(missing => <li key={missing}><small>{missing}</small></li>)}</ul>}
-              </li>;
-            })}</ul>
-            <p>External declaration and annual export are not available yet. This build does not report annual completion.</p>
-          </aside></div></>}
-      {screen === 'assessment' && pkg && <AssessmentScreen pkg={pkg} session={session} operations={operations} />}
+          {workflow && <AnnualWorkflowPanel pkg={pkg} workflow={workflow} busy={busy} navigate={navigate}
+            complete={complete} declare={openDeclaration} exportInfo={() => void run(async () => setExportInfo(true))} />}
+          </div></>}
+      {screen === 'assessment' && pkg && <AssessmentScreen pkg={pkg} session={session} operations={operations}
+        complete={() => complete('assessment')} busy={busy} />}
       {screen === 'plan' && pkg && <PlanScreen key={pkg.id} pkg={pkg} session={session} operations={operations}
         selectedId={selectedActivityId} select={setSelectedActivityId} recordRequested={recordRequested} clearRecordRequest={() => setRecordRequested(false)}
         evidence={packageEvidence} evidenceError={evidenceErrors[pkg.id] ?? ''}
-        evidenceLoaded={Object.hasOwn(evidenceByPackage, pkg.id)} refreshEvidence={() => refreshEvidence(pkg.id)} reportError={setError} />}
-      {screen === 'review' && pkg && <Review packageId={pkg.id} year={pkg.year} operations={operations} session={reviewSession} />}
+        evidenceLoaded={Object.hasOwn(evidenceByPackage, pkg.id)} refreshEvidence={() => refreshEvidence(pkg.id)} reportError={setError}
+        complete={() => complete('plan')} busy={busy} />}
+      {screen === 'review' && pkg && workflow && <Review packageId={pkg.id} year={pkg.year} operations={operations} session={reviewSession}
+        feedback={workflow.steps.review} complete={() => complete('review')} busy={busy} />}
       {screen === 'backup' && <><div className="page-heading"><h1>Protect your portfolio.</h1><p>Full-app backup and restore are distinct from annual exports.</p></div>
         <section className="surface"><h2>Local storage</h2><p className="storage-path">{state?.storageDirectory}</p>
           <p>Full backup and restore are not available in this foundation build. Until available, quit SWCC after Saved and preserve a copy of the entire dataset folder, including database and evidence. Never copy a database while SWCC is running.</p>
@@ -265,6 +316,13 @@ export function App({ operations }: { operations: DesktopOperations }) {
         <div className="goal-dialog-actions"><button type="button" className="secondary" disabled={busy}
           onClick={() => { setDeletingYear(null); setYearDeleteError(null); }}>Keep year</button>
           <button type="button" className="danger" disabled={busy} onClick={() => void deleteYear()}>Delete {deletingYear.year} year package</button></div>
+      </Dialog>}
+      {declaring && pkg && workflow && <DeclarationDialog pkg={pkg} busy={busy}
+        incomplete={ANNUAL_STEPS.some(step => workflow.steps[step].status !== 'Completed')}
+        save={saveDeclaration} close={() => setDeclaring(false)} />}
+      {exportInfo && <Dialog title="Annual export information" onClose={() => setExportInfo(false)}>
+        <p>Annual Forms PDF and Complete Portfolio ZIP are not implemented in this build. No export file has been created.</p>
+        <p>When available, annual exports will remain accessible for incomplete packages after a draft warning. A portfolio export is not a restorable full-app backup.</p>
       </Dialog>}
       {state && <footer className="source-note"><strong>Supplied baseline, not regulatory verification.</strong><p>The ethics document is Second Edition, amended September 2018. The assessment tool references Third Edition / 2023. The same fixed source set applies to every year; SWCC does not verify current-year College compliance.</p></footer>}
     </main></div>

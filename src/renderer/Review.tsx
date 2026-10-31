@@ -1,15 +1,16 @@
-import { useEffect, useSyncExternalStore } from 'react';
+import { useSyncExternalStore } from 'react';
 import { CheckCircle2, Circle } from 'lucide-react';
 import type { DesktopOperations } from '../shared/application.js';
 import { PdfReader } from './PdfReader.js';
 import { ReviewSession } from './review-session.js';
+import type { StepFeedback } from '../shared/workflow.js';
 
-export function Review({ packageId, year, operations, session }: {
+export function Review({ packageId, year, operations, session, feedback, complete, busy }: {
   packageId: string; year: number; operations: DesktopOperations; session: ReviewSession;
+  feedback: StepFeedback; complete: () => void; busy: boolean;
 }) {
   const snapshot = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const state = snapshot.record?.packageId === packageId ? snapshot.record : null;
-  useEffect(() => { void session.open(packageId).catch(() => {}); }, [packageId, session]);
   return <>
     <div className="page-heading"><h1>Review the standards.</h1><p>{year} · Supplied Second Edition, amended September 7, 2018. Resume, browse, or revisit any section.</p></div>
     {snapshot.error && <section className="error-panel" role="alert"><p>{snapshot.error}</p>
@@ -18,7 +19,7 @@ export function Review({ packageId, year, operations, session }: {
     </section>}
     {!state && <p role="status">Opening this year’s review…</p>}
     {state && <div className="review-layout"><aside className="review-sections">
-      <h2>Section checklist</h2><p className="quiet">Every mapped page must appear in the active reader. Checks are automatic; manual step completion is not available yet.</p>
+      <h2>Section checklist</h2><p className="quiet">Every mapped page must appear in the active reader. Checks are automatic; step completion needs your manual confirmation.</p>
       <div className="review-list">{state.readiness.sections.map(section => <div className="review-row" key={section.id}>
         <button type="button" className={section.pages.some(page => page === state.page) ? 'reading' : ''}
           aria-label={`${section.label} — ${section.checked ? 'reviewed' : 'not reviewed'}`}
@@ -37,9 +38,13 @@ export function Review({ packageId, year, operations, session }: {
         {state.resourcesLaunchedAt && <><p className="resources-checked">✓ Default-browser launch recorded: <time dateTime={state.resourcesLaunchedAt}>{new Date(state.resourcesLaunchedAt).toLocaleString()}</time></p>
           <button className="text-button" disabled={snapshot.status === 'Saving'} onClick={() => session.resetResources()}>Reset resources action</button></>}
       </section>
-      <section className="review-readiness" aria-label="Step 1 application readiness"><h3>Step 1 · {state.readiness.ready ? 'Ready' : 'In progress'}</h3>
-        {state.readiness.ready ? <p>Ready for manual confirmation in a later build; not marked Completed.</p>
+      <section className="review-readiness" aria-label="Step 1 application readiness"><h3>Step 1 · <span role="status" aria-label="Step 1 readiness">{feedback.status}</span></h3>
+        {state.readiness.ready ? <p>{feedback.status === 'Completed' ? 'You manually confirmed this step. Ordinary rereading does not reopen it.' : 'Ready for your manual confirmation; not marked Completed.'}</p>
           : <ul>{state.readiness.missing.map(item => <li key={item}>{item}</li>)}</ul>}
+        <button type="button" className="secondary" disabled={busy} aria-label="Complete Step 1" onClick={complete}>
+          {feedback.status === 'Completed' ? 'Confirm Step 1 again' : 'Complete Step 1'}
+        </button>
+        <p>Application readiness is not College compliance.</p>
       </section>
     </aside><PdfReader key={packageId} operations={operations} position={state} onPosition={(page, offset, zoom) => session.move(page, offset, zoom)} onVisit={page => session.visit(page)} /></div>}
   </>;

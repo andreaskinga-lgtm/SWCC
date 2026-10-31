@@ -4,8 +4,9 @@ import { goalsMigration } from './goals-migration.js';
 import { reviewMigration } from './review-migration.js';
 import { activitiesMigration } from './activities-migration.js';
 import { evidenceMigration } from './evidence-migration.js';
+import { completionMigration } from './completion-migration.js';
 
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 const migrations = [
   `
   CREATE TABLE year_packages (
@@ -44,6 +45,7 @@ const migrations = [
   reviewMigration,
   activitiesMigration,
   evidenceMigration,
+  completionMigration,
 ];
 
 export function migrate(db: Database.Database) {
@@ -63,6 +65,7 @@ export function migrate(db: Database.Database) {
         db.exec(goalsMigration);
         db.exec(activitiesMigration);
         db.exec(evidenceMigration);
+        db.exec(completionMigration);
         db.pragma(`user_version = ${SCHEMA_VERSION}`);
         return;
       }

@@ -110,6 +110,8 @@ if (startupFailure) {
       });
       const operations = application.operations;
       const channels: Record<string, keyof ApplicationOperations> = {
+        'swcc:get-workflow': 'getWorkflow', 'swcc:complete-step': 'completeStep',
+        'swcc:record-declaration': 'recordDeclaration',
         'swcc:get-state': 'getState', 'swcc:create-year': 'createYear', 'swcc:open-year': 'openYear',
         'swcc:save-draft': 'saveDraft', 'swcc:create-goal': 'createGoal', 'swcc:update-goal': 'updateGoal',
         'swcc:delete-goal': 'deleteGoal', 'swcc:acknowledge-storage': 'acknowledgeStorage',

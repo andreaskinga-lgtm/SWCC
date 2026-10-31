@@ -8,6 +8,9 @@ async function invoke<T>(channel: string, input?: unknown): Promise<Result<T>> {
   }
 }
 const operations: DesktopOperations = {
+  getWorkflow: id => invoke('swcc:get-workflow', id),
+  completeStep: input => invoke('swcc:complete-step', input),
+  recordDeclaration: input => invoke('swcc:record-declaration', input),
   getState: () => invoke('swcc:get-state'),
   createYear: year => invoke('swcc:create-year', year),
   openYear: id => invoke('swcc:open-year', id),
