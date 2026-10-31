@@ -4,7 +4,7 @@
 
 **Blocked by:** 01: Open an offline desktop app and retain year drafts.
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 - [ ] Render the complete supplied 48-page PDF with locally bundled PDF.js worker/assets. Provide C's section checklist beside the reader, page/section navigation, zoom, and persisted page/position/zoom per package/document.
 - [ ] Use physical pages, cover as page 1: Code of Ethics 2; Meaning of Client 4; Social Work scope 7; Social Service Work scope 8; Principles I 9-10, II 11-15, III 16-18, IV 19-26, V 27-31, VI 32-33, VII 34-37, VIII 38-40.

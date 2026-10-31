@@ -4,7 +4,7 @@
 
 **Blocked by:** 01: Open an offline desktop app and retain year drafts.
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 - [ ] Provide C's self-assessment composition: date, strengths, learning needs/interests, optional peer feedback, and annual standard choices in the writing area, with shared goals and readable readiness alongside.
 - [ ] Persist all twelve annual standard choices: Code of Ethics, Meaning of Client, both scopes of practice, and Principles I-VIII. Standards belong only to the annual assessment; goals have no standard relationship.
