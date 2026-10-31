@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
-  closeSync, createReadStream, createWriteStream, existsSync, fsyncSync, mkdirSync, openSync,
-  readSync, renameSync, statSync, unlinkSync,
+  closeSync, createReadStream, createWriteStream, fsyncSync, lstatSync, mkdirSync, openSync,
+  readFileSync, readSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync,
 } from 'node:fs';
-import { basename, extname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type Database from 'better-sqlite3';
@@ -59,6 +59,33 @@ export interface EvidenceSystem {
   chooseFile?: (selection: EvidenceSelection) => Promise<string | null>;
   openPath?: (managedPath: string) => Promise<string>;
   copyToTemporary?: (sourcePath: string, temporaryPath: string, maximumBytes: number) => Promise<CopyResult>;
+  moveManagedFile?: (sourcePath: string, destinationPath: string) => void;
+  removeDeletionStage?: (directory: string) => void;
+}
+
+interface DeletionEntry {
+  id: string;
+  activityId: string;
+  referenceNumber: number;
+  managedPath: string;
+}
+
+interface DeletionManifest {
+  version: 1;
+  packageId: string;
+  year: number;
+  entries: DeletionEntry[];
+}
+
+export interface EvidenceDeletionStage {
+  directory: string;
+  manifest: DeletionManifest;
+}
+
+export class EvidenceCleanupFailure extends Error {
+  constructor(message: string, readonly recoveryPath: string | undefined) {
+    super(message);
+  }
 }
 
 export interface EvidenceOperations {
@@ -66,6 +93,9 @@ export interface EvidenceOperations {
   importEvidence(input: EvidenceRequest): Promise<EvidenceImportOutcome>;
   replaceEvidence(input: ReplaceEvidenceRequest): Promise<EvidenceImportOutcome>;
   removeEvidence(input: RemoveEvidenceRequest): YearPackage;
+  stageDeletion(packageId: string, year: number, activityId?: string, evidenceId?: string): EvidenceDeletionStage | null;
+  rollbackDeletion(stage: EvidenceDeletionStage | null): void;
+  finalizeDeletion(stage: EvidenceDeletionStage | null): void;
   previewEvidence(input: EvidenceActionRequest): EvidencePreview;
   openEvidence(input: EvidenceActionRequest): Promise<void>;
   readableActivityIds(packageId: string): ReadonlySet<string>;
@@ -86,6 +116,57 @@ function errorCode(error: unknown): string | undefined {
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function existingPath(path: string): boolean {
+  try { lstatSync(path); return true; }
+  catch (error) {
+    if (errorCode(error) === 'ENOENT' || errorCode(error) === 'ENOTDIR') return false;
+    throw error;
+  }
+}
+
+function deletionManifest(value: unknown, directory: string, evidenceRoot: string): DeletionManifest {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('The deletion recovery manifest is invalid.');
+  const manifest = value as Record<string, unknown>;
+  if (manifest.version !== 1 || typeof manifest.packageId !== 'string'
+    || !/^[\da-f-]{36}$/i.test(manifest.packageId) || !Number.isInteger(manifest.year)
+    || (manifest.year as number) < 1 || (manifest.year as number) > 9999 || !Array.isArray(manifest.entries))
+    throw new Error('The deletion recovery manifest is invalid.');
+  const entries: DeletionEntry[] = [];
+  const ids = new Set<string>();
+  const paths = new Set<string>();
+  for (const value of manifest.entries) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('The deletion recovery manifest has an invalid evidence entry.');
+    const entry = value as Record<string, unknown>;
+    if (typeof entry.id !== 'string' || !/^[\da-f-]{36}$/i.test(entry.id)
+      || typeof entry.activityId !== 'string' || !/^[\da-f-]{36}$/i.test(entry.activityId)
+      || !Number.isSafeInteger(entry.referenceNumber) || (entry.referenceNumber as number) < 1
+      || typeof entry.managedPath !== 'string' || !entry.managedPath.startsWith(`${manifest.year}/`)
+      || managedRelativePath(entry.managedPath, directory) === null
+      || managedRelativePath(entry.managedPath, evidenceRoot) === null
+      || ids.has(entry.id) || paths.has(entry.managedPath)) {
+      throw new Error('The deletion recovery manifest has an unsafe or duplicate evidence entry.');
+    }
+    ids.add(entry.id);
+    paths.add(entry.managedPath);
+    entries.push({
+      id: entry.id, activityId: entry.activityId,
+      referenceNumber: entry.referenceNumber as number, managedPath: entry.managedPath,
+    });
+  }
+  if (!entries.length) throw new Error('The deletion recovery manifest contains no evidence entries.');
+  return { version: 1, packageId: manifest.packageId, year: manifest.year as number, entries };
+}
+
+function managedRelativePath(managedPath: string, base: string): string | null {
+  if (!managedPath || isAbsolute(managedPath) || managedPath.includes('\\') || managedPath.includes('\0')) return null;
+  const parts = managedPath.split('/');
+  if (parts.some(part => !part || part === '.' || part === '..')) return null;
+  const path = resolve(base, ...parts);
+  const relativePath = relative(base, path);
+  if (!relativePath || relativePath === '..' || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath)) return null;
+  return path;
 }
 
 function copyAndHash(sourcePath: string, temporaryPath: string, maximumBytes: number): Promise<CopyResult> {
@@ -159,6 +240,51 @@ function asEntry(row: EvidenceRow, integrity: EvidenceIntegrity): EvidenceAttach
     importedAt: row.importedAt,
     integrity,
   };
+}
+
+export function recoverEvidenceDeletions(db: Database.Database, evidenceRoot: string) {
+  const root = resolve(evidenceRoot);
+  for (const candidate of readdirSync(root, { withFileTypes: true })) {
+    if (!candidate.name.startsWith('.deletion-')) continue;
+    const directory = resolve(root, candidate.name);
+    if (!/^\.deletion-[\da-f-]{36}$/i.test(candidate.name) || !candidate.isDirectory())
+      throw new Error(`An unexpected evidence deletion recovery entry requires attention: ${directory}`);
+    const manifestPath = resolve(directory, 'manifest.json');
+    if (!existingPath(manifestPath)) {
+      rmSync(directory, { recursive: true });
+      continue;
+    }
+    let manifest: DeletionManifest;
+    try {
+      manifest = deletionManifest(JSON.parse(readFileSync(manifestPath, 'utf8')), directory, root);
+    } catch (error) {
+      throw new Error(`The deletion recovery state at ${directory} is invalid. Preserve this folder and seek recovery help. ${messageOf(error)}`);
+    }
+    const present = manifest.entries.filter(entry => db.prepare(`SELECT 1 FROM evidence_attachments
+      WHERE id = ? AND package_id = ? AND activity_id = ? AND managed_path = ?`)
+      .get(entry.id, manifest.packageId, entry.activityId, entry.managedPath)).length;
+    if (present !== 0 && present !== manifest.entries.length)
+      throw new Error(`The deletion recovery state at ${directory} does not match the saved evidence records. Preserve this folder and seek recovery help.`);
+    if (present === manifest.entries.length) {
+      for (const entry of manifest.entries) {
+        const stagedPath = managedRelativePath(entry.managedPath, directory);
+        const originalPath = managedRelativePath(entry.managedPath, root);
+        if (!stagedPath || !originalPath) throw new Error(`The deletion recovery state at ${directory} contains an unsafe path.`);
+        const stagedExists = existingPath(stagedPath);
+        const originalExists = existingPath(originalPath);
+        if (stagedExists && originalExists)
+          throw new Error(`The recovery copy for E${entry.referenceNumber} conflicts with its managed file. Preserve ${directory} and seek recovery help.`);
+        if (stagedExists) {
+          mkdirSync(dirname(originalPath), { recursive: true, mode: 0o700 });
+          renameSync(stagedPath, originalPath);
+        }
+      }
+    }
+    try { rmSync(directory, { recursive: true }); }
+    catch (error) {
+      throw new Error(`Evidence deletion recovery could not clear ${directory}. Preserve this folder and retry. ${messageOf(error)}`);
+    }
+  }
 }
 
 export function evidenceOperations(
@@ -441,19 +567,12 @@ export function evidenceOperations(
   function removeEvidence(input: RemoveEvidenceRequest): YearPackage {
     const request = validateMutation(input, ['packageId', 'activityId', 'evidenceId', 'expectedRevision']) as unknown as RemoveEvidenceRequest;
     identifier(request.evidenceId);
-    assertCurrentPackage(request.packageId, request.activityId, request.expectedRevision);
+    const { pkg } = assertCurrentPackage(request.packageId, request.activityId, request.expectedRevision);
     const existing = rowFor(request);
-    const originalPath = managedFilePath(existing.managedPath);
-    const tombstone = originalPath ? `${originalPath}.remove-${randomUUID()}` : null;
-    let moved = false;
-    if (originalPath && existsSync(originalPath)) {
-      try { renameSync(originalPath, tombstone!); moved = true; }
-      catch (error) {
-        fail('STORAGE', `SWCC could not remove ${`E${existing.referenceNumber}`} from managed storage. Check folder permissions and retry. ${messageOf(error)}`);
-      }
-    }
+    const staged = stageDeletion(request.packageId, pkg.year, request.activityId, request.evidenceId);
+    let removed: YearPackage;
     try {
-      const removed = db.transaction(() => {
+      removed = db.transaction(() => {
         const { activity } = assertCurrentPackage(request.packageId, request.activityId, request.expectedRevision);
         rowFor(request);
         const result = db.prepare('DELETE FROM evidence_attachments WHERE id = ? AND package_id = ? AND activity_id = ?')
@@ -462,15 +581,115 @@ export function evidenceOperations(
         advanceEvidenceRevision(request.packageId, activity.id, now());
         return getPackage(request.packageId);
       }).immediate();
-      if (moved) {
-        try { removeFile(tombstone!); } catch { /* The record is removed; leftover bytes are not exposed to the renderer. */ }
-      }
-      return removed;
     } catch (error) {
-      if (moved && tombstone && originalPath && existsSync(tombstone)) {
-        try { renameSync(tombstone, originalPath); } catch { /* Preserve the original transaction error. */ }
+      try { rollbackDeletion(staged); }
+      catch (recoveryError) {
+        throw new Error(`Evidence removal failed and its managed file could not be fully restored. The evidence record remains. Preserve the recovery folder at ${staged?.directory ?? root}. ${messageOf(error)} ${messageOf(recoveryError)}`);
       }
       throw error;
+    }
+    try { finalizeDeletion(staged); }
+    catch (error) {
+      throw new EvidenceCleanupFailure(
+        `${messageOf(error)} E${existing.referenceNumber} was removed from the database, but recoverable managed files remain.`,
+        staged?.directory,
+      );
+    }
+    return removed;
+  }
+
+  function moveManagedFile(sourcePath: string, destinationPath: string) {
+    (system.moveManagedFile ?? renameSync)(sourcePath, destinationPath);
+  }
+
+  function removeDeletionStage(directory: string) {
+    if (system.removeDeletionStage) system.removeDeletionStage(directory);
+    else rmSync(directory, { recursive: true });
+  }
+
+  function stagedFilePath(stage: EvidenceDeletionStage, managedPath: string): string {
+    const path = managedRelativePath(managedPath, stage.directory);
+    if (!path) fail('EVIDENCE', 'An evidence record has an unsafe managed path. Preserve the dataset and seek recovery help.');
+    return path;
+  }
+
+  function restoreStagedFiles(stage: EvidenceDeletionStage) {
+    for (const entry of [...stage.manifest.entries].reverse()) {
+      const stagedPath = stagedFilePath(stage, entry.managedPath);
+      if (!existingPath(stagedPath)) continue;
+      const originalPath = managedFilePath(entry.managedPath);
+      if (!originalPath) fail('EVIDENCE', `E${entry.referenceNumber} has an unsafe managed path. Preserve the dataset and seek recovery help.`);
+      if (existingPath(originalPath)) throw new Error(`The original location for E${entry.referenceNumber} is occupied.`);
+      mkdirSync(dirname(originalPath), { recursive: true, mode: 0o700 });
+      moveManagedFile(stagedPath, originalPath);
+    }
+  }
+
+  function stageDeletion(packageId: string, year: number, activityId?: string, evidenceId?: string): EvidenceDeletionStage | null {
+    const rows = (evidenceId
+      ? db.prepare(`${rowSelect} WHERE package_id = ? AND activity_id = ? AND id = ? ORDER BY reference_number`)
+        .all(packageId, activityId, evidenceId)
+      : activityId
+        ? db.prepare(`${rowSelect} WHERE package_id = ? AND activity_id = ? ORDER BY reference_number`)
+          .all(packageId, activityId)
+        : db.prepare(`${rowSelect} WHERE package_id = ? ORDER BY reference_number`).all(packageId)) as EvidenceRow[];
+    if (!rows.length) return null;
+    const entries = rows.map(row => {
+      if (!row.managedPath.startsWith(`${year}/`) || !managedFilePath(row.managedPath))
+        fail('EVIDENCE', `E${row.referenceNumber} has an unsafe managed location. Preserve the dataset and seek recovery help.`);
+      return {
+        id: row.id, activityId: row.activityId, referenceNumber: row.referenceNumber, managedPath: row.managedPath,
+      };
+    });
+    const stage: EvidenceDeletionStage = {
+      directory: resolve(root, `.deletion-${randomUUID()}`),
+      manifest: { version: 1, packageId, year, entries },
+    };
+    try {
+      mkdirSync(stage.directory, { mode: 0o700 });
+      const partialManifest = resolve(stage.directory, 'manifest.json.partial');
+      writeFileSync(partialManifest, JSON.stringify(stage.manifest), { flag: 'wx', mode: 0o600 });
+      const descriptor = openSync(partialManifest, 'r+');
+      try { fsyncSync(descriptor); }
+      finally { closeSync(descriptor); }
+      moveManagedFile(partialManifest, resolve(stage.directory, 'manifest.json'));
+      for (const entry of stage.manifest.entries) {
+        const originalPath = managedFilePath(entry.managedPath);
+        if (!originalPath) fail('EVIDENCE', `E${entry.referenceNumber} has an unsafe managed location. Preserve the dataset and seek recovery help.`);
+        let metadata;
+        try { metadata = lstatSync(originalPath); }
+        catch (error) {
+          if (errorCode(error) === 'ENOENT' || errorCode(error) === 'ENOTDIR') continue;
+          throw error;
+        }
+        if (metadata.isDirectory()) throw new Error(`E${entry.referenceNumber} points to a directory, not a managed evidence file.`);
+        const stagedPath = stagedFilePath(stage, entry.managedPath);
+        mkdirSync(dirname(stagedPath), { recursive: true, mode: 0o700 });
+        moveManagedFile(originalPath, stagedPath);
+      }
+      return stage;
+    } catch (error) {
+      try {
+        restoreStagedFiles(stage);
+        removeDeletionStage(stage.directory);
+      } catch (recoveryError) {
+        throw new Error(`SWCC could not stage evidence for deletion, and could not restore every managed file. Records were not deleted. Preserve the recoverable files at ${stage.directory}. ${messageOf(error)} ${messageOf(recoveryError)}`);
+      }
+      throw new Error(`SWCC could not stage managed evidence for deletion. Records were not deleted. ${messageOf(error)}`);
+    }
+  }
+
+  function rollbackDeletion(stage: EvidenceDeletionStage | null) {
+    if (!stage) return;
+    restoreStagedFiles(stage);
+    removeDeletionStage(stage.directory);
+  }
+
+  function finalizeDeletion(stage: EvidenceDeletionStage | null) {
+    if (!stage) return;
+    try { removeDeletionStage(stage.directory); }
+    catch (error) {
+      throw new Error(`Managed evidence records were deleted, but their recoverable staging folder could not be cleared. Preserve ${stage.directory} and restart SWCC or contact support. ${messageOf(error)}`);
     }
   }
 
@@ -496,6 +715,9 @@ export function evidenceOperations(
     importEvidence,
     replaceEvidence,
     removeEvidence: input => removeEvidence(input),
+    stageDeletion,
+    rollbackDeletion,
+    finalizeDeletion,
     previewEvidence: input => {
       const { row, bytes } = checkedRow(input, true);
       const mediaType = previewTypes[row.type];

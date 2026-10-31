@@ -120,10 +120,12 @@ export interface AppState {
   lastBackupRevision: number | null;
 }
 export interface OperationError {
-  code: 'VALIDATION' | 'DUPLICATE_YEAR' | 'NOT_FOUND' | 'CONFLICT' | 'STORAGE' | 'IPC' | 'BROWSER' | 'INACTIVE'
+  code: 'VALIDATION' | 'DUPLICATE_YEAR' | 'NOT_FOUND' | 'CONFLICT' | 'STORAGE' | 'IPC' | 'BROWSER' | 'INACTIVE' | 'CONFIRMATION_REQUIRED'
     | 'UNSUPPORTED_FILE' | 'FILE_TOO_LARGE' | 'UNREADABLE' | 'EVIDENCE' | 'OPEN';
   message: string;
   existingPackageId?: string;
+  committed?: boolean;
+  recoveryPath?: string;
 }
 export type Result<T> = { ok: true; value: T } | { ok: false; error: OperationError };
 export interface SaveDraft {
@@ -149,6 +151,18 @@ export interface DeleteGoal {
   packageId: string;
   goalId: string;
   expectedRevision: number;
+  confirmed: true;
+}
+export interface DeleteActivity {
+  packageId: string;
+  activityId: string;
+  expectedRevision: number;
+  confirmed: true;
+}
+export interface DeleteYear {
+  packageId: string;
+  expectedRevision: number;
+  confirmed: true;
 }
 export interface YearPackage extends Draft {
   id: string;
@@ -173,6 +187,8 @@ export interface ApplicationOperations extends ReviewOperations {
   deleteGoal(input: DeleteGoal): Promise<Result<YearPackage>>;
   createActivity(input: CreateActivity): Promise<Result<YearPackage>>;
   updateActivity(input: UpdateActivity): Promise<Result<YearPackage>>;
+  deleteActivity(input: DeleteActivity): Promise<Result<YearPackage>>;
+  deleteYear(input: DeleteYear): Promise<Result<AppState>>;
   getPlanReadiness(packageId: string): Promise<Result<import('./plan.js').PlanReadiness>>;
   openEvidenceLink(input: { packageId: string; activityId: string; url: string }): Promise<Result<void>>;
   getEvidence(packageId: string): Promise<Result<EvidenceAttachment[]>>;

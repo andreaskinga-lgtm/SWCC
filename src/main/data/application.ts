@@ -3,8 +3,8 @@ import { mkdirSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { ANNUAL_STANDARDS, localDate, SOURCE_SET_ID, validDate } from '../../shared/application.js';
 import type {
-  AnnualStandardId, ApplicationOperations, AppState, CreateGoal, DeleteGoal, Draft, Goal,
-  OperationError, Result, SaveDraft, UpdateGoal, YearPackage,
+  AnnualStandardId, ApplicationOperations, AppState, CreateGoal, DeleteActivity, DeleteGoal, DeleteYear,
+  Draft, Goal, OperationError, Result, SaveDraft, UpdateGoal, YearPackage,
 } from '../../shared/application.js';
 import { migrate, SCHEMA_VERSION } from './migrations.js';
 import { storageLayout } from './storage.js';
@@ -12,7 +12,7 @@ import { reviewOperations } from './review.js';
 import type { ReviewSystem } from './review.js';
 import { activityOperations, getActivities } from './activities.js';
 import { evaluatePlanReadiness, validEvidenceLink } from '../../shared/plan.js';
-import { evidenceOperations } from './evidence.js';
+import { evidenceOperations, EvidenceCleanupFailure, recoverEvidenceDeletions } from './evidence.js';
 import type { EvidenceSystem } from './evidence.js';
 
 class ApplicationFailure extends Error {
@@ -63,8 +63,18 @@ function validateUpdateGoal(input: UpdateGoal) {
   if (request.description !== undefined && typeof request.description !== 'string') fail('VALIDATION', 'The learning-goal description must be text.');
 }
 function validateDeleteGoal(input: DeleteGoal) {
-  const request = validateGoalRequest(input, ['packageId', 'goalId', 'expectedRevision']);
+  const request = validateGoalRequest(input, ['packageId', 'goalId', 'expectedRevision', 'confirmed']);
+  if (request.confirmed !== true) fail('CONFIRMATION_REQUIRED', 'Confirm this goal deletion before continuing.');
   identifier(request.goalId);
+}
+function validateDeleteActivity(input: DeleteActivity) {
+  const request = validateGoalRequest(input, ['packageId', 'activityId', 'expectedRevision', 'confirmed']);
+  if (request.confirmed !== true) fail('CONFIRMATION_REQUIRED', 'Confirm this activity and its evidence deletion before continuing.');
+  identifier(request.activityId);
+}
+function validateDeleteYear(input: DeleteYear) {
+  const request = validateGoalRequest(input, ['packageId', 'expectedRevision', 'confirmed']);
+  if (request.confirmed !== true) fail('CONFIRMATION_REQUIRED', 'Confirm this year package and its managed evidence deletion before continuing.');
 }
 
 export function openApplication(
@@ -90,6 +100,7 @@ export function openApplication(
     db.pragma('journal_mode = WAL');
     db.pragma('synchronous = FULL');
     mkdirSync(paths.evidence, { recursive: true });
+    recoverEvidenceDeletions(db, paths.evidence);
   } catch (error) {
     db?.close();
     throw new Error(`Cannot open local records: ${error instanceof Error ? error.message : String(error)} The existing dataset has not been replaced.`, { cause: error });
@@ -126,6 +137,11 @@ export function openApplication(
       .run(timestamp, packageId);
     database.prepare('UPDATE app_metadata SET data_revision = data_revision + 1 WHERE id = 1').run();
   }
+  function advanceActivityRevisions(packageId: string, timestamp: string) {
+    database.prepare(`UPDATE year_packages SET content_revision = content_revision + 1,
+      plan_revision = plan_revision + 1, updated_at = ? WHERE id = ?`).run(timestamp, packageId);
+    database.prepare('UPDATE app_metadata SET data_revision = data_revision + 1 WHERE id = 1').run();
+  }
   function state(): AppState {
     const meta = database.prepare(`SELECT selected_package_id AS selectedPackageId, acknowledged_at AS acknowledgedAt,
       data_revision AS dataRevision, last_backup_at AS lastBackupAt, last_backup_revision AS lastBackupRevision FROM app_metadata WHERE id = 1`)
@@ -144,6 +160,10 @@ export function openApplication(
   async function operation<T>(work: () => T | Promise<T>): Promise<Result<T>> {
     try { return { ok: true, value: await work() }; }
     catch (error) {
+      if (error instanceof EvidenceCleanupFailure) return {
+        ok: false,
+        error: { code: 'STORAGE', message: error.message, committed: true, recoveryPath: error.recoveryPath },
+      };
       return { ok: false, error: error instanceof ApplicationFailure ? error.detail : {
         code: 'STORAGE',
         message: `Local records could not be saved or read: ${error instanceof Error ? error.message : String(error)}. Keep this window open, check available disk space and folder permissions, then retry.`,
@@ -275,6 +295,90 @@ export function openApplication(
       advanceGoalRevisions(input.packageId, now());
       return getPackage(input.packageId);
     }).immediate()),
+    deleteActivity: input => operation(() => {
+      validateDeleteActivity(input);
+      const before = getPackage(input.packageId);
+      if (before.contentRevision !== input.expectedRevision) fail('CONFLICT', 'This package changed before activity deletion. Preserve your edits and retry after saving the current year.');
+      const activity = before.activities.find(item => item.id === input.activityId);
+      if (!activity) fail('NOT_FOUND', 'This activity no longer exists in this year.');
+      const staged = evidence.stageDeletion(input.packageId, before.year, activity.id);
+      let updated: YearPackage;
+      try {
+        updated = database.transaction(() => {
+          const current = getPackage(input.packageId);
+          if (current.contentRevision !== input.expectedRevision) fail('CONFLICT', 'This package changed before activity deletion. Preserve your edits and retry after saving the current year.');
+          if (!current.activities.some(item => item.id === input.activityId)) fail('NOT_FOUND', 'This activity no longer exists in this year.');
+          const deleted = database.prepare('DELETE FROM learning_activities WHERE id = ? AND package_id = ?')
+            .run(input.activityId, input.packageId);
+          if (!deleted.changes) fail('NOT_FOUND', 'This activity no longer exists in this year.');
+          advanceActivityRevisions(input.packageId, now());
+          return getPackage(input.packageId);
+        }).immediate();
+      } catch (error) {
+        try { evidence.rollbackDeletion(staged); }
+        catch (recoveryError) {
+          throw new ApplicationFailure({
+            code: 'STORAGE',
+            message: `Activity deletion failed and its managed evidence could not be fully restored. The activity record remains. Preserve the recovery folder at ${staged?.directory ?? paths.evidence}. ${error instanceof Error ? error.message : String(error)} ${recoveryError instanceof Error ? recoveryError.message : String(recoveryError)}`,
+            recoveryPath: staged?.directory,
+          });
+        }
+        throw error;
+      }
+      try { evidence.finalizeDeletion(staged); }
+      catch (error) {
+        throw new ApplicationFailure({
+          code: 'STORAGE',
+          message: error instanceof Error ? error.message : String(error),
+          committed: true,
+          recoveryPath: staged?.directory,
+        });
+      }
+      return updated;
+    }),
+    deleteYear: input => operation(() => {
+      validateDeleteYear(input);
+      const before = getPackage(input.packageId);
+      if (before.contentRevision !== input.expectedRevision) fail('CONFLICT', 'This package changed before year deletion. Preserve your edits and retry after saving the current year.');
+      const staged = evidence.stageDeletion(input.packageId, before.year);
+      let updated: AppState;
+      try {
+        updated = database.transaction(() => {
+          const current = getPackage(input.packageId);
+          if (current.contentRevision !== input.expectedRevision) fail('CONFLICT', 'This package changed before year deletion. Preserve your edits and retry after saving the current year.');
+          const metadata = database.prepare('SELECT selected_package_id AS selectedPackageId FROM app_metadata WHERE id = 1')
+            .get() as { selectedPackageId: string | null };
+          const selectedPackageId = metadata.selectedPackageId === input.packageId
+            ? (database.prepare('SELECT id FROM year_packages WHERE id != ? ORDER BY year DESC LIMIT 1').get(input.packageId) as { id: string } | undefined)?.id ?? null
+            : metadata.selectedPackageId;
+          database.prepare('UPDATE app_metadata SET selected_package_id = ?, data_revision = data_revision + 1 WHERE id = 1')
+            .run(selectedPackageId);
+          const deleted = database.prepare('DELETE FROM year_packages WHERE id = ?').run(input.packageId);
+          if (!deleted.changes) fail('NOT_FOUND', 'This year package no longer exists.');
+          return state();
+        }).immediate();
+      } catch (error) {
+        try { evidence.rollbackDeletion(staged); }
+        catch (recoveryError) {
+          throw new ApplicationFailure({
+            code: 'STORAGE',
+            message: `Year deletion failed and its managed evidence could not be fully restored. The year package remains. Preserve the recovery folder at ${staged?.directory ?? paths.evidence}. ${error instanceof Error ? error.message : String(error)} ${recoveryError instanceof Error ? recoveryError.message : String(recoveryError)}`,
+            recoveryPath: staged?.directory,
+          });
+        }
+        throw error;
+      }
+      try { evidence.finalizeDeletion(staged); }
+      catch (error) {
+        throw new ApplicationFailure({
+          code: 'STORAGE',
+          message: error instanceof Error ? error.message : String(error),
+          committed: true,
+          recoveryPath: staged?.directory,
+        });
+      }
+      return updated;
+    }),
     acknowledgeStorage: () => operation(() => {
       database.prepare('UPDATE app_metadata SET acknowledged_at = ?, data_revision = data_revision + 1 WHERE id = 1 AND acknowledged_at IS NULL').run(now());
       return state();

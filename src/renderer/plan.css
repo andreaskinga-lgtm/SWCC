@@ -10,6 +10,8 @@
 .activity-index > .selected { border-color: var(--accent); background: var(--leaf); border-radius: 4px 13px 13px 4px; }
 .activity-editor { min-width: 0; background: white; border: 1px solid #e0e6d7; border-radius: 14px; padding: 28px 30px; }
 .activity-editor-header { display: flex; gap: 12px; align-items: center; padding-bottom: 20px; border-bottom: 1px solid #d7deca; margin-bottom: 24px; }
+.activity-editor-header small { flex: 1; }
+.delete-record { color: #7d2e24; }
 .activity-dates { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 .activity-dates select { max-width: none; padding: 12px; }
 .goal-link-editor { border: 0; border-radius: 8px; padding: 20px; background: #f2f4eb; margin: 22px 0; min-width: 0; }
