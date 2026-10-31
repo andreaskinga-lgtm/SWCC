@@ -4,7 +4,7 @@
 
 **Blocked by:** 03: Record shared and supplementary learning activities.
 
-**Status:** claimed
+**Status:** resolved
 
 - [ ] Import files through an OS file dialog into managed storage, never depend on their original paths, and never accept directory imports.
 - [ ] Support pdf, png, jpg, jpeg, webp, gif, bmp, doc, docx, xls, xlsx, ppt, pptx, rtf, txt, and csv. Permit exactly 50 MiB (52,428,800 bytes) per file and reject larger inputs; impose no total yearly quota.
@@ -23,3 +23,5 @@
 - Implemented managed evidence import, integrity checks, repair/removal, local PDF/image previews, explicit OS opening for other supported documents, and shared Step 3 readiness/revision integration.
 - Verification on macOS/Electron: `npm test` passed (32 tests), `npm run test:desktop` passed (21 tests), and `npm run typecheck`, `npm run lint`, and `npm run build` passed. Evidence coverage includes the exact 50 MiB boundary, cancellation and import failures, simulated disk exhaustion, source movement/duplicate names, missing/corrupt hashes, repair/removal, offline previews, and OS-open errors.
 - The production build reports Vite's non-fatal warning that the renderer/PDF worker chunks exceed 500 kB. Installed-package smoke tests on Windows and macOS were not run; OS-specific installer, permission, and file-association behavior remains unverified.
+- Merged `ticket/04` commit `20830d7d95852ee591c784372438f6392c8ade6b` into `integration/swcc-desktop-app` without conflicts as merge commit `b3eac63c921cada7d500d5afad135c074d197bcd`.
+- After integration, `npm test` passed (32 tests), `npm run typecheck`, `npm run lint`, `npm run build`, and `npx playwright test` passed (21 tests). The build's non-fatal chunk-size warning remains; installed-platform smoke tests were not run.
