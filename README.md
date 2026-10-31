@@ -40,15 +40,15 @@ SWCC/
     database.sqlite-shm
     evidence/               # managed evidence copies, organized by year
   runtime/                  # regenerable Chromium cache/session/logs
-  restore-staging/          # reserved for future validated restore staging
+  restore-staging/          # operation-owned, validated backup inspection
   recovery.json            # reserved for future replacement recovery journal
 ```
 
 The storage location is visible in the app. A persisted, non-blocking acknowledgement explains OS-user-local storage and explicit backups. There is no account or network storage. One active instance per storage root protects the normal OS-user dataset.
 
-**Full-app backup is implemented; restore is not available yet.** Open **Backup and restore → Create full backup**, then choose a location outside SWCC storage, preferably on another device or external drive. Keep the complete `.swcc-backup.zip` file safe: it contains all years and original evidence and is **not encrypted**. There is no automatic cloud sync. The quiet status shows the last successful full backup and subsequent recorded data changes.
+**Full-app backup and validated restore preview are implemented; replacement is not available yet.** Open **Backup and restore → Create full backup**, then choose a location outside SWCC storage, preferably on another device or external drive. Keep the complete `.swcc-backup.zip` file safe: it contains all years and original evidence and is **not encrypted**. There is no automatic cloud sync. The quiet status shows the last successful full backup and subsequent recorded data changes.
 
-The separate, disabled **Restore all years** entry honestly describes the upcoming whole-dataset replacement; this build cannot import backups. Keep the existing dataset when installing a replacement app. Annual forms and portfolio exports are not restorable full-app backups. Never manually copy only an open SQLite database file.
+The separate **Restore all years → Preview full backup** action opens an OS archive chooser, validates the archive, and compares its creation date, years and record/file counts with the current dataset. **Replace all years** remains disabled: this build cannot replace or merge records. Cancel removes only that inspection’s staged files. Keep the existing dataset when installing a replacement app. Annual forms and portfolio exports are not restorable full-app backups. Never manually copy only an open SQLite database file.
 
 Startup refuses corrupt, empty, missing-from-an-existing-dataset, future-schema, or relationship-invalid databases. Migration/read/write/IPC errors are surfaced; SWCC never resets records as a recovery shortcut.
 
@@ -66,6 +66,7 @@ Startup refuses corrupt, empty, missing-from-an-existing-dataset, future-schema,
 | `src/main/data/backup.ts` | Full-dataset SQLite backup, confined evidence inventory, main-owned save dialog, complete-file publication and successful status |
 | `src/main/archive.ts` | Maintained `yazl` streaming ZIP writer; hashes the exact archived bytes, propagates read/write failures and cancellation |
 | `src/shared/backup.ts` | Versioned full-backup manifest, typed outcome and honest operation progress |
+| `src/shared/restore.ts`, `src/main/data/restore.ts` | Typed inspection/preview, maintained `yauzl` ZIP reader, bounded confined extraction and strict read-only dataset validation |
 | `src/main/data/migrations.ts` | Ordered transactional migrations; SQLite `user_version` is schema version |
 | `src/main/data/storage.ts` | Stable dataset/evidence/runtime/staging/journal paths |
 | `src/main/index.ts`, `preload.cts` | Single instance, restricted typed IPC, isolated/sandboxed renderer, navigation/new-window constraints, protected close |
@@ -81,7 +82,7 @@ Startup refuses corrupt, empty, missing-from-an-existing-dataset, future-schema,
 | `src/shared/forms.ts`, `src/main/export/forms.ts` | Draft-export warnings, measured source-template projection, local font appearances, flattening and complete PDF publication |
 | `src/renderer/backup-screen.tsx` | C's full-backup action, quiet status, progress/cancellation and distinct unavailable restore entry |
 
-Export/backup implementations belong in **main-process modules**, not renderer/file-system bridges. The dashboard's **Export Forms PDF** action invokes the narrowly typed `exportForms` operation. Continuation pages, portfolio archives, and restore remain later slices. Record deletion, managed evidence and repair, readiness, manual completion, external declaration recording, and full-app backup are implemented. Ready never means manually Completed.
+Export/backup implementations belong in **main-process modules**, not renderer/file-system bridges. The dashboard's **Export Forms PDF** action invokes the narrowly typed `exportForms` operation. Continuation pages, portfolio archives, and recoverable replacement remain later slices. Record deletion, managed evidence and repair, readiness, manual completion, external declaration recording, and full-app backup are implemented. Ready never means manually Completed.
 
 Public operations return `Result<T>`, not success-shaped failures. `createYear` returns a stable package and persists selection. A duplicate returns `DUPLICATE_YEAR` with `existingPackageId` for actionable opening. `openYear` persists selection without advancing content/data revisions. `saveDraft` accepts a **complete `Draft`** plus package ID and expected content revision; unknown draft fields, malformed dates, and stale revisions are rejected without overwriting the saved record.
 
@@ -125,6 +126,18 @@ SQLite's **backup API**, not a live-file copy, creates the standalone database i
 The ZIP is streamed into a private partial file beside the destination, flushed to disk, then published by a same-directory rename only after the whole archive succeeds. Failed/cancelled output is removed and an existing archive remains untouched until complete publication. Only publication followed by a successful metadata write advances `lastBackupAt` / `lastBackupRevision`; that update does **not** advance `dataRevision`. Subsequent user-data changes do. The snapshot contains metadata as it existed before this publication. No schema migration was needed: backup metadata already exists in the shipped foundation schema.
 
 Focused tests use the public operation with real multi-year SQLite/WAL records, managed bytes, independent ZIP inspection and reopening the archived database through normal operations. Controlled substitutes are limited to actual OS dialogs, time and failing/paused filesystem output. Real Electron renderer checks exercise keyboard backup, both-session flush protection, busy/close/cancel behavior, status across restart and narrow-window reflow.
+
+## Validated restore preview contract
+
+`inspectFullBackup()`, `getRestoreProgress()` and `cancelRestorePreview()` are the same narrow typed operations used by the production renderer/preload and integration tests. Only main chooses an archive path. The renderer flushes both editing sessions before inspection; a failed flush retains edits and blocks inspection. Preview cancellation does not flush or discard edits. Inspection reserves the operation, exposes choosing/reading/extracting/validating progress and rejects new conflicting mutations; live reads remain available.
+
+Detection uses ZIP contents and the manifest, never the filename extension. This build accepts archive version 1 and the shipped schema 7 only, with exact application/source-set identity and strict manifest fields. Older/future schemas require a compatible build, not a silent migration or repaired substitute. The database is opened read-only in private `restore-staging/inspection-<id>/`, outside `dataset/`. Its schema, SQLite integrity, foreign keys, stored types, unique ownership, dates/statuses, completion/declaration/backup revisions and stable reference counters must be valid. Every managed evidence record must match exactly one inventoried, streamed, hash-verified file.
+
+Absolute/parent-traversal/backslash paths, duplicate entries/properties, symlinks/special files, encrypted ZIPs and missing/undeclared files fail visibly. Actual inflated evidence bytes are stopped at 52,428,800 bytes (50 MiB), regardless of declared sizes. Defensive inspection ceilings are 4 MiB for the manifest, 512 MiB for the standalone database and 50,000 inventoried files; larger archives require a compatible inspection implementation. These are inspection bounds, not a yearly evidence quota.
+
+Inspection never modifies live records, evidence or successful-backup metadata. Failure/cancellation removes only the operation-owned staging directory, leaving other staging artifacts alone. Normal close cancels an open preview after the shared successful flush; close during inspection is blocked until it finishes or is cancelled. Use the native dialog’s Cancel action while choosing. Forced termination may leave its private staging artifacts, but cannot replace the live dataset.
+
+The C comparison is a **preview**, not completed restoration. **Replace all years** stays disabled. Recovery backup, replacement moves/journal and interrupted replacement recovery belong to ticket 13 and are not implemented here.
 
 ## Shared and supplementary activities
 

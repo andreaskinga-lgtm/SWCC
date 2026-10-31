@@ -12,6 +12,8 @@ import { ReviewSession } from './review-session.js';
 import { Review } from './Review.js';
 import { BackupScreen } from './backup-screen.js';
 import type { BackupProgress } from '../shared/backup.js';
+import type { RestorePreview, RestoreProgress } from '../shared/restore.js';
+import { RestorePreviewDialog } from './backup-screen.js';
 
 type Screen = 'years' | 'overview' | 'assessment' | 'plan' | 'review' | 'backup';
 function unwrap<T>(result: Result<T>): T {
@@ -42,6 +44,11 @@ export function App({ operations }: { operations: DesktopOperations }) {
   const [backupProgress, setBackupProgress] = useState<BackupProgress>({
     phase: 'idle', filesCompleted: 0, filesTotal: 0, bytesCompleted: 0, bytesTotal: 0,
   });
+  const [restoreRunning, setRestoreRunning] = useState(false);
+  const [restoreProgress, setRestoreProgress] = useState<RestoreProgress>({
+    phase: 'idle', filesCompleted: 0, filesTotal: 0, bytesCompleted: 0, bytesTotal: 0,
+  });
+  const [restorePreview, setRestorePreview] = useState<RestorePreview | null>(null);
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
   const [recordRequested, setRecordRequested] = useState(false);
   const [deletingYear, setDeletingYear] = useState<{ id: string; year: number } | null>(null);
@@ -71,6 +78,18 @@ export function App({ operations }: { operations: DesktopOperations }) {
     const timer = setInterval(() => void update(), 150);
     return () => { active = false; clearInterval(timer); };
   }, [backupRunning, operations]);
+  useEffect(() => {
+    if (!restoreRunning) return;
+    let active = true;
+    const update = async () => {
+      const result = await operations.getRestoreProgress();
+      if (active && result.ok) setRestoreProgress(result.value);
+      else if (active && !result.ok) setError(result.error.message);
+    };
+    void update();
+    const timer = setInterval(() => void update(), 150);
+    return () => { active = false; clearInterval(timer); };
+  }, [restoreRunning, operations]);
   useEffect(() => {
     if (pkg) void reviewSession.open(pkg.id).catch(() => {});
   }, [pkg?.id, reviewSession]);
@@ -136,6 +155,37 @@ export function App({ operations }: { operations: DesktopOperations }) {
           : `Full backup saved: ${result.fileName}. Keep this copy beyond this device.`);
       } finally { setBackupRunning(false); }
     });
+  }
+  function inspectBackup() {
+    void run(async () => {
+      setRestoreRunning(true);
+      setRestoreProgress({ phase: 'choosing', filesCompleted: 0, filesTotal: 0, bytesCompleted: 0, bytesTotal: 0 });
+      try {
+        const outcome = unwrap(await operations.inspectFullBackup());
+        if (outcome.cancelled) setFeedback('Inspection cancelled. Live records and backup status are unchanged.');
+        else setRestorePreview(outcome.preview);
+      } finally {
+        const progress = await operations.getRestoreProgress();
+        if (progress.ok) setRestoreProgress(progress.value);
+        setRestoreRunning(false);
+      }
+    });
+  }
+  async function cancelInspection() {
+    if (busy && !restoreRunning) return;
+    if (restoreRunning) {
+      const result = await operations.cancelRestorePreview();
+      if (!result.ok) setError(result.error.message);
+      return;
+    }
+    setBusy(true);
+    try {
+      unwrap(await operations.cancelRestorePreview());
+      setRestorePreview(null);
+      setRestoreProgress({ phase: 'idle', filesCompleted: 0, filesTotal: 0, bytesCompleted: 0, bytesTotal: 0 });
+      setFeedback('Inspection cancelled. Live records and backup status are unchanged.');
+    } catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
+    finally { setBusy(false); }
   }
   function navigate(next: Screen) {
     void run(async () => {
@@ -368,7 +418,9 @@ export function App({ operations }: { operations: DesktopOperations }) {
       {screen === 'review' && pkg && workflow && <Review packageId={pkg.id} year={pkg.year} operations={operations} session={reviewSession}
         feedback={workflow.steps.review} complete={() => complete('review')} busy={busy} />}
       {screen === 'backup' && state && <BackupScreen state={state} busy={busy} running={backupRunning} progress={backupProgress}
-        backup={backup} cancel={() => void operations.cancelFullBackup().then(result => { if (!result.ok) setError(result.error.message); })} />}
+        backup={backup} cancel={() => void operations.cancelFullBackup().then(result => { if (!result.ok) setError(result.error.message); })}
+        inspect={inspectBackup} inspecting={restoreRunning} restoreProgress={restoreProgress} cancelInspection={() => void cancelInspection()} />}
+      {restorePreview && <RestorePreviewDialog preview={restorePreview} busy={busy} error={error} cancel={() => void cancelInspection()} />}
       {deletingYear && <Dialog title={`Delete year ${deletingYear.year}?`} onClose={() => {
         if (!busy) { setDeletingYear(null); setYearDeleteError(null); }
       }}>
