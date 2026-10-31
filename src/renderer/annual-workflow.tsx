@@ -47,7 +47,7 @@ export function FormsExportDialog({ pkg, workflow, busy, error, exportForms, clo
   const missing = formsExportWarnings(pkg, workflow);
   return <Dialog title="Export annual forms" onClose={() => { if (!busy) close(); }}>
     <p>Export the review checklist, one annual self-assessment (SAT), and one annual development plan (PDP) in the supplied layouts.</p>
-    <p>Evidence files are referenced, not embedded. This is not a restorable full-app backup. Only short content fits in this build; longer content fails explicitly until continuation pages are available.</p>
+    <p>Long narratives use readable continuation pages in the same layouts, without repeating their content. Evidence files are referenced, not embedded. This is not a restorable full-app backup.</p>
     {missing.length > 0 && <section className="declaration-warning" aria-label="Draft export warning">
       <h3>This annual package is incomplete.</h3>
       <p>You can explicitly export a draft; missing fields stay blank. Application readiness and completion are not College compliance.</p>
