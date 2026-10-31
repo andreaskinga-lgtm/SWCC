@@ -1,12 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Minus, Plus } from 'lucide-react';
-import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy } from 'pdfjs-dist';
-import PdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?worker';
+import { getDocument, type PDFDocumentProxy } from 'pdfjs-dist';
 import type { DesktopOperations } from '../shared/application.js';
 import type { ReviewPosition } from '../shared/review.js';
+import './pdfjs-worker.js';
 import './review.css';
-
-GlobalWorkerOptions.workerPort = new PdfWorker();
 
 export function PdfReader({ operations, position, onPosition, onVisit }: {
   operations: DesktopOperations;

@@ -25,14 +25,16 @@ export function DateField({ pkg, session, label, field }: {
   </label>;
 }
 
-export function Dialog({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
+export function Dialog({ title, children, onClose, className = 'goal-dialog' }: {
+  title: string; children: ReactNode; onClose: () => void; className?: string;
+}) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const dialog = ref.current;
     if (dialog && !dialog.open) dialog.showModal();
     return () => { if (dialog?.open) dialog.close(); };
   }, []);
-  return <dialog ref={ref} className="goal-dialog" aria-label={title}
+  return <dialog ref={ref} className={className} aria-label={title}
     onCancel={event => { event.preventDefault(); onClose(); }}
     onClick={event => { if (event.target === ref.current) onClose(); }}>
     <div className="goal-dialog-header"><h2>{title}</h2><button type="button" className="icon-button" aria-label="Close dialog" onClick={onClose}><X size={19} /></button></div>

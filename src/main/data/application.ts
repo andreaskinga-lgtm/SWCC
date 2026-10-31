@@ -12,6 +12,8 @@ import { reviewOperations } from './review.js';
 import type { ReviewSystem } from './review.js';
 import { activityOperations, getActivities } from './activities.js';
 import { evaluatePlanReadiness, validEvidenceLink } from '../../shared/plan.js';
+import { evidenceOperations } from './evidence.js';
+import type { EvidenceSystem } from './evidence.js';
 
 class ApplicationFailure extends Error {
   constructor(readonly detail: OperationError) { super(detail.message); }
@@ -65,7 +67,12 @@ function validateDeleteGoal(input: DeleteGoal) {
   identifier(request.goalId);
 }
 
-export function openApplication(storageRoot: string, clock: { now?: () => Date; today?: () => string } = {}, reviewSystem?: ReviewSystem) {
+export function openApplication(
+  storageRoot: string,
+  clock: { now?: () => Date; today?: () => string } = {},
+  reviewSystem?: ReviewSystem,
+  evidenceSystem?: EvidenceSystem,
+) {
   const paths = storageLayout(storageRoot);
   const dataset = paths.dataset;
   const databaseFile = paths.database;
@@ -143,9 +150,19 @@ export function openApplication(storageRoot: string, clock: { now?: () => Date; 
       } };
     }
   }
+  const evidence = evidenceOperations(database, paths.evidence, getPackage, now, fail, identifier, evidenceSystem);
   const operations: ApplicationOperations = {
     ...reviewOperations(database, now, reviewSystem),
-    getPlanReadiness: id => operation(() => { identifier(id); return evaluatePlanReadiness(getPackage(id), today()); }),
+    getEvidence: id => operation(() => evidence.getEvidence(id)),
+    importEvidence: input => operation(() => evidence.importEvidence(input)),
+    replaceEvidence: input => operation(() => evidence.replaceEvidence(input)),
+    removeEvidence: input => operation(() => evidence.removeEvidence(input)),
+    previewEvidence: input => operation(() => evidence.previewEvidence(input)),
+    openEvidence: input => operation(() => evidence.openEvidence(input)),
+    getPlanReadiness: id => operation(() => {
+      identifier(id);
+      return evaluatePlanReadiness(getPackage(id), today(), evidence.readableActivityIds(id));
+    }),
     openEvidenceLink: input => operation(async () => {
       if (!input || typeof input !== 'object' || typeof input.url !== 'string' || !validEvidenceLink(input.url))
         fail('VALIDATION', 'Only valid HTTP or HTTPS evidence links can be opened.');

@@ -1,19 +1,24 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import type { Activity, ActivityStatus, ApplicationOperations, Goal, YearPackage } from '../shared/application.js';
+import type {
+  Activity, ActivityStatus, ApplicationOperations, EvidenceAttachment, EvidencePreview, Goal, YearPackage,
+} from '../shared/application.js';
 import { dateWarning } from '../shared/application.js';
 import { activityDateError, evaluatePlanReadiness, validEvidenceLink } from '../shared/plan.js';
 import type { DraftSession } from './draft-session.js';
 import { DateField, Dialog, GoalCreateDialog, GoalDeleteDialog } from './assessment-screen.js';
+import { EvidencePreviewDialog } from './EvidencePreview.js';
 import './plan.css';
 
-export function PlanReadinessPanel({ pkg }: { pkg: YearPackage }) {
-  const readiness = evaluatePlanReadiness(pkg);
+export function PlanReadinessPanel({ pkg, readableEvidenceActivityIds = new Set<string>() }: {
+  pkg: YearPackage; readableEvidenceActivityIds?: ReadonlySet<string>;
+}) {
+  const readiness = evaluatePlanReadiness(pkg, undefined, readableEvidenceActivityIds);
   return <section className={`readiness-panel ${readiness.ready ? 'ready' : ''}`} aria-labelledby="plan-readiness-title">
     <div className="readiness-heading"><h2 id="plan-readiness-title">Step 3 · Development plan</h2>
       <span className={`readiness-status ${readiness.ready ? 'ready' : ''}`} role="status" aria-label="Step 3 readiness">{readiness.ready ? 'Ready' : 'In progress'}</span></div>
     {readiness.ready ? <p>All application readiness checks are satisfied. Manual completion is separate.</p>
       : <ul className="readiness-missing" aria-label="Step 3 missing items">{readiness.missing.map(item => <li key={item}>{item}</li>)}</ul>}
-    <small>Supplementary activities do not block readiness. No file is required when evidence notes or a valid link are present.</small>
+    <small>Supplementary activities do not block readiness. Files are optional when notes or a valid link qualify; missing or corrupt files do not count.</small>
   </section>;
 }
 
@@ -62,13 +67,21 @@ function ActivityCreateDialog({ pkg, session, onClose, onCreated }: {
   </Dialog>;
 }
 
-function ActivityEditor({ activity, pkg, session, operations, addGoal }: {
+function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence, evidenceError, evidenceLoaded, refreshEvidence }: {
   activity: Activity; pkg: YearPackage; session: DraftSession; operations: ApplicationOperations; addGoal: () => void;
+  evidence: EvidenceAttachment[]; evidenceError: string; evidenceLoaded: boolean; refreshEvidence: () => Promise<EvidenceAttachment[]>;
 }) {
   const [linksText, setLinksText] = useState(activity.evidenceLinks.join('\n'));
   const [openError, setOpenError] = useState('');
+  const [evidenceOpenError, setEvidenceOpenError] = useState<{ id: string; message: string } | null>(null);
+  const [fileActionError, setFileActionError] = useState('');
+  const [fileBusy, setFileBusy] = useState(false);
+  const [preview, setPreview] = useState<EvidencePreview | null>(null);
+  const [removing, setRemoving] = useState<EvidenceAttachment | null>(null);
+  const [removeError, setRemoveError] = useState('');
   const error = activityDateError(activity);
   const warning = dateWarning(activity.completionDate, pkg.year);
+  const attached = evidence.filter(entry => entry.activityId === activity.id);
   async function openLink(url: string) {
     setOpenError('');
     try {
@@ -76,6 +89,75 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal }: {
       const result = await operations.openEvidenceLink({ packageId: pkg.id, activityId: activity.id, url });
       if (!result.ok) throw new Error(result.error.message);
     } catch (failure) { setOpenError(failure instanceof Error ? failure.message : String(failure)); }
+  }
+  async function chooseEvidence(evidenceId?: string) {
+    setFileActionError('');
+    setFileBusy(true);
+    try {
+      await session.flush();
+      const current = session.getSnapshot().record;
+      if (!current) throw new Error('Open a year before importing evidence.');
+      const request = { packageId: pkg.id, activityId: activity.id, expectedRevision: current.contentRevision };
+      const result = evidenceId
+        ? await operations.replaceEvidence({ ...request, evidenceId })
+        : await operations.importEvidence(request);
+      if (!result.ok) throw new Error(result.error.message);
+      if (result.value.cancelled) return;
+      session.open(result.value.package);
+      await refreshEvidence();
+    } catch (failure) {
+      setFileActionError(failure instanceof Error ? failure.message : String(failure));
+    } finally { setFileBusy(false); }
+  }
+  async function removeEvidence() {
+    if (!removing) return;
+    setRemoveError('');
+    setFileBusy(true);
+    try {
+      await session.flush();
+      const current = session.getSnapshot().record;
+      if (!current) throw new Error('Open a year before removing evidence.');
+      const result = await operations.removeEvidence({
+        packageId: pkg.id, activityId: activity.id, evidenceId: removing.id, expectedRevision: current.contentRevision,
+      });
+      if (!result.ok) throw new Error(result.error.message);
+      session.open(result.value);
+      setRemoving(null);
+      await refreshEvidence();
+    } catch (failure) {
+      setRemoveError(failure instanceof Error ? failure.message : String(failure));
+    } finally { setFileBusy(false); }
+  }
+  async function showPreview(entry: EvidenceAttachment) {
+    setFileActionError('');
+    setFileBusy(true);
+    try {
+      await session.flush();
+      const result = await operations.previewEvidence({ packageId: pkg.id, activityId: activity.id, evidenceId: entry.id });
+      if (!result.ok) throw new Error(result.error.message);
+      setPreview(result.value);
+    } catch (failure) {
+      setFileActionError(failure instanceof Error ? failure.message : String(failure));
+    } finally { setFileBusy(false); }
+  }
+  async function openDocument(entry: EvidenceAttachment) {
+    setEvidenceOpenError(null);
+    setFileBusy(true);
+    try {
+      await session.flush();
+      const result = await operations.openEvidence({ packageId: pkg.id, activityId: activity.id, evidenceId: entry.id });
+      if (!result.ok) throw new Error(result.error.message);
+    } catch (failure) {
+      setEvidenceOpenError({
+        id: entry.id,
+        message: failure instanceof Error ? failure.message : String(failure),
+      });
+    } finally { setFileBusy(false); }
+  }
+  async function recheckEvidence() {
+    setFileActionError('');
+    try { await refreshEvidence(); }
+    catch (failure) { setFileActionError(failure instanceof Error ? failure.message : String(failure)); }
   }
   return <article className="activity-editor" aria-label={`Activity editor ${activity.ref}`}>
     <div className="activity-editor-header"><span className="goal-reference">{activity.ref}</span><small>One record · all linked goals</small></div>
@@ -116,14 +198,53 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal }: {
     </li>)}</ul>
     <small className="quiet">Opening a link needs internet to view its website. A successful launch does not verify loading or reading.</small>
     {openError && <p role="alert" className="goal-validation">{openError}</p>}
+    <section className="managed-evidence" aria-labelledby={`managed-evidence-title-${activity.id}`}>
+      <div className="managed-evidence-heading"><div><h3 id={`managed-evidence-title-${activity.id}`}>Attached evidence files</h3>
+        <p>Optional files are copied into SWCC storage. Supported types are PDF, images, and common office/text documents; maximum 50 MiB each.</p></div>
+        <button type="button" disabled={fileBusy} onClick={() => void chooseEvidence()}>Import evidence file</button>
+      </div>
+      <button type="button" className="text-button evidence-recheck" disabled={fileBusy} onClick={() => void recheckEvidence()}>Check file integrity</button>
+      {evidenceError && <div role="alert" className="goal-validation">Evidence integrity could not be checked: {evidenceError}</div>}
+      {fileActionError && <p role="alert" className="goal-validation">{fileActionError}</p>}
+      {!evidenceLoaded && !evidenceError && <p role="status" className="quiet">Checking attached evidence…</p>}
+      {evidenceLoaded && !attached.length && <p className="quiet">No file evidence is attached to this activity yet.</p>}
+      {attached.map(entry => {
+        const previewable = entry.type === 'pdf' || ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'].includes(entry.type);
+        const integrityMessage = entry.integrity === 'missing' ? `${entry.ref} is missing; replace it or remove it.`
+          : entry.integrity === 'corrupt' ? `${entry.ref} failed its SHA-256 integrity check; replace it or remove it.`
+            : entry.integrity === 'unreadable' ? `${entry.ref} cannot be read; replace it or remove it.` : '';
+        return <article className={`managed-evidence-entry ${entry.integrity}`} aria-label={`Evidence ${entry.ref}`} key={entry.id}>
+          <div className="managed-evidence-meta"><span className="goal-reference">{entry.ref}</span><strong>{entry.originalName}</strong>
+            <small>{entry.type.toUpperCase()} · {entry.byteCount.toLocaleString()} bytes · {entry.integrity === 'readable' ? 'Readable' : 'Needs repair'}</small></div>
+          {integrityMessage && <p className="evidence-integrity-error" role="alert">{integrityMessage}</p>}
+          {entry.integrity === 'readable' && <div className="managed-evidence-actions">
+            {previewable ? <button type="button" disabled={fileBusy} onClick={() => void showPreview(entry)}>Preview {entry.ref}</button>
+              : <button type="button" disabled={fileBusy} onClick={() => void openDocument(entry)}>Open {entry.ref} in installed app</button>}
+          </div>}
+          {evidenceOpenError?.id === entry.id && <p role="alert" className="evidence-integrity-error">{evidenceOpenError.message}</p>}
+          <div className="managed-evidence-actions">
+            <button type="button" className="secondary" disabled={fileBusy} onClick={() => void chooseEvidence(entry.id)}>Replace {entry.ref}</button>
+            <button type="button" className="text-button" disabled={fileBusy} onClick={() => { setRemoving(entry); setRemoveError(''); }}>Remove {entry.ref}</button>
+          </div>
+        </article>;
+      })}
+    </section>
     <label className="field narrative"><span>Application to practice</span><textarea aria-label="Application to practice" rows={5} value={activity.applicationToPractice}
       onChange={event => session.editActivity(activity.id, { applicationToPractice: event.target.value })} /></label>
+    {preview && <EvidencePreviewDialog preview={preview} onClose={() => setPreview(null)} />}
+    {removing && <Dialog title={`Remove evidence ${removing.ref}?`} onClose={() => { if (!fileBusy) setRemoving(null); }}>
+      <p className="goal-dialog-copy">This removes {removing.ref} from {activity.ref} and deletes its managed copy. The reference will not be reused.</p>
+      {removeError && <p role="alert" className="goal-validation">{removeError}</p>}
+      <div className="goal-dialog-actions"><button type="button" className="secondary" disabled={fileBusy} onClick={() => setRemoving(null)}>Cancel</button>
+        <button type="button" disabled={fileBusy} onClick={() => void removeEvidence()}>Remove evidence</button></div>
+    </Dialog>}
   </article>;
 }
 
-export function PlanScreen({ pkg, session, operations, selectedId, select, recordRequested, clearRecordRequest }: {
+export function PlanScreen({ pkg, session, operations, selectedId, select, recordRequested, clearRecordRequest, evidence, evidenceError, evidenceLoaded, refreshEvidence }: {
   pkg: YearPackage; session: DraftSession; operations: ApplicationOperations; selectedId: string | null;
   select: (id: string) => void; recordRequested: boolean; clearRecordRequest: () => void;
+  evidence: EvidenceAttachment[]; evidenceError: string; evidenceLoaded: boolean; refreshEvidence: () => Promise<EvidenceAttachment[]>;
 }) {
   const [creating, setCreating] = useState(recordRequested);
   const [creatingGoal, setCreatingGoal] = useState<{ activityId?: string } | null>(null);
@@ -156,8 +277,11 @@ export function PlanScreen({ pkg, session, operations, selectedId, select, recor
         <small>{item.goalIds.length ? pkg.goals.filter(goal => item.goalIds.includes(goal.id)).map(goal => goal.ref).join(', ') : 'No linked goal · supplementary'}</small>
       </button>)}</div>
       <DateField pkg={pkg} session={session} field="planDate" label="Plan date" />
-      <p className="quiet">Plan date is independent of assessment date.</p><PlanReadinessPanel pkg={pkg} /></aside>
-      {activity ? <ActivityEditor key={activity.id} activity={activity} pkg={pkg} session={session} operations={operations} addGoal={() => setCreatingGoal({ activityId: activity.id })} />
+      <p className="quiet">Plan date is independent of assessment date.</p><PlanReadinessPanel pkg={pkg}
+        readableEvidenceActivityIds={new Set(evidence.filter(entry => entry.integrity === 'readable').map(entry => entry.activityId))} /></aside>
+      {activity ? <ActivityEditor key={activity.id} activity={activity} pkg={pkg} session={session} operations={operations}
+        addGoal={() => setCreatingGoal({ activityId: activity.id })} evidence={evidence} evidenceError={evidenceError}
+        evidenceLoaded={evidenceLoaded} refreshEvidence={refreshEvidence} />
         : <section className="surface empty-editor"><h2>Make room for learning.</h2><p>Record an activity, then connect goals or keep it supplementary.</p></section>}
     </div>
     {creating && <ActivityCreateDialog pkg={pkg} session={session} onClose={closeCreate} onCreated={created} />}

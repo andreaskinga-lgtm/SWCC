@@ -61,6 +61,44 @@ export interface Activity extends ActivityFields {
   createdAt: string;
   updatedAt: string;
 }
+export type EvidenceIntegrity = 'readable' | 'missing' | 'corrupt' | 'unreadable';
+export interface EvidenceAttachment {
+  id: string;
+  packageId: string;
+  activityId: string;
+  ref: string;
+  originalName: string;
+  type: string;
+  byteCount: number;
+  sha256: string;
+  importedAt: string;
+  integrity: EvidenceIntegrity;
+}
+export type EvidenceImportOutcome =
+  | { cancelled: true }
+  | { cancelled: false; package: YearPackage; attachment: EvidenceAttachment };
+export interface EvidenceRequest {
+  packageId: string;
+  activityId: string;
+  expectedRevision: number;
+}
+export interface ReplaceEvidenceRequest extends EvidenceRequest {
+  evidenceId: string;
+}
+export interface EvidenceActionRequest {
+  packageId: string;
+  activityId: string;
+  evidenceId: string;
+}
+export interface RemoveEvidenceRequest extends EvidenceActionRequest {
+  expectedRevision: number;
+}
+export interface EvidencePreview {
+  ref: string;
+  originalName: string;
+  type: string;
+  data: Uint8Array;
+}
 export interface CreateActivity extends Partial<ActivityFields> {
   packageId: string;
   expectedRevision: number;
@@ -82,7 +120,8 @@ export interface AppState {
   lastBackupRevision: number | null;
 }
 export interface OperationError {
-  code: 'VALIDATION' | 'DUPLICATE_YEAR' | 'NOT_FOUND' | 'CONFLICT' | 'STORAGE' | 'IPC' | 'BROWSER' | 'INACTIVE';
+  code: 'VALIDATION' | 'DUPLICATE_YEAR' | 'NOT_FOUND' | 'CONFLICT' | 'STORAGE' | 'IPC' | 'BROWSER' | 'INACTIVE'
+    | 'UNSUPPORTED_FILE' | 'FILE_TOO_LARGE' | 'UNREADABLE' | 'EVIDENCE' | 'OPEN';
   message: string;
   existingPackageId?: string;
 }
@@ -136,6 +175,12 @@ export interface ApplicationOperations extends ReviewOperations {
   updateActivity(input: UpdateActivity): Promise<Result<YearPackage>>;
   getPlanReadiness(packageId: string): Promise<Result<import('./plan.js').PlanReadiness>>;
   openEvidenceLink(input: { packageId: string; activityId: string; url: string }): Promise<Result<void>>;
+  getEvidence(packageId: string): Promise<Result<EvidenceAttachment[]>>;
+  importEvidence(input: EvidenceRequest): Promise<Result<EvidenceImportOutcome>>;
+  replaceEvidence(input: ReplaceEvidenceRequest): Promise<Result<EvidenceImportOutcome>>;
+  removeEvidence(input: RemoveEvidenceRequest): Promise<Result<YearPackage>>;
+  previewEvidence(input: EvidenceActionRequest): Promise<Result<EvidencePreview>>;
+  openEvidence(input: EvidenceActionRequest): Promise<Result<void>>;
   acknowledgeStorage(): Promise<Result<AppState>>;
 }
 export interface DesktopOperations extends ApplicationOperations {
