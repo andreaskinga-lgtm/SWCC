@@ -11,7 +11,7 @@ function PageHeading({ title, description }: { title: string; description: strin
   return <div className="page-heading"><h1>{title}</h1><p>{description}</p></div>;
 }
 
-function DateField({ pkg, session, label, field }: {
+export function DateField({ pkg, session, label, field }: {
   pkg: YearPackage;
   session: DraftSession;
   label: string;
@@ -25,7 +25,7 @@ function DateField({ pkg, session, label, field }: {
   </label>;
 }
 
-function Dialog({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
+export function Dialog({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const dialog = ref.current;
@@ -53,10 +53,11 @@ function GoalEditor({ goal, session, onDelete }: { goal: Goal; session: DraftSes
   </article>;
 }
 
-function GoalCreateDialog({ source, session, onClose }: {
+export function GoalCreateDialog({ source, session, onClose, activityId }: {
   source: 'assessment' | 'plan';
   session: DraftSession;
   onClose: () => void;
+  activityId?: string;
 }) {
   const state = useSyncSession(session);
   const [title, setTitle] = useState('');
@@ -81,7 +82,7 @@ function GoalCreateDialog({ source, session, onClose }: {
     if (!title.trim()) { setValidationError('Name the goal before adding it.'); return; }
     setValidationError('');
     setSubmitted(true);
-    try { await session.createGoal(title, description); }
+    try { await session.createGoal(title, description, activityId); }
     catch (error) { setValidationError(error instanceof Error ? error.message : String(error)); }
   }
   async function retry() {
@@ -112,7 +113,7 @@ function GoalCreateDialog({ source, session, onClose }: {
   </Dialog>;
 }
 
-function GoalDeleteDialog({ goal, session, operations, onClose }: {
+export function GoalDeleteDialog({ goal, session, operations, onClose }: {
   goal: Goal;
   session: DraftSession;
   operations: ApplicationOperations;
@@ -218,37 +219,6 @@ export function AssessmentScreen({ pkg, session, operations }: {
       </aside>
     </div>
     {creating && <GoalCreateDialog source="assessment" session={session} onClose={() => setCreating(false)} />}
-    {deleting && <GoalDeleteDialog goal={deleting} session={session} operations={operations} onClose={() => setDeleting(null)} />}
-  </>;
-}
-
-export function PlanScreen({ pkg, session, operations }: {
-  pkg: YearPackage;
-  session: DraftSession;
-  operations: ApplicationOperations;
-}) {
-  const [creating, setCreating] = useState(false);
-  const [deleting, setDeleting] = useState<Goal | null>(null);
-  return <>
-    <PageHeading title="Give your learning a place." description={`Your ${pkg.year} development plan. Goals are the same records shown in the annual self-assessment.`} />
-    <section className="goal-connection-strip" aria-labelledby="plan-goals-title">
-      <div className="section-heading"><h2 id="plan-goals-title">Goal connections</h2>
-        <button type="button" className="text-button" onClick={() => setCreating(true)}><Plus size={15} />Add goal</button>
-      </div>
-      {pkg.goals.length > 0 ? <div className="plan-goal-list">{pkg.goals.map(goal => <article key={goal.id} className="plan-goal"
-        aria-label={`${goal.ref} ${goal.title}`}>
-        <span className="goal-reference">{goal.ref}</span>
-        <div><h3>{goal.title}</h3>{goal.description && <p>{goal.description}</p>}</div>
-        <button type="button" className="text-button" aria-label={`Delete goal ${goal.ref}`} onClick={() => setDeleting(goal)}>Remove</button>
-      </article>)}</div> : <p className="empty">Add a goal here or in the self-assessment; the same record will appear in both places.</p>}
-      <p className="quiet">Goals have no standard selections. Activity records and evidence are separate from this shared goal list.</p>
-    </section>
-    <section className="surface plan-date-panel">
-      <h2>Development plan date</h2>
-      <DateField pkg={pkg} session={session} field="planDate" label="Plan date" />
-      <p>The plan date is separate from the assessment date. Activity, evidence, and application-to-practice entry will be added in a later build.</p>
-    </section>
-    {creating && <GoalCreateDialog source="plan" session={session} onClose={() => setCreating(false)} />}
     {deleting && <GoalDeleteDialog goal={deleting} session={session} operations={operations} onClose={() => setDeleting(null)} />}
   </>;
 }

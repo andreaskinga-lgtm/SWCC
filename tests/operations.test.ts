@@ -430,6 +430,7 @@ test.each([
   { version: 1, reviewOnly: false, label: 'foundation' },
   { version: 2, reviewOnly: false, label: 'annual standards' },
   { version: 3, reviewOnly: false, label: 'assessment and goals' },
+  { version: 4, reviewOnly: false, label: 'integrated assessment, goals and review' },
   { version: 2, reviewOnly: true, label: 'parallel review' },
 ])('$label datasets upgrade without losing records, counters or independent revisions', async ({ version, reviewOnly }) => {
   const root = storage();
@@ -444,12 +445,12 @@ test.each([
     draft: { assessmentDate: record.assessmentDate, planDate: '2024-06-14', strengths: 'Keep my reflection',
       learningNeeds: 'Keep my learning needs', peerFeedback: '', annualStandards: [...standards] },
   }));
-  if (version === 3) {
+  if (version >= 3) {
     record = value(await app.operations.createGoal({
       packageId: record.id, expectedRevision: record.contentRevision, title: 'Keep my shared goal',
     }));
   }
-  if (reviewOnly) {
+  if (reviewOnly || version >= 4) {
     value(await app.operations.recordReviewVisits({ packageId: record.id, pages: [2, 11, 48] }));
     value(await app.operations.saveReviewPosition({ packageId: record.id, page: 48, offset: 0.25, zoom: 150 }));
     value(await app.operations.launchReviewResources(record.id));
@@ -460,7 +461,8 @@ test.each([
   const revision = value(await app.operations.getState()).dataRevision;
   app.close();
   const fixture = new Database(resolve(root, 'dataset/database.sqlite'));
-  if (!reviewOnly) {
+  fixture.exec('DROP TABLE activity_goal_links; DROP TABLE learning_activities; DROP INDEX goal_package_ownership;');
+  if (!reviewOnly && version < 4) {
     fixture.exec('DROP TABLE review_visits; DROP TABLE review_states; ALTER TABLE year_packages DROP COLUMN review_revision;');
   }
   if (version < 3) fixture.exec('DROP TABLE learning_goals;');
@@ -476,7 +478,7 @@ test.each([
   const edited = value(await app.operations.createGoal({
     packageId: record.id, expectedRevision: record.contentRevision, title: 'New goal after upgrade',
   }));
-  expect(edited.goals.at(-1)?.ref).toBe(version === 3 ? 'G2' : 'G1');
+  expect(edited.goals.at(-1)?.ref).toBe(version >= 3 ? 'G2' : 'G1');
   expect(edited.goals.slice(0, -1)).toEqual(record.goals);
   expect(edited).toMatchObject({
     assessmentRevision: record.assessmentRevision + 1, planRevision: record.planRevision + 1,

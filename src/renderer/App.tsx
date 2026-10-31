@@ -3,7 +3,10 @@ import { BookOpen, ClipboardList, Home, Layers, HardDrive, Sprout, Network } fro
 import type { AppState, DesktopOperations, OperationError, Result } from '../shared/application.js';
 import { localDate } from '../shared/application.js';
 import { DraftSession } from './draft-session.js';
-import { AssessmentScreen, PlanScreen } from './assessment-screen.js';
+import { AssessmentScreen } from './assessment-screen.js';
+import { PlanScreen } from './plan-screen.js';
+import { evaluateAssessmentReadiness } from '../shared/assessment.js';
+import { evaluatePlanReadiness } from '../shared/plan.js';
 import { ReviewSession } from './review-session.js';
 import { Review } from './Review.js';
 
@@ -32,6 +35,8 @@ export function App({ operations }: { operations: DesktopOperations }) {
   const [error, setError] = useState<string | null>(null);
   const [duplicate, setDuplicate] = useState<OperationError | null>(null);
   const [busy, setBusy] = useState(false);
+  const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
+  const [recordRequested, setRecordRequested] = useState(false);
   const pkg = draft.record;
   useEffect(() => {
     void operations.getState().then(result => {
@@ -65,6 +70,8 @@ export function App({ operations }: { operations: DesktopOperations }) {
   function open(id: string) {
     void run(async () => {
       session.open(unwrap(await operations.openYear(id)));
+      setSelectedActivityId(null);
+      setRecordRequested(false);
       setState(unwrap(await operations.getState()));
       setDuplicate(null);
       setScreen('overview');
@@ -78,6 +85,13 @@ export function App({ operations }: { operations: DesktopOperations }) {
       setState(unwrap(await operations.getState()));
       setDuplicate(null);
       setScreen('overview');
+    });
+  }
+  function activityEntry(id: string | null) {
+    void run(async () => {
+      setSelectedActivityId(id);
+      setRecordRequested(!id);
+      setScreen('plan');
     });
   }
   return <div className="map-layout">
@@ -120,21 +134,43 @@ export function App({ operations }: { operations: DesktopOperations }) {
           <ul className="year-list">{state?.years.map(row => <li key={row.id}><div><strong>{row.year}</strong><span>Draft · application completion not yet recorded</span></div>
             <button disabled={busy} onClick={() => open(row.id)}>Open {row.year}</button></li>)}</ul>
         </section></>}
-      {screen === 'overview' && pkg && <><div className="page-heading"><h1>Connect learning to practice.</h1><p>Your {pkg.year} portfolio begins with reflection.</p></div>
+      {screen === 'overview' && pkg && <><div className="page-heading map-heading"><div><h1>Connect learning to practice.</h1><p>Your {pkg.year} goals and the experiences that move them forward.</p></div>
+        <button type="button" onClick={() => activityEntry(null)}>Record an activity</button></div>
         <div className="map-overview"><section className="relationship-board surface"><div className="relationship-columns">
-          <div className="goal-panel"><h2>Learning goals</h2>
-            {pkg.goals.length > 0 ? <ul className="overview-goal-list">{pkg.goals.map(goal => <li key={goal.id}><span>{goal.ref}</span><strong>{goal.title}</strong></li>)}</ul>
-              : <p>No goals yet. Add one from self-assessment or development plan.</p>}
+          <div><h2>Learning goals</h2><div className="goal-nodes">
+            {pkg.goals.map(goal => <article className="goal-node" key={goal.id}><span className="goal-reference">{goal.ref}</span><h3>{goal.title}</h3>
+              {goal.description && <p>{goal.description}</p>}
+              <div className="goal-activity-refs">{pkg.activities.filter(activity => activity.goalIds.includes(goal.id)).map(activity =>
+                <button type="button" key={activity.id} aria-label={`Open ${activity.ref} from ${goal.ref}`} onClick={() => activityEntry(activity.id)}>{activity.ref}</button>)}</div>
+              {!pkg.activities.some(activity => activity.goalIds.includes(goal.id)) && <small>No supporting activity yet</small>}
+            </article>)}
+            {!pkg.goals.length && <p>No goals yet. Add one from self-assessment or development plan.</p>}
+            </div>
             <button className="secondary" onClick={() => navigate('assessment')}>Write your self-assessment</button>
           </div>
-          <div><h2>Activities & experiences</h2><p>No sample records. Activity records and their goal relationships will be added in a later build.</p><button className="secondary" onClick={() => navigate('plan')}>View development plan</button></div>
+          <div><h2>Activities & experiences</h2><div className="activity-nodes">{pkg.activities.map(activity => <button type="button" key={activity.id}
+            className="activity-node" aria-label={`Open activity ${activity.ref}: ${activity.title}`} onClick={() => activityEntry(activity.id)}>
+            <div><span className="goal-reference">{activity.ref}</span><span className="activity-state">{activity.status}</span></div><h3>{activity.title}</h3>
+            <span className="goal-link-chips">{activity.goalIds.length ? pkg.goals.filter(goal => activity.goalIds.includes(goal.id)).map(goal => <span key={goal.id}>{goal.ref}</span>)
+              : <small>No linked goal · supplementary</small>}</span>
+            {activity.goalIds.length > 1 && <small>One shared record supports these goals</small>}
+          </button>)}
+          {!pkg.activities.length && <p>Record an activity and connect it to a goal, or keep it supplementary.</p>}</div>
+          <button className="secondary" onClick={() => navigate('plan')}>View development plan</button></div>
         </div><p className="board-footer">Evidence and reflection will stay with each activity, never with its links.</p></section>
           <aside className="map-checklist"><h2>Close the annual loop</h2><p>Work freely. Complete deliberately.</p>
-            <ul>{destinations.slice(1, 4).map(item => <li key={item.screen}><button className="text-button" onClick={() => navigate(item.screen)}>{item.name}</button><small>Draft · completion unavailable</small></li>)}</ul>
+            <ul>{destinations.slice(1, 4).map(item => {
+              const readiness = item.screen === 'assessment' ? evaluateAssessmentReadiness(pkg) : item.screen === 'plan' ? evaluatePlanReadiness(pkg) : null;
+              return <li key={item.screen}><button className="text-button" onClick={() => navigate(item.screen)}>{item.name}</button>
+                <small>{readiness?.ready ? 'Ready' : 'In progress'} · manual completion not yet available</small>
+                {readiness && !readiness.ready && <ul>{readiness.missing.map(missing => <li key={missing}><small>{missing}</small></li>)}</ul>}
+              </li>;
+            })}</ul>
             <p>External declaration and annual export are not available yet. This build does not report annual completion.</p>
           </aside></div></>}
       {screen === 'assessment' && pkg && <AssessmentScreen pkg={pkg} session={session} operations={operations} />}
-      {screen === 'plan' && pkg && <PlanScreen pkg={pkg} session={session} operations={operations} />}
+      {screen === 'plan' && pkg && <PlanScreen key={pkg.id} pkg={pkg} session={session} operations={operations}
+        selectedId={selectedActivityId} select={setSelectedActivityId} recordRequested={recordRequested} clearRecordRequest={() => setRecordRequested(false)} />}
       {screen === 'review' && pkg && <Review packageId={pkg.id} year={pkg.year} operations={operations} session={reviewSession} />}
       {screen === 'backup' && <><div className="page-heading"><h1>Protect your portfolio.</h1><p>Full-app backup and restore are distinct from annual exports.</p></div>
         <section className="surface"><h2>Local storage</h2><p className="storage-path">{state?.storageDirectory}</p>

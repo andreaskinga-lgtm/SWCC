@@ -99,6 +99,8 @@ if (startupFailure) {
         'swcc:get-state': 'getState', 'swcc:create-year': 'createYear', 'swcc:open-year': 'openYear',
         'swcc:save-draft': 'saveDraft', 'swcc:create-goal': 'createGoal', 'swcc:update-goal': 'updateGoal',
         'swcc:delete-goal': 'deleteGoal', 'swcc:acknowledge-storage': 'acknowledgeStorage',
+        'swcc:create-activity': 'createActivity', 'swcc:update-activity': 'updateActivity',
+        'swcc:get-plan-readiness': 'getPlanReadiness', 'swcc:open-evidence-link': 'openEvidenceLink',
         'swcc:get-review': 'getReview', 'swcc:save-review-position': 'saveReviewPosition',
         'swcc:record-review-visits': 'recordReviewVisits', 'swcc:reset-review-section': 'resetReviewSection',
         'swcc:launch-review-resources': 'launchReviewResources', 'swcc:reset-review-resources': 'resetReviewResources',

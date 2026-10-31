@@ -10,6 +10,8 @@ import { migrate, SCHEMA_VERSION } from './migrations.js';
 import { storageLayout } from './storage.js';
 import { reviewOperations } from './review.js';
 import type { ReviewSystem } from './review.js';
+import { activityOperations, getActivities } from './activities.js';
+import { evaluatePlanReadiness, validEvidenceLink } from '../../shared/plan.js';
 
 class ApplicationFailure extends Error {
   constructor(readonly detail: OperationError) { super(detail.message); }
@@ -47,9 +49,10 @@ function validateGoalRequest(input: unknown, allowedKeys: readonly string[]) {
   return request;
 }
 function validateCreateGoal(input: CreateGoal) {
-  const request = validateGoalRequest(input, ['packageId', 'expectedRevision', 'title', 'description']);
+  const request = validateGoalRequest(input, ['packageId', 'expectedRevision', 'title', 'description', 'activityId']);
   if (typeof request.title !== 'string' || !request.title.trim()) fail('VALIDATION', 'Enter a learning-goal title before saving.');
   if (request.description !== undefined && typeof request.description !== 'string') fail('VALIDATION', 'The learning-goal description must be text.');
+  if (request.activityId !== undefined) identifier(request.activityId);
 }
 function validateUpdateGoal(input: UpdateGoal) {
   const request = validateGoalRequest(input, ['packageId', 'goalId', 'expectedRevision', 'title', 'description']);
@@ -99,7 +102,7 @@ export function openApplication(storageRoot: string, clock: { now?: () => Date; 
     return rows.map(({ referenceNumber, ...goal }) => ({ ...goal, ref: `G${referenceNumber}` }));
   }
   function getPackage(id: string): YearPackage {
-    const record = database.prepare(`${packageSelect} WHERE id = ?`).get(id) as Omit<YearPackage, 'annualStandards' | 'goals'> | undefined;
+    const record = database.prepare(`${packageSelect} WHERE id = ?`).get(id) as Omit<YearPackage, 'annualStandards' | 'goals' | 'activities'> | undefined;
     if (!record) fail('NOT_FOUND', 'This year package no longer exists. Open All years to choose another.');
     const selected = new Set((database.prepare('SELECT standard_id AS standardId FROM annual_standards WHERE package_id = ?')
       .all(id) as { standardId: string }[]).map(row => row.standardId));
@@ -107,6 +110,7 @@ export function openApplication(storageRoot: string, clock: { now?: () => Date; 
       ...record,
       annualStandards: ANNUAL_STANDARDS.filter(standard => selected.has(standard.id)).map(standard => standard.id),
       goals: getGoals(id),
+      activities: getActivities(database, id),
     };
   }
   function advanceGoalRevisions(packageId: string, timestamp: string) {
@@ -130,8 +134,8 @@ export function openApplication(storageRoot: string, clock: { now?: () => Date; 
       storageDirectory: dataset,
     };
   }
-  async function operation<T>(work: () => T): Promise<Result<T>> {
-    try { return { ok: true, value: work() }; }
+  async function operation<T>(work: () => T | Promise<T>): Promise<Result<T>> {
+    try { return { ok: true, value: await work() }; }
     catch (error) {
       return { ok: false, error: error instanceof ApplicationFailure ? error.detail : {
         code: 'STORAGE',
@@ -141,6 +145,28 @@ export function openApplication(storageRoot: string, clock: { now?: () => Date; 
   }
   const operations: ApplicationOperations = {
     ...reviewOperations(database, now, reviewSystem),
+    getPlanReadiness: id => operation(() => { identifier(id); return evaluatePlanReadiness(getPackage(id), today()); }),
+    openEvidenceLink: input => operation(async () => {
+      if (!input || typeof input !== 'object' || typeof input.url !== 'string' || !validEvidenceLink(input.url))
+        fail('VALIDATION', 'Only valid HTTP or HTTPS evidence links can be opened.');
+      identifier(input.packageId);
+      identifier(input.activityId);
+      const activity = getPackage(input.packageId).activities.find(item => item.id === input.activityId);
+      if (!activity || !activity.evidenceLinks.includes(input.url)) fail('NOT_FOUND', 'Save this evidence link on an activity in this year before opening it.');
+      if (!reviewSystem) fail('BROWSER', 'The default browser is unavailable. Your evidence link is still saved.');
+      try { await reviewSystem.openExternal(input.url); }
+      catch (error) { fail('BROWSER', `The browser could not be launched: ${error instanceof Error ? error.message : String(error)}. Your evidence link is still saved. Check your default browser and retry.`); }
+    }),
+    createActivity: input => operation(async () => {
+      const result = await activityOperations(database, getPackage, now, today, fail, identifier).createActivity(input);
+      if (!result.ok) throw new ApplicationFailure(result.error);
+      return result.value;
+    }),
+    updateActivity: input => operation(async () => {
+      const result = await activityOperations(database, getPackage, now, today, fail, identifier).updateActivity(input);
+      if (!result.ok) throw new ApplicationFailure(result.error);
+      return result.value;
+    }),
     getState: () => operation(state),
     createYear: year => operation(() => database.transaction(() => {
       if (!Number.isInteger(year) || year < 1 || year > 9999) fail('VALIDATION', 'Enter a calendar year from 1 to 9999.');
@@ -189,6 +215,8 @@ export function openApplication(storageRoot: string, clock: { now?: () => Date; 
       validateCreateGoal(input);
       const record = getPackage(input.packageId);
       if (record.contentRevision !== input.expectedRevision) fail('CONFLICT', 'This package changed since it was opened. Saving is blocked to avoid overwriting changes. Retry after reopening the current year.');
+      if (input.activityId && !record.activities.some(activity => activity.id === input.activityId))
+        fail('NOT_FOUND', 'Choose an activity in this year before creating a linked goal.');
       const counter = database.prepare('SELECT next_number AS nextNumber FROM reference_counters WHERE package_id = ? AND kind = ?')
         .get(input.packageId, 'G') as { nextNumber: number } | undefined;
       if (!counter) fail('STORAGE', 'The learning-goal reference counter is missing. Preserve this dataset and retry after recovery.');
@@ -197,6 +225,11 @@ export function openApplication(storageRoot: string, clock: { now?: () => Date; 
       database.prepare('UPDATE reference_counters SET next_number = next_number + 1 WHERE package_id = ? AND kind = ?').run(input.packageId, 'G');
       database.prepare(`INSERT INTO learning_goals(id, package_id, reference_number, title, description, created_at, updated_at)
         VALUES(?, ?, ?, ?, ?, ?, ?)`).run(id, input.packageId, counter.nextNumber, input.title, input.description ?? '', timestamp, timestamp);
+      if (input.activityId) {
+        database.prepare('INSERT INTO activity_goal_links(activity_id, goal_id, package_id) VALUES(?, ?, ?)')
+          .run(input.activityId, id, input.packageId);
+        database.prepare('UPDATE learning_activities SET updated_at = ? WHERE id = ?').run(timestamp, input.activityId);
+      }
       advanceGoalRevisions(input.packageId, timestamp);
       return getPackage(input.packageId);
     }).immediate()),
