@@ -4,7 +4,7 @@
 
 **Blocked by:** 05: Delete records without losing unrelated learning evidence; 06: Track actual offline standards review by year.
 
-**Status:** claimed
+**Status:** resolved
 
 Claimed October 31, 2026 on resume from integration commit `6597dd8`; implementation branch `ticket/07`.
 
@@ -19,3 +19,11 @@ Claimed October 31, 2026 on resume from integration commit `6597dd8`; implementa
 - [ ] A year package is Complete only with all three current manual completions and a declaration date. Year-list/dashboard status updates immediately and survives restart.
 - [ ] Retain source-edition information and application-readiness wording near workflow feedback; never imply verification of current College compliance or impose an extra goal/hour quota.
 - [ ] Domain/public-operation checks cover the full invalidation table, deletion/evidence changes, repeat completion, incomplete declarations, and failure during flush. Renderer checks cover any-order completion, labelled keyboard actions, explicit warnings, year isolation, and C's annual-workflow composition.
+
+## Comments
+
+### 2026-10-31 — integrated and verified
+
+Implemented on `ticket/07` at `58bf8be1c0f6087921151c9af73fe7762eab41f0`, merged into `integration/swcc-desktop-app` with merge commit `9e9c5db8a9faf408185ca9c9ff5573988fac4a04`.
+
+Revision-bound manual completion, independent missing-item workflow feedback, declaration date/app-entry timestamp, year status, migration, and C dashboard controls are implemented. Canonical checks passed: 68 public-operation tests, 29 real production Electron tests, typecheck, lint, and build. Four completion tests also passed against a newly packaged arm64 application. Windows, Intel macOS, macOS 14, a new DMG installation, upgrades, and OS-initiated shutdown remain unverified; no platform acceptance is implied by this ticket closure.

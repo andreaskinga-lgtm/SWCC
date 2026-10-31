@@ -4,7 +4,9 @@
 
 **Blocked by:** 07: Confirm step completion and record renewal declarations.
 
-**Status:** ready-for-agent
+**Status:** claimed
+
+Claimed October 31, 2026 after ticket 07 integration; implementation branch `ticket/08`.
 
 - [ ] Expose Export Forms PDF through the dashboard's C export controls and an OS destination dialog. Flush drafts and read a consistent annual snapshot before generation; a failed flush cannot export stale edits as success.
 - [ ] Show readiness/manual-completion blockers for incomplete packages and allow an explicit draft export. Always emit the logical SAT/PDP even with no goals; missing fields stay blank rather than receiving fabricated content.

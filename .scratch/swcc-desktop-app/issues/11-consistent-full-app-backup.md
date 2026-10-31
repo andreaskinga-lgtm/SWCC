@@ -4,7 +4,9 @@
 
 **Blocked by:** 07: Confirm step completion and record renewal declarations.
 
-**Status:** ready-for-agent
+**Status:** claimed
+
+Claimed October 31, 2026 after ticket 07 integration; implementation branch `ticket/11`, concurrent with the independent forms-export ticket 08.
 
 - [ ] Implement C's backup/restore destination with the full-backup explanation/action, quiet last-successful-backup date and unbacked-changes indicator, and a distinct restore entry. Do not imply an annual portfolio is restorable.
 - [ ] Preserve the approved full-backup archive naming contract and include all years, assessments, standards, goals, activities/links, evidence metadata/files, review visits/resume positions/resources action, relevant revisions/manual completions, declarations, and relevant app metadata.
