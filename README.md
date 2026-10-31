@@ -1,6 +1,6 @@
 # SWCC desktop
 
-The offline Electron app includes durable annual assessment drafts, independent annual standards, shared learning goals and activities, managed evidence files with integrity checks and repair, activity notes/links and reflections, per-year standards review, explicit annual step completion and external declaration records, and short-content annual Forms PDF export. The production shell follows approved C / Learning map reference at commit `5477044`; prototype samples and simulated operations are not shipped.
+The offline Electron app includes durable annual assessment drafts, independent annual standards, shared learning goals and activities, managed evidence files with integrity checks and repair, activity notes/links and reflections, per-year standards review, explicit annual step completion and external declaration records, short-content annual Forms PDF export, and full-app backup. The production shell follows approved C / Learning map reference at commit `5477044`; prototype samples and simulated operations are not shipped.
 
 ## Run and check
 
@@ -46,7 +46,9 @@ SWCC/
 
 The storage location is visible in the app. A persisted, non-blocking acknowledgement explains OS-user-local storage and explicit backups. There is no account or network storage. One active instance per storage root protects the normal OS-user dataset.
 
-**Backup and restore are not implemented yet.** Their destination says so and offers no simulated success. Until full backup is implemented, wait for **Saved**, quit normally, and preserve a copy of the **entire dataset directory**, including evidence and any SQLite sidecars. Never copy only an open database file. Annual exports will not be full-app backups. Keep the existing dataset when installing a replacement app.
+**Full-app backup is implemented; restore is not available yet.** Open **Backup and restore → Create full backup**, then choose a location outside SWCC storage, preferably on another device or external drive. Keep the complete `.swcc-backup.zip` file safe: it contains all years and original evidence and is **not encrypted**. There is no automatic cloud sync. The quiet status shows the last successful full backup and subsequent recorded data changes.
+
+The separate, disabled **Restore all years** entry honestly describes the upcoming whole-dataset replacement; this build cannot import backups. Keep the existing dataset when installing a replacement app. Annual forms and portfolio exports are not restorable full-app backups. Never manually copy only an open SQLite database file.
 
 Startup refuses corrupt, empty, missing-from-an-existing-dataset, future-schema, or relationship-invalid databases. Migration/read/write/IPC errors are surfaced; SWCC never resets records as a recovery shortcut.
 
@@ -61,6 +63,9 @@ Startup refuses corrupt, empty, missing-from-an-existing-dataset, future-schema,
 | `src/main/data/application.ts` | Public SQLite operations used by IPC and integration tests |
 | `src/main/data/activities.ts` | Activity persistence, stable A references, same-year unique links, Step 3 revisions |
 | `src/main/data/evidence.ts` | Main-owned file chooser/open actions, managed copies, stable E references, SHA-256 integrity and repair |
+| `src/main/data/backup.ts` | Full-dataset SQLite backup, confined evidence inventory, main-owned save dialog, complete-file publication and successful status |
+| `src/main/archive.ts` | Maintained `yazl` streaming ZIP writer; hashes the exact archived bytes, propagates read/write failures and cancellation |
+| `src/shared/backup.ts` | Versioned full-backup manifest, typed outcome and honest operation progress |
 | `src/main/data/migrations.ts` | Ordered transactional migrations; SQLite `user_version` is schema version |
 | `src/main/data/storage.ts` | Stable dataset/evidence/runtime/staging/journal paths |
 | `src/main/index.ts`, `preload.cts` | Single instance, restricted typed IPC, isolated/sandboxed renderer, navigation/new-window constraints, protected close |
@@ -74,8 +79,9 @@ Startup refuses corrupt, empty, missing-from-an-existing-dataset, future-schema,
 | `src/renderer/App.tsx` | C shell, years, navigation, local storage acknowledgement, honest later-feature destinations |
 | `src/renderer/annual-workflow.tsx` | C's adjacent annual checklist, declaration entry/warnings and explicit forms draft export |
 | `src/shared/forms.ts`, `src/main/export/forms.ts` | Draft-export warnings, measured source-template projection, local font appearances, flattening and complete PDF publication |
+| `src/renderer/backup-screen.tsx` | C's full-backup action, quiet status, progress/cancellation and distinct unavailable restore entry |
 
-Export/backup implementations belong in **main-process modules**, not renderer/file-system bridges. The dashboard's **Export Forms PDF** action invokes the narrowly typed `exportForms` operation. Continuation pages, portfolio archives, and full backup/restore remain later slices. Record deletion, managed evidence and repair, readiness, manual completion, and external declaration recording are implemented. Ready never means manually Completed.
+Export/backup implementations belong in **main-process modules**, not renderer/file-system bridges. The dashboard's **Export Forms PDF** action invokes the narrowly typed `exportForms` operation. Continuation pages, portfolio archives, and restore remain later slices. Record deletion, managed evidence and repair, readiness, manual completion, external declaration recording, and full-app backup are implemented. Ready never means manually Completed.
 
 Public operations return `Result<T>`, not success-shaped failures. `createYear` returns a stable package and persists selection. A duplicate returns `DUPLICATE_YEAR` with `existingPackageId` for actionable opening. `openYear` persists selection without advancing content/data revisions. `saveDraft` accepts a **complete `Draft`** plus package ID and expected content revision; unknown draft fields, malformed dates, and stale revisions are rejected without overwriting the saved record.
 
@@ -91,11 +97,34 @@ Each package owns `reference_counters` for `G`, `A`, and `E`, initialized at 1. 
 
 `DraftSession.edit()` retains text immediately. Autosave debounces 400 ms and serializes writes. Keystrokes during a save remain visible; returned revisions advance underneath them, and the newest draft is saved next.
 
-**Every renderer action that consumes or leaves edited records must first flush both `DraftSession` and `ReviewSession`**: navigation, completion, declaration entry, and future export/backup callers. Resolution means all edits present during the flush have committed. Rejection means pending changes remain visible, status is **Not saved**, and the consuming action must not continue. Never swallow a rejected flush and report Saved/success. Retrying saves the retained changes; revision conflicts must not silently overwrite newer saved data.
+**Every renderer action that consumes or leaves edited records must first flush both `DraftSession` and `ReviewSession`**: navigation, completion, declaration entry, forms export, and full backup. Resolution means all edits present during the flush have committed. Rejection means pending changes remain visible, status is **Not saved**, and the consuming action must not continue. Never swallow a rejected flush and report Saved/success. Retrying saves the retained changes; revision conflicts must not silently overwrite newer saved data.
 
 Normal window close, app Quit, Windows session-end query, and macOS shutdown notification request that same renderer flush. Main permits termination only after a successful renderer acknowledgement. Failed flush keeps the window open with actionable status and Retry save. A retry after a failed close saves without silently closing; the worker can then close deliberately.
 
 OS Force Quit, power loss, renderer process failure, or an OS overriding a shutdown delay cannot be guaranteed to flush in-memory edits. Do not imply otherwise. Saved SQLite records remain durable; preserve/copy visible unsaved text before forced recovery.
+
+## Full-app backup contract
+
+`createFullBackup()` is the same narrowly typed operation used by preload, renderer and real-SQLite integration tests. Only main chooses a path via the OS save dialog; renderer content cannot supply filesystem paths. The renderer flushes **both** editing sessions before invoking it. `getBackupProgress()` reports choosing/waiting/snapshot/archiving/publishing phases and actual file/byte progress; `cancelFullBackup()` cancels collection, but not an already-started publication. Cancellation of an OS dialog uses its ordinary Cancel action.
+
+Main reserves the backup operation immediately, rejects new mutations and forms exports with actionable `BUSY` results, and drains already-admitted asynchronous imports/browser-state writes and forms exports before collecting the snapshot. The gate covers record/review/completion/declaration writes, selection, acknowledgement and all evidence imports/replacements/removals/deletions. Reads remain available. Protected close waits for an in-flight forms export and refuses termination during backup; after backup cancellation/completion the worker closes deliberately rather than triggering an unexpected deferred quit.
+
+The archive uses this portable contract:
+
+```text
+SWCC-<UTC-timestamp-without-colons>.swcc-backup.zip
+  manifest.json
+  database.sqlite
+  evidence/<year>/E<reference>-<unique-id>.<type>
+```
+
+`manifest.json` has `kind: "full-backup"` (never `"portfolio"`), `archiveVersion: 1`, the snapshot's schema version, `appId: "org.swcc.desktop"`, `sourceSetId`, UTC `createdAt`, snapshot `dataRevision`, and `files` entries with portable `path`, `byteCount` and lowercase SHA-256. The inventory covers the database and every referenced evidence file; the manifest does not inventory itself. Original filenames, relationships, stable reference counters, all years/drafts/standards/review state/manual completions/declarations and relevant app metadata are preserved in the database. Bundled read-only source PDFs and regenerable caches are excluded.
+
+SQLite's **backup API**, not a live-file copy, creates the standalone database including WAL-resident records. Snapshot integrity/relationships/source identities are checked. Inventory comes from that snapshot, and original evidence is streamed unchanged while checking saved byte counts/hashes. Missing, changed, unreadable, symbolic-link or unsafe-path evidence fails visibly, with no silent omission.
+
+The ZIP is streamed into a private partial file beside the destination, flushed to disk, then published by a same-directory rename only after the whole archive succeeds. Failed/cancelled output is removed and an existing archive remains untouched until complete publication. Only publication followed by a successful metadata write advances `lastBackupAt` / `lastBackupRevision`; that update does **not** advance `dataRevision`. Subsequent user-data changes do. The snapshot contains metadata as it existed before this publication. No schema migration was needed: backup metadata already exists in the shipped foundation schema.
+
+Focused tests use the public operation with real multi-year SQLite/WAL records, managed bytes, independent ZIP inspection and reopening the archived database through normal operations. Controlled substitutes are limited to actual OS dialogs, time and failing/paused filesystem output. Real Electron renderer checks exercise keyboard backup, both-session flush protection, busy/close/cancel behavior, status across restart and narrow-window reflow.
 
 ## Shared and supplementary activities
 
@@ -147,7 +176,7 @@ A year is Complete only with all three current manual confirmations and a declar
 
 Choose **Export Forms PDF** beside the annual workflow, review the missing readiness/manual-completion/declaration items, then explicitly choose **Export draft PDF** when incomplete. Empty drafts still emit the checklist, one SAT and one PDP; missing fields remain blank. An OS save dialog chooses the destination. Cancellation is not success; generation and storage errors remain visible and retryable.
 
-The renderer flushes both draft and review sessions before opening export and again before generation. A failed flush retains edits and prevents consuming stale records. Main captures the package, review, evidence metadata/integrity and warning state **synchronously in one SQLite read transaction, before any asynchronous work**. Later edits, resets or evidence deletions do not mix revisions into that forms snapshot. Forms only reference evidence metadata; they do not collect attachment bytes or need an archive mutation lock. Main prevents overlapping Forms PDF requests and waits for an active forms write before approving normal close.
+The renderer flushes both draft and review sessions before opening export and again before generation. A failed flush retains edits and prevents consuming stale records. Main captures the package, review, evidence metadata/integrity and warning state **synchronously in one SQLite read transaction, before any asynchronous work**. Later edits, resets or evidence deletions do not mix revisions into that forms snapshot. Forms only reference evidence metadata; they do not collect attachment bytes. The full-backup gate rejects new forms exports while collecting a backup and drains an already-admitted export before snapshotting. Main prevents overlapping Forms PDF requests and waits for an active forms write before approving normal close.
 
 `pdf-lib` and `@pdf-lib/fontkit` use byte-identical local templates: checklist physical page 1, SAT assessment-tool page 8, and PDP page 11. The checklist's thirteen checkbox centers were measured on the actual 612 × 792 pt image background; generated X glyphs are centered using local font glyph bounds, independent of Step 1 confirmation. Annual standards use the twelve SAT checkboxes independently of review progress and goals. SAT/PDP dates remain separate date-only strings.
 
@@ -169,6 +198,8 @@ SWCC_EXPORT_INSPECT=1 npm test -- tests/forms-export.test.ts
 `tests/desktop/forms.spec.ts` exercises the production offline Electron renderer, keyboard draft confirmation, destination cancellation, busy/error feedback, and failed-save retention followed by exporting the latest text. OS chooser responses and injected disk errors are controlled system-boundary fixtures; generated PDFs and renderer actions are real.
 
 Ticket 08 verification on October 31, 2026, macOS 26.6.2 / arm64: `npm ci`, all 75 public-operation tests, typecheck, lint, build, and 13 targeted desktop forms/completion/draft checks passed. The actual checklist/SAT/PDP sources and generated raster layouts were visually inspected. `package:dir` also passed, and all four forms renderer checks passed offline against the resulting unsigned app bundle with its bundled PDFs/font, including normal-close protection during export. This was an app-bundle smoke, not a DMG installation or Windows/macOS Intel acceptance; those targets were not exercised for this slice. Vite retains its existing large-chunk advisory.
+
+Tickets 08/11 integration verification on October 31, 2026, macOS / arm64: merged npm lock refreshed with npm, `npm ci`, all **86 public-operation tests**, typecheck, lint, build, and the **full 37-test real Electron desktop suite** passed (one GUI worker, production offline renderer). Combined coverage checks that backup rejects new forms exports, drains an admitted real PDF export before snapshotting, and does not treat forms output as a backup or advance its successful-backup status. Forms close protection, both-session flush failures, backup progress/errors/cancellation, and unavailable restore passed unchanged. Integrated installers and Windows/macOS Intel behavior were not exercised; the existing Vite large-chunk advisory remains.
 
 ## Fixed read-only source set
 
@@ -236,3 +267,10 @@ Ticket 07 verification on the same macOS arm64 host, October 31, 2026:
 - `npm run test:desktop`: **29** real Electron checks passed offline using production `file://` assets, including **4** completion cases. These cover any-order keyboard confirmation, C's adjacent dashboard composition, readable blockers/warnings, declaration date/timezone restart, all actual mapped PDF displays and completed rereading, year isolation and status, and failed draft/review flushes.
 - `npm run package:dir`: unsigned arm64 `.app` produced; all **4** completion renderer checks also passed against `release/mac-arm64/SWCC.app/Contents/MacOS/SWCC` offline. This is packaged-app smoke, not a newly installed DMG certification.
 - These checks do not certify Windows/Intel macOS/macOS 14, installer upgrades or OS-initiated shutdown. OS browser launch is substituted only at `shell.openExternal`; no website loading/reading or regulatory verification is claimed.
+
+Ticket 11 verification on the same macOS arm64 host, October 31, 2026:
+
+- `npm test`: **78** real-SQLite public-operation checks passed, including **10** full-backup cases covering multiple years/WAL, complete inventory/hashes, original evidence, completion/declaration records, read-back through normal operations, admitted imports, conflicting changes/deletions, unsafe paths, disk/snapshot/publication failures, cancellation and later unbacked revisions.
+- `npm run typecheck`, `npm run lint` and `npm run build`: passed; the existing large-bundle advisory remains.
+- `npm run test:desktop -- tests/desktop/backup.spec.ts tests/desktop/drafts.spec.ts tests/desktop/completion.spec.ts`: **13** production `file://`, offline Electron checks passed, including **4** backup renderer cases. OS save dialogs are controlled at Electron's dialog boundary; archive generation, SQLite and managed bytes are real.
+- Restore remains ticket 12. Windows/Intel macOS/macOS 14 installed backup behavior, installer upgrades, actual removable-drive exhaustion and power-loss durability have not been exercised by this ticket.

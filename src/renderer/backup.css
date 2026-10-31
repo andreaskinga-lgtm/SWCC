@@ -1,0 +1,19 @@
+.backup-layout { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(270px, 1fr); gap: 36px; align-items: start; }
+.backup-main { padding: 37px; }
+.backup-main > h2 { font-size: 25px; }
+.backup-main > h3 { margin-top: 28px; }
+.backup-main > p, .backup-state p, .restore-entry p { color: var(--muted); font-size: 13px; max-width: 58ch; }
+.backup-main > button { display: inline-flex; align-items: center; gap: 10px; }
+.backup-illustration { display: flex; align-items: center; gap: 18px; width: fit-content; padding: 27px 32px; background: var(--leaf); color: var(--accent); border-radius: 12px 12px 2px 2px; margin-bottom: 27px; }
+.backup-illustration span { width: 42px; height: 1px; background: var(--accent); opacity: .4; }
+.backup-main .backup-summary { color: var(--accent); margin: 25px 0; }
+.backup-state { border-bottom: 1px solid #d7deca; padding: 12px 0 27px; }
+.backup-state h2, .restore-entry h2 { font-size: 17px; }
+.backup-state .backup-indicator { display: inline-block; border: 1px solid #bac6a7; border-radius: 8px; background: var(--leaf); color: var(--accent); padding: 8px 12px; }
+.restore-entry { padding-top: 27px; }
+.restore-entry button:disabled { cursor: not-allowed; }
+.backup-progress { margin-top: 22px; padding: 18px; background: var(--leaf); border-radius: 8px; font-size: 13px; }
+.backup-progress progress { width: 100%; accent-color: var(--accent); }
+.backup-note { font-size: 12px; }
+@media (max-width: 1100px) { .backup-layout { grid-template-columns: 1fr; } }
+@media (max-width: 700px) { .backup-main { padding: 24px; } .backup-illustration { padding: 22px 25px; } }
