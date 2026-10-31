@@ -92,7 +92,8 @@ if (startupFailure) {
       const operations = application.operations;
       const channels: Record<string, keyof ApplicationOperations> = {
         'swcc:get-state': 'getState', 'swcc:create-year': 'createYear', 'swcc:open-year': 'openYear',
-        'swcc:save-draft': 'saveDraft', 'swcc:acknowledge-storage': 'acknowledgeStorage',
+        'swcc:save-draft': 'saveDraft', 'swcc:create-goal': 'createGoal', 'swcc:update-goal': 'updateGoal',
+        'swcc:delete-goal': 'deleteGoal', 'swcc:acknowledge-storage': 'acknowledgeStorage',
       };
       function trusted(event: Electron.IpcMainInvokeEvent) {
         return event.sender === window?.webContents && event.senderFrame === window.webContents.mainFrame

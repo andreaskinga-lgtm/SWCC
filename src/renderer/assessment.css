@@ -1,0 +1,174 @@
+.assessment-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(270px, 1fr);
+  gap: 34px;
+  align-items: start;
+}
+.assessment-writing {
+  margin-bottom: 0;
+  padding: 30px;
+  border-radius: 14px;
+}
+.assessment-writing .narrative { margin: 24px 0 28px; }
+.assessment-writing .narrative > span { font-size: 16px; }
+.assessment-writing .narrative > small { color: var(--muted); }
+.assessment-writing .narrative textarea { line-height: 1.8; }
+.standard-choices {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.standard-choices legend { margin-bottom: 9px; font-size: 16px; font-weight: 600; }
+.standard-choices > p { color: var(--muted); font-size: 12px; }
+.standard-choices label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid #e0e6d7;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.standard-choices input[type=checkbox] {
+  width: 17px;
+  height: 17px;
+  margin: 1px 0 0;
+  flex: 0 0 auto;
+  accent-color: var(--accent);
+}
+.assessment-side { min-width: 0; }
+.goals-section {
+  padding: 24px;
+  background: #dfe8ca;
+  border-radius: 14px;
+}
+.section-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.section-heading h2 { margin: 0; }
+.section-heading .text-button { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.goals-section > .quiet, .goal-connection-strip > .quiet { margin: 11px 0 0; color: var(--muted); font-size: 12px; }
+.assessment-goal-list { margin-top: 20px; }
+.goal-editor {
+  padding: 17px 0 1px;
+  border-bottom: 1px solid #c8d3b3;
+}
+.goal-editor:first-child { padding-top: 4px; }
+.goal-editor:last-child { border-bottom: 0; }
+.goal-editor-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.goal-reference {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  padding: 5px 8px;
+  border-radius: 5px;
+  background: white;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+}
+.overview-goal-list { margin: 15px 0 20px; padding: 0; list-style: none; }
+.overview-goal-list li { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 1px solid #c8d3b3; }
+.overview-goal-list li > span { flex: 0 0 auto; color: var(--accent); font-size: 11px; font-weight: 700; }
+.overview-goal-list li > strong { min-width: 0; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.goal-editor .field { margin-bottom: 15px; }
+.goal-editor .field input, .goal-editor .field textarea { background: white; }
+.goal-editor .field input { font-size: 14px; font-weight: 600; }
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7px;
+  border: 0;
+  color: var(--muted);
+  background: transparent;
+}
+.icon-button:hover:not(:disabled) { color: #7d2e24; background: #ffffffa8; }
+.goal-validation { display: block; margin: -7px 0 12px; color: #7d2e24; }
+.empty { color: var(--muted); }
+.readiness-panel {
+  margin-top: 22px;
+  padding: 22px;
+  border: 1px solid #d7deca;
+  border-radius: 12px;
+  background: white;
+}
+.readiness-panel.ready { border-color: #9eaf82; background: #fbfcf8; }
+.readiness-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.readiness-heading h2 { margin: 0; font-size: 16px; }
+.readiness-status {
+  flex: 0 0 auto;
+  color: #775016;
+  font-size: 12px;
+  font-weight: 700;
+}
+.readiness-status.ready { color: var(--accent); }
+.readiness-panel > p { margin: 13px 0; color: var(--muted); font-size: 12px; }
+.readiness-missing { margin: 0; padding: 0 0 0 18px; color: #52603f; }
+.readiness-missing li { margin: 8px 0; font-size: 12px; line-height: 1.5; }
+.readiness-panel > small { display: block; margin-top: 16px; color: var(--muted); font-size: 11px; }
+.goal-connection-strip {
+  margin-bottom: 25px;
+  padding: 23px 26px;
+  border-radius: 14px;
+  background: #dfe8ca;
+}
+.goal-connection-strip .section-heading h2 { max-width: 120px; }
+.plan-goal-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin-top: 19px; }
+.plan-goal {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  min-width: 0;
+  padding: 15px;
+  border-radius: 10px;
+  background: white;
+}
+.plan-goal h3 { margin: 3px 0 6px; font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
+.plan-goal p { margin: 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.plan-goal .text-button { padding: 3px; font-size: 12px; }
+.plan-date-panel { padding: 28px; }
+.plan-date-panel h2 { margin-bottom: 22px; }
+.plan-date-panel > p { max-width: 72ch; color: var(--muted); font-size: 13px; }
+.goal-dialog {
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(760px, calc(100vh - 32px));
+  padding: 25px;
+  border: 1px solid #d7deca;
+  border-radius: 14px;
+  color: #303b25;
+  background: white;
+  box-shadow: 0 20px 70px #303b2530;
+}
+.goal-dialog::backdrop { background: #1b2518a0; }
+.goal-dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 13px; }
+.goal-dialog-header h2 { margin: 0; font-size: 20px; }
+.goal-dialog-copy { color: var(--muted); font-size: 13px; }
+.goal-dialog .field { margin: 18px 0; }
+.goal-dialog .field small { color: var(--muted); font-weight: 400; }
+.goal-dialog-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 22px; }
+.goal-dialog .secondary {
+  border: 1px solid #bac6a7;
+  background: white;
+  color: var(--accent);
+}
+.goal-dialog .goal-validation { margin: 12px 0; }
+.goal-retry { padding: 13px; border-radius: 8px; background: #fff4ed; color: #7d2e24; }
+.goal-retry p { margin: 0 0 10px; font-size: 13px; }
+.goal-retry button { padding: 8px 12px; }
+
+@media (max-width: 1100px) {
+  .assessment-layout { grid-template-columns: 1fr; }
+  .assessment-side { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); align-items: start; gap: 20px; }
+  .readiness-panel { margin-top: 0; }
+}
+@media (max-width: 700px) {
+  .assessment-writing { padding: 22px; }
+  .assessment-side { display: block; }
+  .readiness-panel { margin-top: 20px; }
+  .goals-section { padding: 19px; }
+  .goal-connection-strip { padding: 19px; }
+  .plan-goal-list { grid-template-columns: 1fr; }
+  .goal-dialog { padding: 20px; }
+}
