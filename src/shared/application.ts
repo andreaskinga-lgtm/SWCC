@@ -122,7 +122,7 @@ export interface AppState {
 }
 export interface OperationError {
   code: 'VALIDATION' | 'DUPLICATE_YEAR' | 'NOT_FOUND' | 'CONFLICT' | 'STORAGE' | 'IPC' | 'BROWSER' | 'INACTIVE' | 'CONFIRMATION_REQUIRED'
-    | 'UNSUPPORTED_FILE' | 'FILE_TOO_LARGE' | 'UNREADABLE' | 'EVIDENCE' | 'OPEN' | 'NOT_READY';
+    | 'UNSUPPORTED_FILE' | 'FILE_TOO_LARGE' | 'UNREADABLE' | 'EVIDENCE' | 'OPEN' | 'NOT_READY' | 'EXPORT' | 'OVERFLOW';
   message: string;
   existingPackageId?: string;
   committed?: boolean;
@@ -183,6 +183,7 @@ export interface YearPackage extends Draft {
   activities: Activity[];
 }
 export interface ApplicationOperations extends ReviewOperations {
+  exportForms(input: import('./forms.js').ExportForms): Promise<Result<import('./forms.js').FormsExportOutcome>>;
   getWorkflow(packageId: string): Promise<Result<import('./workflow.js').AnnualWorkflow>>;
   completeStep(input: import('./workflow.js').CompleteStep): Promise<Result<YearPackage>>;
   recordDeclaration(input: import('./workflow.js').RecordDeclaration): Promise<Result<YearPackage>>;

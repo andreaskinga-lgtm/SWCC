@@ -16,6 +16,9 @@ import { evidenceOperations, EvidenceCleanupFailure, recoverEvidenceDeletions } 
 import type { EvidenceSystem } from './evidence.js';
 import { ANNUAL_STEPS, evaluateWorkflow, packageStatus } from '../../shared/workflow.js';
 import type { AnnualStep, StepCompletion } from '../../shared/workflow.js';
+import { formsExportWarnings } from '../../shared/forms.js';
+import { exportAnnualForms } from '../export/forms.js';
+import type { FormsSystem } from '../export/forms.js';
 
 class ApplicationFailure extends Error {
   constructor(readonly detail: OperationError) { super(detail.message); }
@@ -84,6 +87,7 @@ export function openApplication(
   clock: { now?: () => Date; today?: () => string } = {},
   reviewSystem?: ReviewSystem,
   evidenceSystem?: EvidenceSystem,
+  formsSystem?: FormsSystem,
 ) {
   const paths = storageLayout(storageRoot);
   const dataset = paths.dataset;
@@ -186,6 +190,28 @@ export function openApplication(
   const evidence = evidenceOperations(database, paths.evidence, getPackage, now, fail, identifier, evidenceSystem);
   const operations: ApplicationOperations = {
     ...reviewOperations(database, now, reviewSystem),
+    exportForms: input => operation(() => {
+      if (!input || typeof input !== 'object' || Array.isArray(input)
+        || Object.keys(input).some(key => !['packageId', 'confirmDraft'].includes(key)))
+        fail('VALIDATION', 'Choose a year package and confirm any draft warning before exporting.');
+      identifier(input.packageId);
+      if (input.confirmDraft !== undefined && input.confirmDraft !== true)
+        fail('VALIDATION', 'Confirm the incomplete-package warning before exporting a draft.');
+      const snapshot = database.transaction(() => {
+        const record = getPackage(input.packageId);
+        const review = readReviewProgress(database, record.id);
+        const attachments = evidence.getEvidence(record.id);
+        const workflow = evaluateWorkflow(record, review, today(), new Set(attachments
+          .filter(entry => entry.integrity === 'readable').map(entry => entry.activityId)));
+        const missing = formsExportWarnings(record, workflow);
+        if (missing.length && !input.confirmDraft) throw new ApplicationFailure({
+          code: 'CONFIRMATION_REQUIRED', message: 'This annual package is incomplete. Review the missing items and explicitly export a draft.', missing,
+        });
+        return { package: record, review, attachments };
+      })();
+      if (!formsSystem) fail('EXPORT', 'The forms destination dialog is unavailable. No output was published.');
+      return exportAnnualForms(snapshot, formsSystem, fail);
+    }),
     getWorkflow: id => operation(() => {
       identifier(id);
       return evaluateWorkflow(getPackage(id), readReviewProgress(database, id), today(), evidence.readableActivityIds(id));

@@ -25,6 +25,7 @@ let window: BrowserWindow | null = null;
 let application: ReturnType<typeof openApplication> | null = null;
 let approvedClose = false;
 let closeRequested = false;
+let exportingForms: Promise<Result<unknown>> | null = null;
 
 function requestClose() {
   closeRequested = true;
@@ -72,6 +73,19 @@ if (startupFailure) {
           return result.canceled ? null : result.filePaths[0] ?? null;
         },
         openPath: path => shell.openPath(path),
+      }, {
+        chooseDestination: async selection => {
+          const options = { title: 'Export Forms PDF', defaultPath: selection.defaultName,
+            filters: [{ name: 'PDF document', extensions: ['pdf'] }] };
+          const result = window ? await dialog.showSaveDialog(window, options) : await dialog.showSaveDialog(options);
+          return result.canceled ? null : result.filePath ?? null;
+        },
+        readChecklist: () => readFileSync(app.isPackaged
+          ? join(process.resourcesPath, 'sources', 'step-one.pdf') : join(directory, '../../Step One SWCC.pdf')),
+        readAssessment: () => readFileSync(app.isPackaged
+          ? join(process.resourcesPath, 'sources', 'assessment-2026.pdf') : join(directory, '../../OCSWSSW-CCP-Assess-Tool-2026-English.pdf')),
+        readFont: () => readFileSync(app.isPackaged
+          ? join(process.resourcesPath, 'fonts', 'NotoSans-Regular.ttf') : join(directory, '../../resources/fonts/NotoSans-Regular.ttf')),
       });
       if (app.isPackaged) {
         for (const document of SOURCE_DOCUMENTS) {
@@ -110,6 +124,7 @@ if (startupFailure) {
       });
       const operations = application.operations;
       const channels: Record<string, keyof ApplicationOperations> = {
+        'swcc:export-forms': 'exportForms',
         'swcc:get-workflow': 'getWorkflow', 'swcc:complete-step': 'completeStep',
         'swcc:record-declaration': 'recordDeclaration',
         'swcc:get-state': 'getState', 'swcc:create-year': 'createYear', 'swcc:open-year': 'openYear',
@@ -136,6 +151,11 @@ if (startupFailure) {
           if (key === 'recordReviewVisits' && (!window?.isVisible() || !window.isFocused() || window.isMinimized()))
             return { ok: false, error: { code: 'INACTIVE', message: 'Return to the active reader to track this page.' } };
           const operation = operations[key] as (input: unknown) => Promise<Result<unknown>>;
+          if (key === 'exportForms') {
+            if (exportingForms) return { ok: false, error: { code: 'EXPORT', message: 'A Forms PDF export is already running. Wait for it to finish before exporting again.' } };
+            exportingForms = operation(input).finally(() => { exportingForms = null; });
+            return exportingForms;
+          }
           return operation(input);
         });
       }
@@ -150,8 +170,9 @@ if (startupFailure) {
       window.on('hide', notifyReaderActive);
       window.on('minimize', notifyReaderActive);
       window.on('restore', notifyReaderActive);
-      ipcMain.handle('swcc:complete-close', event => {
+      ipcMain.handle('swcc:complete-close', async event => {
         if (!trusted(event) || !closeRequested) return { ok: false, error: { code: 'IPC', message: 'No close request is pending.' } };
+        await exportingForms;
         approvedClose = true;
         // Allow the IPC acknowledgement to reach the renderer before destruction.
         setImmediate(() => app.quit());
