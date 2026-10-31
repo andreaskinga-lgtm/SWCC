@@ -4,7 +4,7 @@
 
 **Blocked by:** 02: Maintain annual self-assessment and shared learning goals.
 
-**Status:** claimed
+**Status:** resolved
 
 - [ ] Implement C's dashboard with goals beside activities, each activity shown once with all linked G references, a leading Record an activity action, and a separate annual-workflow area rather than a metrics-card grid.
 - [ ] Implement C's development-plan goal-connection strip, activity index, and one selected activity editor. Selecting an A reference edits the same record from any linked goal; unlinked activities remain visible.
@@ -34,3 +34,7 @@ Actual final outcomes after merging latest integration:
 - `npx playwright test`: **18 passed**, real production `file://` Electron renderer offline; three activity cases plus all existing assessment, draft and review checks. Activity checks cover shared and inline-created goals, supplementary work, evidence/reflection, valid/invalid transitions, outside-year dates, restart with a changed timezone, 620px/520px keyboard reflow, selection/navigation/close protection, failed creation retry without duplicate references, and browser launch failures.
 
 Caveats: build reports the existing bundle-size advisory. OS browser calls are controlled only at the `shell.openExternal` boundary in automated checks; no claim that a website loaded. No new installer, Windows/Intel macOS or cross-platform transfer was exercised. Managed attachment files, deletion of activities/years, manual step completion/declaration and exports remain later tickets, not simulated here. No unresolved ticket-03 criteria or blockers identified.
+
+### 2026-10-31 — Integration merge verification
+
+Merged `ticket/03` commit `931778122c118a2e4e22b62cb0eeb4e6508e5924` with `--no-ff` as integration commit `d8863ffcac399a3a7fe413db9b71b317550e1421`. Integrated checks passed: `npm test` (25 tests), `npm run typecheck`, `npm run lint`, `npm run build` (with a Vite chunk-size warning), and `npx playwright test` (18 tests).
