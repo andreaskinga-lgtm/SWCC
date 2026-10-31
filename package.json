@@ -20,6 +20,7 @@
   },
   "main": "dist/main/index.js",
   "dependencies": {
+    "pdfjs-dist": "5.4.624",
     "lucide-react": "1.66.0",
     "better-sqlite3": "12.11.1",
     "react": "19.3.1",

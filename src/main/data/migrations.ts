@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
+import { reviewMigration } from './review-migration.js';
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 const migrations = [
   `
   CREATE TABLE year_packages (
@@ -34,6 +35,7 @@ const migrations = [
     PRIMARY KEY(package_id, kind)
   );
   `,
+  reviewMigration,
 ];
 
 export function migrate(db: Database.Database) {

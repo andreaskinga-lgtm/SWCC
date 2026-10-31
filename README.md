@@ -1,6 +1,6 @@
 # SWCC desktop
 
-Ticket 01 foundation: a real offline Electron app with durable annual assessment drafts. The production shell follows the approved C / Learning map reference at commit `5477044`; prototype samples and simulated operations are not shipped.
+A real offline Electron app with durable annual assessment drafts and per-year standards review. The production shell follows the approved C / Learning map reference at commit `5477044`; prototype samples and simulated operations are not shipped.
 
 ## Run and check
 
@@ -60,9 +60,12 @@ Startup refuses corrupt, empty, missing-from-an-existing-dataset, future-schema,
 | `src/main/data/storage.ts` | Stable dataset/evidence/runtime/staging/journal paths |
 | `src/main/index.ts`, `preload.cts` | Single instance, restricted typed IPC, isolated/sandboxed renderer, navigation/new-window constraints, protected close |
 | `src/renderer/draft-session.ts` | Retained draft, serialized autosave, shared flush contract |
+| `src/shared/review.ts` | Fixed physical-page mappings and shared Step 1 readiness/missing items |
+| `src/main/data/review.ts` | Durable per-year review operations and the fixed resources browser action |
+| `src/renderer/Review.tsx`, `PdfReader.tsx`, `review-session.ts` | C checklist, real local PDF.js worker/viewport tracking, serialized review writes and flush |
 | `src/renderer/App.tsx` | C shell, years, assessment writing, independent plan date, honest later-feature destinations |
 
-Future export/backup implementations belong in **main-process modules**, not renderer/file-system bridges. Introduce only their narrowly typed public operations when implemented. Review, standards, goals, activities, evidence import, readiness/completion, declaration, exports, and archives are intentionally not implemented in ticket 01.
+Future export/backup implementations belong in **main-process modules**, not renderer/file-system bridges. Introduce only their narrowly typed public operations when implemented. Goals, annual assessment standards, activities, evidence import, manual completion, declaration, exports, and archives are not part of the foundation/review tickets.
 
 Public operations return `Result<T>`, not success-shaped failures. `createYear` returns a stable package and persists selection. A duplicate returns `DUPLICATE_YEAR` with `existingPackageId` for actionable opening. `openYear` persists selection without advancing content/data revisions. `saveDraft` accepts a **complete `Draft`** plus package ID and expected content revision; unknown draft fields, malformed dates, and stale revisions are rejected without overwriting the saved record.
 
@@ -76,11 +79,25 @@ Each package owns `reference_counters` for `G`, `A`, and `E`, initialized at 1. 
 
 `DraftSession.edit()` retains text immediately. Autosave debounces 400 ms and serializes writes. Keystrokes during a save remain visible; returned revisions advance underneath them, and the newest draft is saved next.
 
-**Every renderer action that consumes or leaves edited records must first `await session.flush()`**: navigation now, and completion/export/backup callers later. Resolution means all edits present during the flush have committed. Rejection means the draft remains visible, status is **Not saved**, and the consuming action must not continue. Never swallow a rejected flush and report Saved/success. Retrying saves the retained draft; revision conflicts must not silently overwrite newer saved data.
+**Every renderer action that consumes or leaves edited records must first flush both `DraftSession` and `ReviewSession`**: navigation now, and completion/export/backup callers later. Resolution means all edits present during the flush have committed. Rejection means pending changes remain visible, status is **Not saved**, and the consuming action must not continue. Never swallow a rejected flush and report Saved/success. Retrying saves the retained changes; revision conflicts must not silently overwrite newer saved data.
 
 Normal window close, app Quit, Windows session-end query, and macOS shutdown notification request that same renderer flush. Main permits termination only after a successful renderer acknowledgement. Failed flush keeps the window open with actionable status and Retry save. A retry after a failed close saves without silently closing; the worker can then close deliberately.
 
 OS Force Quit, power loss, renderer process failure, or an OS overriding a shutdown delay cannot be guaranteed to flush in-memory edits. Do not imply otherwise. Saved SQLite records remain durable; preserve/copy visible unsaved text before forced recovery.
+
+## Offline standards review
+
+Review renders the original **48-page** ethics PDF using PDF.js and a local dedicated worker. CMaps, standard fonts and WASM assets are bundled in `dist/renderer/pdf-assets/` and served locally in development. No CDN, embedded remote viewer, thumbnail claims, or browser PDF plugin is used. The reader receives only the fixed document's bytes through trusted IPC, never filesystem access or a caller-chosen path.
+
+The shared `reviewReadiness()` is the sole Step 1 section/missing-item implementation. Mappings use physical PDF pages (cover = 1): 2, 4, 7, 8, 9–10, 11–15, 16–18, 19–26, 27–31, 32–33, 34–37, and 38–40. Every mapped page must qualify; other pages do not add categories.
+
+A page qualifies only **after its actual canvas render finishes**, in a visible/focused OS window and visible/active document, with visible height at least half the smaller of the page height and reader `clientHeight`. Window clipping is included. Fetching the whole document, offscreen renders, incidental slivers and page jumps do not count. No dwell timer or comprehension claim is made.
+
+`getReview`, `recordReviewVisits`, `saveReviewPosition`, `resetReviewSection`, `launchReviewResources`, and `resetReviewResources` persist state per package and the fixed `ethics-2018` document. Reader position is the physical page, scroll offset divided by rendered page height, and zoom (75–200%). Pending writes are serialized and participate in navigation/close flush; storage failures retain the pending visits/position and expose Retry review save.
+
+`reviewRevision` advances only when a reset actually removes mapped visits or a recorded resources launch. Rereading, new automatic checks, page/position/zoom changes and year navigation do not invalidate Step 1. Review writes do not advance assessment/plan/content revisions; durable review changes advance app `dataRevision` for future backup tracking. **Manual Complete Step is intentionally not implemented here** (ticket 07); Ready is not Completed.
+
+Only actually displaying physical page 48 exposes Other required resources. Explicit action invokes main-process `shell.openExternal` with the fixed plain College URL, and checks the item only after OS launch succeeds and the timestamp commits. Browser failures report the OS error and leave an unchecked item unchecked. Internet is needed to view the website; launch success proves neither loading nor reading. An explicit reset clears the timestamp.
 
 ## Fixed read-only source set
 
@@ -110,6 +127,14 @@ Initial foundation verification on **macOS 26.6.2 / arm64**, October 31, 2026:
 - Original/bundled source SHA-256 hashes matched for all three PDFs.
 
 This is initial **ticket 01** packaged/offline verification, not later full-feature target acceptance. macOS 14, Intel macOS, Windows 11, Gatekeeper's quarantined-download flow, cross-version installer upgrades, and OS-initiated machine shutdown have not been exercised. No platform restriction blocked the available macOS arm64 smoke.
+
+Ticket 06 review verification on the same macOS arm64 host, October 31, 2026:
+
+- Typecheck, lint and production build passed; 11 real-SQLite public-operation checks and all 12 real Electron desktop checks (5 foundation + 7 review) passed.
+- The review checks exercise an actual local dedicated PDF.js worker and rendered PDF pixels, both exact half-smaller-height boundaries, partial/multi-page sections, jumps, hidden/inactive/offscreen exclusion, per-year restart/position/zoom, keyboard reflow, and failure-protected review navigation/close.
+- `npm run package:dir` produced an unsigned arm64 `.app`; all 7 review checks passed against `release/mac-arm64/SWCC.app/Contents/MacOS/SWCC` offline, using packaged read-only PDF resources and local worker/assets, without a development server.
+- Browser success/failure is injected **only at the OS `shell.openExternal` boundary** in automated checks. The real main-process action persists the actual successful launch result; these checks do not claim that an external website loaded or was read.
+- This is an available-host packaged application smoke, not a newly mounted DMG installation or Windows/Intel/macOS 14 certification. Manual step completion remains ticket 07.
 
 Repeat packaged checks after building/installing:
 

@@ -114,13 +114,14 @@ test('corrupt and future-schema datasets are refused rather than replaced by emp
   const root = storage();
   const app = openApplication(root);
   const record = value(await app.operations.createYear(2024));
+  const schemaVersion = value(await app.operations.getState()).schemaVersion;
   app.close();
   const fixture = new Database(resolve(root, 'dataset/database.sqlite'));
   fixture.pragma('user_version = 999');
   fixture.close();
   expect(() => openApplication(root)).toThrow('newer than supported');
   const repair = new Database(resolve(root, 'dataset/database.sqlite'));
-  repair.pragma('user_version = 1');
+  repair.pragma(`user_version = ${schemaVersion}`);
   repair.close();
   const reopened = openApplication(root);
   expect(value(await reopened.operations.getState()).selectedPackage?.id).toBe(record.id);
@@ -148,6 +149,7 @@ test('a failed migration and invalid ownership are reported while the saved pack
   const root = storage();
   const app = openApplication(root);
   const record = value(await app.operations.createYear(2024));
+  const schemaVersion = value(await app.operations.getState()).schemaVersion;
   app.close();
   const file = resolve(root, 'dataset/database.sqlite');
   let fixture = new Database(file);
@@ -155,7 +157,7 @@ test('a failed migration and invalid ownership are reported while the saved pack
   fixture.close();
   expect(() => openApplication(root)).toThrow('already exists');
   fixture = new Database(file);
-  fixture.pragma('user_version = 1');
+  fixture.pragma(`user_version = ${schemaVersion}`);
   fixture.pragma('foreign_keys = OFF');
   fixture.prepare('UPDATE app_metadata SET selected_package_id = ?').run(randomUUID());
   fixture.close();
@@ -179,4 +181,79 @@ test('long incomplete narratives are saved in full without an invented text quot
   expect(saved.ok).toBe(true);
   expect(value(await app.operations.getState()).selectedPackage?.strengths === narrative).toBe(true);
   app.close();
+});
+
+test('review resumes per year and checks a section only after all mapped physical pages', async () => {
+  const root = storage();
+  let app = openApplication(root);
+  const first = value(await app.operations.createYear(2026));
+  const second = value(await app.operations.createYear(2025));
+  expect(value(await app.operations.getReview(first.id))).toMatchObject({
+    visitedPages: [], page: 1, offset: 0, zoom: 100,
+    readiness: { ready: false, missing: expect.arrayContaining(['Review Code of Ethics.', 'Launch Other required resources in the default browser.']) },
+  });
+  let review = value(await app.operations.recordReviewVisits({ packageId: first.id, pages: [11, 15, 48] }));
+  expect(review.readiness.sections.find(section => section.id === 'principle-ii')?.checked).toBe(false);
+  expect(review.resourcesAvailable).toBe(true);
+  review = value(await app.operations.recordReviewVisits({ packageId: first.id, pages: [12, 13, 14] }));
+  expect(review.readiness.sections.find(section => section.id === 'principle-ii')?.checked).toBe(true);
+  await app.operations.saveReviewPosition({ packageId: first.id, page: 15, offset: 0.375, zoom: 150 });
+  app.close();
+  app = openApplication(root);
+  expect(value(await app.operations.getReview(first.id))).toMatchObject({ visitedPages: [11, 12, 13, 14, 15, 48], page: 15, offset: 0.375, zoom: 150 });
+  expect(value(await app.operations.getReview(second.id))).toMatchObject({ visitedPages: [], page: 1, zoom: 100, resourcesAvailable: false });
+  app.close();
+});
+
+test('review resets reopen only Step 1; rereading, position, and browser success never invalidate it', async () => {
+  const root = storage();
+  let browserFailure = true;
+  const launches: string[] = [];
+  const system = {
+    openExternal: async (url: string) => {
+      launches.push(url);
+      if (browserFailure) throw new Error('No browser association');
+    },
+    readDocument: () => new Uint8Array(readFileSync('Code-of-Ethics-and-Standards-of-Practice-September-7-2018 (1).pdf')),
+  };
+  const app = openApplication(root, { now: () => new Date('2026-10-31T20:00:00Z') }, system);
+  const record = value(await app.operations.createYear(2026));
+  expect(await app.operations.launchReviewResources(record.id)).toMatchObject({ ok: false, error: { code: 'VALIDATION' } });
+  expect(launches).toEqual([]);
+  // These are operation claims, not viewport claims; real viewport tests exercise their producer.
+  let review = value(await app.operations.recordReviewVisits({ packageId: record.id, pages: Array.from({ length: 48 }, (_, index) => index + 1) }));
+  expect(review.readiness.sections.every(section => section.checked)).toBe(true);
+  expect(review.readiness.missing).toEqual(['Launch Other required resources in the default browser.']);
+  expect(await app.operations.launchReviewResources(record.id)).toMatchObject({ ok: false, error: { code: 'BROWSER', message: expect.stringContaining('No browser association') } });
+  expect(value(await app.operations.getReview(record.id)).resourcesLaunchedAt).toBeNull();
+  browserFailure = false;
+  review = value(await app.operations.launchReviewResources(record.id));
+  expect(launches).toEqual([
+    'https://www.ocswssw.org/registrants/continuing-competence-program/',
+    'https://www.ocswssw.org/registrants/continuing-competence-program/',
+  ]);
+  expect(review).toMatchObject({ resourcesLaunchedAt: '2026-10-31T20:00:00.000Z', readiness: { ready: true }, reviewRevision: 0 });
+  const savedRevision = value(await app.operations.getState()).dataRevision;
+  await app.operations.recordReviewVisits({ packageId: record.id, pages: [2, 48] });
+  await app.operations.launchReviewResources(record.id);
+  expect(value(await app.operations.getState()).dataRevision).toBe(savedRevision);
+  await app.operations.saveReviewPosition({ packageId: record.id, page: 40, offset: 0.2, zoom: 200 });
+  expect(value(await app.operations.getReview(record.id)).reviewRevision).toBe(0);
+  review = value(await app.operations.resetReviewSection({ packageId: record.id, sectionId: 'principle-iv' }));
+  expect(review.reviewRevision).toBe(1);
+  expect(review.visitedPages).not.toContain(19);
+  expect(review.visitedPages).not.toContain(26);
+  expect(review.visitedPages).toContain(27);
+  expect(review.readiness.missing).toEqual(['Review Principle IV: The Social Work and Social Service Work Record.']);
+  review = value(await app.operations.resetReviewResources(record.id));
+  expect(review).toMatchObject({ resourcesLaunchedAt: null, reviewRevision: 2 });
+  await app.operations.resetReviewResources(record.id);
+  await app.operations.resetReviewSection({ packageId: record.id, sectionId: 'principle-iv' });
+  expect(value(await app.operations.getReview(record.id)).reviewRevision).toBe(2);
+  expect(value(await app.operations.openYear(record.id))).toMatchObject({ assessmentRevision: 0, planRevision: 0, contentRevision: 0, reviewRevision: 2 });
+  expect(value(await app.operations.getReviewDocument())).toEqual(system.readDocument());
+  app.close();
+  const reopened = openApplication(root);
+  expect(value(await reopened.operations.getReview(record.id))).toMatchObject({ reviewRevision: 2, resourcesLaunchedAt: null, page: 40, offset: 0.2, zoom: 200 });
+  reopened.close();
 });
