@@ -22,6 +22,9 @@ import type { FormsSystem } from '../export/forms.js';
 import { createFullBackup } from './backup.js';
 import type { BackupSystem } from './backup.js';
 import type { BackupProgress } from '../../shared/backup.js';
+import { exportAnnualPortfolio } from '../export/portfolio.js';
+import type { PortfolioSystem } from '../export/portfolio.js';
+import type { PortfolioProgress } from '../../shared/portfolio.js';
 
 class ApplicationFailure extends Error {
   constructor(readonly detail: OperationError) { super(detail.message); }
@@ -92,6 +95,7 @@ export function openApplication(
   evidenceSystem?: EvidenceSystem,
   formsSystem?: FormsSystem,
   backupSystem?: BackupSystem,
+  portfolioSystem?: PortfolioSystem,
 ) {
   const paths = storageLayout(storageRoot);
   const dataset = paths.dataset;
@@ -193,14 +197,66 @@ export function openApplication(
   }
   const evidence = evidenceOperations(database, paths.evidence, getPackage, now, fail, identifier, evidenceSystem);
   let backupController: AbortController | null = null;
+  let portfolioController: AbortController | null = null;
   const idleProgress = (): BackupProgress => ({
     phase: 'idle', filesCompleted: 0, filesTotal: 0, bytesCompleted: 0, bytesTotal: 0,
   });
   let backupProgress = idleProgress();
+  let portfolioProgress: PortfolioProgress = idleProgress();
   const mutations = new Set<Promise<unknown>>();
   const operations: ApplicationOperations = {
+    exportPortfolio: input => operation(async () => {
+      if (backupController || portfolioController) fail('BUSY', 'An archive operation is already running. Wait for it to finish before exporting a portfolio.');
+      if (!input || typeof input !== 'object' || Array.isArray(input)
+        || Object.keys(input).some(key => !['packageId', 'confirmDraft'].includes(key))
+        || (input.confirmDraft !== undefined && input.confirmDraft !== true))
+        fail('VALIDATION', 'Choose a year package and confirm any draft warning before exporting.');
+      identifier(input.packageId);
+      const { packageId, confirmDraft } = input;
+      const controller = new AbortController();
+      portfolioController = controller;
+      portfolioProgress = { ...idleProgress(), phase: 'waiting' };
+      try {
+        let stopped!: () => void;
+        const cancelled = new Promise<void>(resolveCancelled => { stopped = resolveCancelled; });
+        controller.signal.addEventListener('abort', stopped, { once: true });
+        try { await Promise.race([Promise.allSettled([...mutations]), cancelled]); }
+        finally { controller.signal.removeEventListener('abort', stopped); }
+        if (controller.signal.aborted) return { cancelled: true };
+        portfolioProgress = { ...idleProgress(), phase: 'snapshot' };
+        const snapshot = database.transaction(() => {
+          const record = getPackage(packageId);
+          const review = readReviewProgress(database, record.id);
+          const attachments = evidence.getEvidence(record.id);
+          const workflow = evaluateWorkflow(record, review, today(), new Set(attachments
+            .filter(entry => entry.integrity === 'readable').map(entry => entry.activityId)));
+          const missing = formsExportWarnings(record, workflow);
+          if (missing.length && !confirmDraft) throw new ApplicationFailure({
+            code: 'CONFIRMATION_REQUIRED', message: 'This annual package is incomplete. Review the missing items and explicitly export a draft.', missing,
+          });
+          const rows = database.prepare('SELECT id, managed_path AS managedPath FROM evidence_attachments WHERE package_id = ?')
+            .all(record.id) as { id: string; managedPath: string }[];
+          const meta = database.prepare('SELECT data_revision AS dataRevision FROM app_metadata WHERE id = 1').get() as { dataRevision: number };
+          return { package: record, review, attachments, ...meta,
+            evidenceFiles: attachments.map(attachment => ({
+              attachment, managedPath: rows.find(row => row.id === attachment.id)!.managedPath,
+            })) };
+        })();
+        if (!formsSystem || !portfolioSystem) fail('EXPORT', 'The portfolio export resources or destination dialog are unavailable. No output was published.');
+        return await exportAnnualPortfolio(snapshot, paths, now(), formsSystem, portfolioSystem, controller.signal,
+          progress => { portfolioProgress = progress; }, fail);
+      } finally {
+        portfolioController = null;
+        portfolioProgress = idleProgress();
+      }
+    }, 'Complete Portfolio ZIP could not be completed. No output was published'),
+    getPortfolioProgress: () => operation(() => ({ ...portfolioProgress })),
+    cancelPortfolioExport: () => operation(() => {
+      if (portfolioProgress.phase === 'publishing') fail('BUSY', 'The complete portfolio is being published. Wait for publication to finish.');
+      portfolioController?.abort();
+    }),
     createFullBackup: () => operation(async () => {
-      if (backupController) fail('BUSY', 'A full backup is already running. Wait for it to finish.');
+      if (backupController || portfolioController) fail('BUSY', 'An archive operation is already running. Wait for it to finish.');
       backupController = new AbortController();
       backupProgress = { ...idleProgress(), phase: 'choosing' };
       try {
@@ -502,8 +558,8 @@ export function openApplication(
   for (const key of protectedOperations) {
     const original = operations[key] as (input: unknown) => Promise<Result<unknown>>;
     const guarded = async (input: unknown): Promise<Result<unknown>> => {
-      if (backupController) return {
-        ok: false, error: { code: 'BUSY', message: 'A full backup is collecting your records and evidence. Wait for it to finish, then retry; your edit has not been applied.' },
+      if (backupController || portfolioController) return {
+        ok: false, error: { code: 'BUSY', message: `A ${portfolioController ? 'portfolio export' : 'full backup'} is collecting your records and evidence. Wait for it to finish, then retry; your edit has not been applied.` },
       };
       const running = original(input);
       mutations.add(running);
@@ -513,7 +569,7 @@ export function openApplication(
     Object.assign(operations, { [key]: guarded });
   }
   return { operations, close: () => {
-    if (backupController) throw new Error('Wait for the full backup to finish before closing local records.');
+    if (backupController || portfolioController) throw new Error('Wait for the archive operation to finish before closing local records.');
     database.close();
   } };
 }

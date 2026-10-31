@@ -12,6 +12,8 @@ import { ReviewSession } from './review-session.js';
 import { Review } from './Review.js';
 import { BackupScreen } from './backup-screen.js';
 import type { BackupProgress } from '../shared/backup.js';
+import type { PortfolioProgress } from '../shared/portfolio.js';
+import { PortfolioExportDialog } from './portfolio-dialog.js';
 
 type Screen = 'years' | 'overview' | 'assessment' | 'plan' | 'review' | 'backup';
 function unwrap<T>(result: Result<T>): T {
@@ -48,6 +50,11 @@ export function App({ operations }: { operations: DesktopOperations }) {
   const [yearDeleteError, setYearDeleteError] = useState<string | null>(null);
   const [declaring, setDeclaring] = useState(false);
   const [showFormsExport, setShowFormsExport] = useState(false);
+  const [showPortfolioExport, setShowPortfolioExport] = useState(false);
+  const [portfolioRunning, setPortfolioRunning] = useState(false);
+  const [portfolioProgress, setPortfolioProgress] = useState<PortfolioProgress>({
+    phase: 'idle', filesCompleted: 0, filesTotal: 0, bytesCompleted: 0, bytesTotal: 0,
+  });
   const [exportError, setExportError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState('');
   const [evidenceByPackage, setEvidenceByPackage] = useState<Record<string, EvidenceAttachment[]>>({});
@@ -72,6 +79,17 @@ export function App({ operations }: { operations: DesktopOperations }) {
     return () => { active = false; clearInterval(timer); };
   }, [backupRunning, operations]);
   useEffect(() => {
+    if (!portfolioRunning) return;
+    let active = true;
+    const update = async () => {
+      const result = await operations.getPortfolioProgress();
+      if (active && result.ok) setPortfolioProgress(result.value);
+    };
+    void update();
+    const timer = setInterval(() => void update(), 150);
+    return () => { active = false; clearInterval(timer); };
+  }, [portfolioRunning, operations]);
+  useEffect(() => {
     if (pkg) void reviewSession.open(pkg.id).catch(() => {});
   }, [pkg?.id, reviewSession]);
   useEffect(() => {
@@ -83,7 +101,7 @@ export function App({ operations }: { operations: DesktopOperations }) {
     }).catch(() => setError('Cannot connect to local records. Preserve your storage folder and restart SWCC.'));
     return operations.onCloseRequested(() => {
       void Promise.all([session.flush(), reviewSession.flush()]).then(() => operations.completeClose()).then(result => {
-        if (!result.ok) setError(result.error.message);
+        if (!result.ok) { setError(result.error.message); setExportError(result.error.message); }
       }).catch(() => { /* The session displays the retained edit and retry action. */ });
     });
   }, [operations, session, reviewSession]);
@@ -250,7 +268,7 @@ export function App({ operations }: { operations: DesktopOperations }) {
       setFeedback('External submission date recorded. SWCC has not submitted or verified a declaration.');
     } finally { setBusy(false); }
   }
-  function openExport() {
+  function openExport(kind: 'forms' | 'portfolio') {
     void run(async () => {
       const current = session.getSnapshot().record;
       if (!current) return;
@@ -258,7 +276,8 @@ export function App({ operations }: { operations: DesktopOperations }) {
       await reviewSession.open(current.id);
       await refreshEvidence(current.id);
       setExportError(null);
-      setShowFormsExport(true);
+      setShowFormsExport(kind === 'forms');
+      setShowPortfolioExport(kind === 'portfolio');
     });
   }
   async function exportForms(confirmDraft: boolean) {
@@ -282,6 +301,32 @@ export function App({ operations }: { operations: DesktopOperations }) {
     } catch (failure) {
       setExportError(failure instanceof Error ? failure.message : String(failure));
     } finally { setBusy(false); }
+  }
+  async function exportPortfolio(confirmDraft: boolean) {
+    if (busy) return;
+    setBusy(true);
+    setExportError(null);
+    setFeedback('');
+    try {
+      await Promise.all([session.flush(), reviewSession.flush()]);
+      const current = session.getSnapshot().record;
+      if (!current) throw new Error('Open a year before exporting its portfolio.');
+      setPortfolioProgress({ phase: 'waiting', filesCompleted: 0, filesTotal: 0, bytesCompleted: 0, bytesTotal: 0 });
+      setPortfolioRunning(true);
+      const outcome = unwrap(await operations.exportPortfolio({
+        packageId: current.id, ...(confirmDraft ? { confirmDraft: true as const } : {}),
+      }));
+      setError(null);
+      setExportError(null);
+      if (outcome.cancelled) {
+        setFeedback('Portfolio export cancelled. No output was published.');
+      } else {
+        setShowPortfolioExport(false);
+        setFeedback(`Complete Portfolio ZIP written: ${outcome.fileName} (${outcome.pageCount} forms pages; ${outcome.attachmentCount} original evidence files). This is not a full-app backup.`);
+      }
+    } catch (failure) {
+      setExportError(failure instanceof Error ? failure.message : String(failure));
+    } finally { setPortfolioRunning(false); setBusy(false); }
   }
   return <div className="map-layout">
     <aside className="map-rail" aria-label="Portfolio navigation">
@@ -332,7 +377,7 @@ export function App({ operations }: { operations: DesktopOperations }) {
                 aria-label={`Delete year ${row.year}`} onClick={() => { setYearDeleteError(null); setDeletingYear(row); }}>Delete</button></div></li>)}</ul>
         </section></>}
       {screen === 'overview' && pkg && <><div className="page-heading map-heading"><div><h1>Connect learning to practice.</h1><p>Your {pkg.year} goals and the experiences that move them forward.</p></div>
-        <button type="button" onClick={() => activityEntry(null)}>Record an activity</button></div>
+        <button type="button" disabled={busy} onClick={() => activityEntry(null)}>Record an activity</button></div>
         <div className="map-overview"><section className="relationship-board surface"><div className="relationship-columns">
           <div><h2>Learning goals</h2><div className="goal-nodes">
             {pkg.goals.map(goal => <article className="goal-node" key={goal.id}><span className="goal-reference">{goal.ref}</span><h3>{goal.title}</h3>
@@ -356,7 +401,7 @@ export function App({ operations }: { operations: DesktopOperations }) {
           <button className="secondary" onClick={() => navigate('plan')}>View development plan</button></div>
         </div><p className="board-footer">Evidence and reflection will stay with each activity, never with its links.</p></section>
           {workflow && <AnnualWorkflowPanel pkg={pkg} workflow={workflow} busy={busy} navigate={navigate}
-            complete={complete} declare={openDeclaration} exportForms={openExport} />}
+            complete={complete} declare={openDeclaration} exportForms={() => openExport('forms')} exportPortfolio={() => openExport('portfolio')} />}
           </div></>}
       {screen === 'assessment' && pkg && <AssessmentScreen pkg={pkg} session={session} operations={operations}
         complete={() => complete('assessment')} busy={busy} />}
@@ -383,6 +428,10 @@ export function App({ operations }: { operations: DesktopOperations }) {
         save={saveDeclaration} close={() => setDeclaring(false)} />}
       {showFormsExport && pkg && workflow && <FormsExportDialog pkg={pkg} workflow={workflow} busy={busy} error={exportError}
         exportForms={draft => void exportForms(draft)} close={() => setShowFormsExport(false)} />}
+      {showPortfolioExport && pkg && workflow && <PortfolioExportDialog pkg={pkg} workflow={workflow} busy={busy}
+        running={portfolioRunning} progress={portfolioProgress} error={exportError}
+        exportPortfolio={draft => void exportPortfolio(draft)} close={() => setShowPortfolioExport(false)}
+        cancel={() => void operations.cancelPortfolioExport().then(result => { if (!result.ok) setExportError(result.error.message); })} />}
       {state && <footer className="source-note"><strong>Supplied baseline, not regulatory verification.</strong><p>The ethics document is Second Edition, amended September 2018. The assessment tool references Third Edition / 2023. The same fixed source set applies to every year; SWCC does not verify current-year College compliance.</p></footer>}
     </main></div>
   </div>;

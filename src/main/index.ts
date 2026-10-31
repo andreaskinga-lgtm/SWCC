@@ -96,6 +96,14 @@ if (startupFailure) {
           if (result.canceled || !result.filePath) return null;
           return result.filePath.endsWith('.swcc-backup.zip') ? result.filePath : `${result.filePath}.swcc-backup.zip`;
         },
+      }, {
+        chooseDestination: async suggestedName => {
+          const options = { title: 'Export Complete Portfolio ZIP', defaultPath: suggestedName,
+            filters: [{ name: 'Annual portfolio ZIP (not a full backup)', extensions: ['zip'] }] };
+          const result = window ? await dialog.showSaveDialog(window, options) : await dialog.showSaveDialog(options);
+          if (result.canceled || !result.filePath) return null;
+          return /\.zip$/i.test(result.filePath) ? result.filePath : `${result.filePath}.zip`;
+        },
       });
       if (app.isPackaged) {
         for (const document of SOURCE_DOCUMENTS) {
@@ -134,6 +142,8 @@ if (startupFailure) {
       });
       const operations = application.operations;
       const channels: Record<string, keyof ApplicationOperations> = {
+        'swcc:export-portfolio': 'exportPortfolio', 'swcc:get-portfolio-progress': 'getPortfolioProgress',
+        'swcc:cancel-portfolio-export': 'cancelPortfolioExport',
         'swcc:export-forms': 'exportForms',
         'swcc:create-full-backup': 'createFullBackup', 'swcc:get-backup-progress': 'getBackupProgress',
         'swcc:cancel-full-backup': 'cancelFullBackup',
@@ -188,6 +198,10 @@ if (startupFailure) {
         const progress = await operations.getBackupProgress();
         if (!progress.ok || progress.value.phase !== 'idle') return {
           ok: false, error: { code: 'BUSY', message: 'A full backup is still running. Wait for it to finish or cancel it, then close SWCC deliberately.' },
+        };
+        const portfolio = await operations.getPortfolioProgress();
+        if (!portfolio.ok || portfolio.value.phase !== 'idle') return {
+          ok: false, error: { code: 'BUSY', message: 'A portfolio export is still running. Wait for it to finish or cancel it, then close SWCC deliberately.' },
         };
         approvedClose = true;
         // Allow the IPC acknowledgement to reach the renderer before destruction.
