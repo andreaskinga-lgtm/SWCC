@@ -17,3 +17,9 @@
 - [ ] Integrate readable attached evidence into the shared Step 3 evidence rule while retaining notes/links as valid alternatives. A missing/corrupt file cannot itself satisfy readiness; operations that require its bytes must fail explicitly rather than silently omit it.
 - [ ] Evidence import/replacement/removal advances Step 3's relevant revision and data revision; previewing/opening does not invalidate manual completion.
 - [ ] Public-operation and renderer checks use real files for source-file movement, duplicate names, exact size boundaries, broken hashes/missing bytes, repair/removal, cancelled/failed imports, storage exhaustion, and OS-open failures. Reuse the visible autosave/error protection.
+
+## Comments
+
+- Implemented managed evidence import, integrity checks, repair/removal, local PDF/image previews, explicit OS opening for other supported documents, and shared Step 3 readiness/revision integration.
+- Verification on macOS/Electron: `npm test` passed (32 tests), `npm run test:desktop` passed (21 tests), and `npm run typecheck`, `npm run lint`, and `npm run build` passed. Evidence coverage includes the exact 50 MiB boundary, cancellation and import failures, simulated disk exhaustion, source movement/duplicate names, missing/corrupt hashes, repair/removal, offline previews, and OS-open errors.
+- The production build reports Vite's non-fatal warning that the renderer/PDF worker chunks exceed 500 kB. Installed-package smoke tests on Windows and macOS were not run; OS-specific installer, permission, and file-association behavior remains unverified.

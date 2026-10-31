@@ -1,6 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { BookOpen, ClipboardList, Home, Layers, HardDrive, Sprout, Network } from 'lucide-react';
-import type { AppState, DesktopOperations, OperationError, Result } from '../shared/application.js';
+import type { AppState, DesktopOperations, EvidenceAttachment, OperationError, Result } from '../shared/application.js';
 import { localDate } from '../shared/application.js';
 import { DraftSession } from './draft-session.js';
 import { AssessmentScreen } from './assessment-screen.js';
@@ -37,7 +37,12 @@ export function App({ operations }: { operations: DesktopOperations }) {
   const [busy, setBusy] = useState(false);
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
   const [recordRequested, setRecordRequested] = useState(false);
+  const [evidenceByPackage, setEvidenceByPackage] = useState<Record<string, EvidenceAttachment[]>>({});
+  const [evidenceErrors, setEvidenceErrors] = useState<Record<string, string>>({});
   const pkg = draft.record;
+  const packageEvidence = pkg ? evidenceByPackage[pkg.id] ?? [] : [];
+  const readableEvidenceActivityIds = new Set(packageEvidence
+    .filter(entry => entry.integrity === 'readable').map(entry => entry.activityId));
   useEffect(() => {
     void operations.getState().then(result => {
       if (!result.ok) { setError(result.error.message); return; }
@@ -51,6 +56,34 @@ export function App({ operations }: { operations: DesktopOperations }) {
       }).catch(() => { /* The session displays the retained edit and retry action. */ });
     });
   }, [operations, session, reviewSession]);
+  useEffect(() => {
+    if (!pkg) return;
+    let active = true;
+    void operations.getEvidence(pkg.id).then(result => {
+      if (!active) return;
+      if (!result.ok) {
+        setEvidenceErrors(previous => ({ ...previous, [pkg.id]: result.error.message }));
+        return;
+      }
+      setEvidenceByPackage(previous => ({ ...previous, [pkg.id]: result.value }));
+      setEvidenceErrors(previous => ({ ...previous, [pkg.id]: '' }));
+    }).catch(failure => {
+      if (active) setEvidenceErrors(previous => ({
+        ...previous, [pkg.id]: failure instanceof Error ? failure.message : String(failure),
+      }));
+    });
+    return () => { active = false; };
+  }, [operations, pkg?.id]);
+  async function refreshEvidence(packageId: string) {
+    const result = await operations.getEvidence(packageId);
+    if (!result.ok) {
+      setEvidenceErrors(previous => ({ ...previous, [packageId]: result.error.message }));
+      throw new Error(result.error.message);
+    }
+    setEvidenceByPackage(previous => ({ ...previous, [packageId]: result.value }));
+    setEvidenceErrors(previous => ({ ...previous, [packageId]: '' }));
+    return result.value;
+  }
   async function run(work: () => Promise<void>) {
     if (busy) return;
     setBusy(true);
@@ -160,7 +193,8 @@ export function App({ operations }: { operations: DesktopOperations }) {
         </div><p className="board-footer">Evidence and reflection will stay with each activity, never with its links.</p></section>
           <aside className="map-checklist"><h2>Close the annual loop</h2><p>Work freely. Complete deliberately.</p>
             <ul>{destinations.slice(1, 4).map(item => {
-              const readiness = item.screen === 'assessment' ? evaluateAssessmentReadiness(pkg) : item.screen === 'plan' ? evaluatePlanReadiness(pkg) : null;
+              const readiness = item.screen === 'assessment' ? evaluateAssessmentReadiness(pkg) : item.screen === 'plan'
+                ? evaluatePlanReadiness(pkg, undefined, readableEvidenceActivityIds) : null;
               return <li key={item.screen}><button className="text-button" onClick={() => navigate(item.screen)}>{item.name}</button>
                 <small>{readiness?.ready ? 'Ready' : 'In progress'} · manual completion not yet available</small>
                 {readiness && !readiness.ready && <ul>{readiness.missing.map(missing => <li key={missing}><small>{missing}</small></li>)}</ul>}
@@ -170,7 +204,9 @@ export function App({ operations }: { operations: DesktopOperations }) {
           </aside></div></>}
       {screen === 'assessment' && pkg && <AssessmentScreen pkg={pkg} session={session} operations={operations} />}
       {screen === 'plan' && pkg && <PlanScreen key={pkg.id} pkg={pkg} session={session} operations={operations}
-        selectedId={selectedActivityId} select={setSelectedActivityId} recordRequested={recordRequested} clearRecordRequest={() => setRecordRequested(false)} />}
+        selectedId={selectedActivityId} select={setSelectedActivityId} recordRequested={recordRequested} clearRecordRequest={() => setRecordRequested(false)}
+        evidence={packageEvidence} evidenceError={evidenceErrors[pkg.id] ?? ''}
+        evidenceLoaded={Object.hasOwn(evidenceByPackage, pkg.id)} refreshEvidence={() => refreshEvidence(pkg.id)} />}
       {screen === 'review' && pkg && <Review packageId={pkg.id} year={pkg.year} operations={operations} session={reviewSession} />}
       {screen === 'backup' && <><div className="page-heading"><h1>Protect your portfolio.</h1><p>Full-app backup and restore are distinct from annual exports.</p></div>
         <section className="surface"><h2>Local storage</h2><p className="storage-path">{state?.storageDirectory}</p>

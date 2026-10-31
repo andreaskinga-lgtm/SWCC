@@ -3,6 +3,7 @@ import { join, isAbsolute } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { mkdirSync, existsSync, readFileSync } from 'node:fs';
 import { openApplication } from './data/application.js';
+import { SUPPORTED_EVIDENCE_EXTENSIONS } from './data/evidence.js';
 import { SOURCE_DOCUMENTS } from '../shared/application.js';
 import type { ApplicationOperations, Result } from '../shared/application.js';
 import { storageLayout } from './data/storage.js';
@@ -58,6 +59,19 @@ if (startupFailure) {
         readDocument: () => readFileSync(app.isPackaged
           ? join(process.resourcesPath, 'sources', 'ethics-2018.pdf')
           : join(directory, '../../Code-of-Ethics-and-Standards-of-Practice-September-7-2018 (1).pdf')),
+      }, {
+        chooseFile: async selection => {
+          const options = {
+            title: `Add evidence to ${selection.activityRef}`,
+            properties: ['openFile'] as ['openFile'],
+            filters: [{ name: 'Supported evidence', extensions: [...SUPPORTED_EVIDENCE_EXTENSIONS] }],
+          };
+          const result = window
+            ? await dialog.showOpenDialog(window, options)
+            : await dialog.showOpenDialog(options);
+          return result.canceled ? null : result.filePaths[0] ?? null;
+        },
+        openPath: path => shell.openPath(path),
       });
       if (app.isPackaged) {
         for (const document of SOURCE_DOCUMENTS) {
@@ -101,6 +115,9 @@ if (startupFailure) {
         'swcc:delete-goal': 'deleteGoal', 'swcc:acknowledge-storage': 'acknowledgeStorage',
         'swcc:create-activity': 'createActivity', 'swcc:update-activity': 'updateActivity',
         'swcc:get-plan-readiness': 'getPlanReadiness', 'swcc:open-evidence-link': 'openEvidenceLink',
+        'swcc:get-evidence': 'getEvidence', 'swcc:import-evidence': 'importEvidence',
+        'swcc:replace-evidence': 'replaceEvidence', 'swcc:remove-evidence': 'removeEvidence',
+        'swcc:preview-evidence': 'previewEvidence', 'swcc:open-evidence': 'openEvidence',
         'swcc:get-review': 'getReview', 'swcc:save-review-position': 'saveReviewPosition',
         'swcc:record-review-visits': 'recordReviewVisits', 'swcc:reset-review-section': 'resetReviewSection',
         'swcc:launch-review-resources': 'launchReviewResources', 'swcc:reset-review-resources': 'resetReviewResources',
