@@ -420,3 +420,52 @@ test('failed staging cleanup remains an actionable failure and can be retried wi
   value(await f.operations.cancelRestorePreview());
   await f.unchanged();
 });
+
+test('current manual completion cannot claim a step whose saved records never satisfy readiness', async () => {
+  const f = await fixture();
+  f.tamperDatabase(`INSERT INTO step_completions SELECT id, 'plan', plan_revision, '2026-10-31T12:00:00.000Z'
+    FROM year_packages WHERE year = 2025`);
+  await f.save();
+  const result = await f.operations.inspectFullBackup();
+  if (result.ok) await f.operations.cancelRestorePreview();
+  expect(result).toMatchObject({ ok: false, error: { message: expect.stringMatching(/completion.*readiness/i) } });
+  await f.unchanged();
+});
+
+test('a genuine completed annual package and declaration remain valid in the preview without modifying live completion', async () => {
+  const root = storage();
+  const archive = resolve(storage(), 'complete.zip');
+  const app = openApplication(root, {}, {
+    openExternal: async () => {},
+    readDocument: () => readFileSync('Code-of-Ethics-and-Standards-of-Practice-September-7-2018 (1).pdf'),
+  }, undefined, undefined, { chooseDestination: async () => archive }, { chooseArchive: async () => archive });
+  apps.push(app);
+  const operations = app.operations;
+  let pkg = value(await operations.createYear(2024));
+  pkg = value(await operations.saveDraft({
+    packageId: pkg.id, expectedRevision: pkg.contentRevision,
+    draft: { assessmentDate: '2024-01-01', planDate: '2024-01-02', strengths: 'Strengths', peerFeedback: '',
+      learningNeeds: 'Learning needs', annualStandards: ['code-of-ethics'] },
+  }));
+  pkg = value(await operations.createGoal({ packageId: pkg.id, expectedRevision: pkg.contentRevision, title: 'Goal' }));
+  pkg = value(await operations.createActivity({
+    packageId: pkg.id, expectedRevision: pkg.contentRevision, title: 'Completed consultation',
+    goalIds: [pkg.goals[0].id], status: 'Completed', completionDate: '2024-12-01',
+    evidenceDescription: 'Consultation notes', applicationToPractice: 'Applied the learning',
+  }));
+  value(await operations.recordReviewVisits({ packageId: pkg.id, pages: Array.from({ length: 48 }, (_, i) => i + 1) }));
+  value(await operations.launchReviewResources(pkg.id));
+  for (const step of ['review', 'assessment', 'plan'] as const) {
+    const workflow = value(await operations.getWorkflow(pkg.id));
+    pkg = value(await operations.completeStep({ packageId: pkg.id, step, expectedRevision: workflow.steps[step].relevantRevision }));
+  }
+  value(await operations.recordDeclaration({ packageId: pkg.id, expectedRevision: pkg.contentRevision, date: '2024-12-31' }));
+  value(await operations.createFullBackup());
+  const before = value(await operations.getState());
+  expect(before.years[0].status).toBe('Complete');
+  expect(value(await operations.inspectFullBackup())).toMatchObject({
+    cancelled: false, preview: { backup: { years: [2024], goals: 1, activities: 1, evidenceFiles: 0 } },
+  });
+  value(await operations.cancelRestorePreview());
+  expect(value(await operations.getState())).toEqual(before);
+});

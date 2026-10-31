@@ -162,6 +162,7 @@ export function App({ operations }: { operations: DesktopOperations }) {
       setRestoreProgress({ phase: 'choosing', filesCompleted: 0, filesTotal: 0, bytesCompleted: 0, bytesTotal: 0 });
       try {
         const outcome = unwrap(await operations.inspectFullBackup());
+        setError(null);
         if (outcome.cancelled) setFeedback('Inspection cancelled. Live records and backup status are unchanged.');
         else setRestorePreview(outcome.preview);
       } finally {
@@ -181,6 +182,7 @@ export function App({ operations }: { operations: DesktopOperations }) {
     setBusy(true);
     try {
       unwrap(await operations.cancelRestorePreview());
+      setError(null);
       setRestorePreview(null);
       setRestoreProgress({ phase: 'idle', filesCompleted: 0, filesTotal: 0, bytesCompleted: 0, bytesTotal: 0 });
       setFeedback('Inspection cancelled. Live records and backup status are unchanged.');

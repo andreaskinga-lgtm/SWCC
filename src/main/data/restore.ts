@@ -10,11 +10,15 @@ import type { Entry, ZipFile } from 'yauzl';
 import type { FullBackupManifest } from '../../shared/backup.js';
 import type { DatasetSummary, RestorePreview, RestoreProgress } from '../../shared/restore.js';
 import { ANNUAL_STANDARDS, SOURCE_SET_ID, validDate } from '../../shared/application.js';
-import { activityDateError, validEvidenceLink } from '../../shared/plan.js';
-import type { ActivityFields } from '../../shared/application.js';
+import { activityDateError, evaluatePlanReadiness, validEvidenceLink } from '../../shared/plan.js';
+import { evaluateAssessmentReadiness } from '../../shared/assessment.js';
+import { reviewReadiness } from '../../shared/review.js';
+import type { ActivityFields, AnnualStandardId, Goal } from '../../shared/application.js';
 import { migrate, SCHEMA_VERSION } from './migrations.js';
 import { MAX_EVIDENCE_BYTES, SUPPORTED_EVIDENCE_EXTENSIONS } from './evidence.js';
 import type { storageLayout } from './storage.js';
+import { getActivities } from './activities.js';
+import { readReviewProgress } from './review.js';
 
 export interface RestoreSystem {
   chooseArchive: () => Promise<string | null>;
@@ -351,6 +355,30 @@ export async function inspectArchive(
         if (!new RegExp(`^${row.year}/E${row.reference}-[\\da-f-]{36}\\.${row.type}$`).test(row.path)
           || !file || row.byteCount !== file.byteCount || row.sha256 !== file.sha256)
           throw new Error('A managed evidence path, size or hash disagrees with its database ownership and archive inventory.');
+      }
+      const currentCompletions = db.prepare(`SELECT c.package_id AS id, c.step, p.assessment_date AS assessmentDate,
+        p.plan_date AS planDate, p.strengths, p.learning_needs AS learningNeeds FROM step_completions c
+        JOIN year_packages p ON p.id = c.package_id WHERE c.completed_revision =
+        CASE c.step WHEN 'review' THEN p.review_revision WHEN 'assessment' THEN p.assessment_revision
+        WHEN 'plan' THEN p.plan_revision END`).all() as
+        { id: string; step: string; assessmentDate: string; planDate: string; strengths: string; learningNeeds: string }[];
+      for (const row of currentCompletions) {
+        const goals = db.prepare(`SELECT id, package_id AS packageId, 'G' || reference_number AS ref,
+          title, description, created_at AS createdAt, updated_at AS updatedAt FROM learning_goals WHERE package_id = ?`).all(row.id) as Goal[];
+        let ready: boolean;
+        if (row.step === 'review') ready = reviewReadiness(readReviewProgress(db, row.id)).ready;
+        else if (row.step === 'assessment') {
+          const annualStandards = (db.prepare('SELECT standard_id AS id FROM annual_standards WHERE package_id = ?').all(row.id) as
+            { id: AnnualStandardId }[]).map(standard => standard.id);
+          ready = evaluateAssessmentReadiness({ ...row, goals, annualStandards }).ready;
+        } else {
+          const activities = getActivities(db, row.id);
+          const readableActivities = new Set((db.prepare('SELECT activity_id AS id FROM evidence_attachments WHERE package_id = ?').all(row.id) as
+            { id: string }[]).map(attachment => attachment.id));
+          ready = evaluatePlanReadiness({ planDate: row.planDate, goals, activities }, undefined, readableActivities).ready;
+        }
+        if (!ready) throw new Error('A current manual completion disagrees with its annual step readiness.');
+        signal.throwIfAborted();
       }
       backup = datasetSummary(db);
     } finally { db.close(); }

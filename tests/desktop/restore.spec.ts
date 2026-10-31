@@ -165,6 +165,7 @@ test('real inspection progress protects edits and close while choosing an archiv
   });
   await expect(page.locator('.operation-feedback')).toContainText('Inspection cancelled');
   await expect(page.getByRole('status', { name: 'Inspection progress' })).toHaveCount(0);
+  await expect(page.getByRole('alert')).toHaveCount(0);
   expect(await page.evaluate(() => window.swcc.getState())).toEqual(before);
   expect(desktop.windows().length).toBe(1);
 });

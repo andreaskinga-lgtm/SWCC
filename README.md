@@ -1,6 +1,6 @@
 # SWCC desktop
 
-The offline Electron app includes durable annual assessment drafts, independent annual standards, shared learning goals and activities, managed evidence files with integrity checks and repair, activity notes/links and reflections, per-year standards review, explicit annual step completion and external declaration records, annual Forms PDF export with readable continuations, and full-app backup. The production shell follows approved C / Learning map reference at commit `5477044`; prototype samples and simulated operations are not shipped.
+The offline Electron app includes durable annual assessment drafts, independent annual standards, shared learning goals and activities, managed evidence files with integrity checks and repair, activity notes/links and reflections, per-year standards review, explicit annual step completion and external declaration records, annual Forms PDF export with readable continuations, full-app backup and validated restore preview. The production shell follows approved C / Learning map reference at commit `5477044`; prototype samples and simulated operations are not shipped.
 
 ## Run and check
 
@@ -80,7 +80,7 @@ Startup refuses corrupt, empty, missing-from-an-existing-dataset, future-schema,
 | `src/renderer/App.tsx` | C shell, years, navigation, local storage acknowledgement, honest later-feature destinations |
 | `src/renderer/annual-workflow.tsx` | C's adjacent annual checklist, declaration entry/warnings and explicit forms draft export |
 | `src/shared/forms.ts`, `src/main/export/forms.ts` | Draft-export warnings, measured source-template projection, local font appearances, flattening and complete PDF publication |
-| `src/renderer/backup-screen.tsx` | C's full-backup action, quiet status, progress/cancellation and distinct unavailable restore entry |
+| `src/renderer/backup-screen.tsx` | C's full-backup action, quiet status, inspection progress/cancel and whole-dataset preview with replacement disabled |
 
 Export/backup implementations belong in **main-process modules**, not renderer/file-system bridges. The dashboard's **Export Forms PDF** action invokes the narrowly typed `exportForms` operation, including continuation pages. Portfolio archives and recoverable replacement remain later slices. Record deletion, managed evidence and repair, readiness, manual completion, external declaration recording, full-app backup and validated restore preview are implemented. Ready never means manually Completed.
 
@@ -135,7 +135,7 @@ Detection uses ZIP contents and the manifest, never the filename extension. This
 
 Absolute/parent-traversal/backslash paths, duplicate entries/properties, symlinks/special files, encrypted ZIPs and missing/undeclared files fail visibly. Actual inflated evidence bytes are stopped at 52,428,800 bytes (50 MiB), regardless of declared sizes. Defensive inspection ceilings are 4 MiB for the manifest, 512 MiB for the standalone database and 50,000 inventoried files; larger archives require a compatible inspection implementation. These are inspection bounds, not a yearly evidence quota.
 
-Inspection never modifies live records, evidence or successful-backup metadata. Failure/cancellation removes only the operation-owned staging directory, leaving other staging artifacts alone. Normal close cancels an open preview after the shared successful flush; close during inspection is blocked until it finishes or is cancelled. Use the native dialog’s Cancel action while choosing. Forced termination may leave its private staging artifacts, but cannot replace the live dataset.
+Inspection never modifies live records, evidence or successful-backup metadata. Failure/cancellation removes only the operation-owned staging directory, leaving other staging artifacts alone. Cleanup errors remain failures with a retry action rather than claiming cancellation succeeded. Normal close cancels an open preview after the shared successful flush; close during inspection is blocked until it finishes or is cancelled. Use the native dialog’s Cancel action while choosing. Forced termination may leave its private staging artifacts, but cannot replace the live dataset.
 
 The C comparison is a **preview**, not completed restoration. **Replace all years** stays disabled. Recovery backup, replacement moves/journal and interrupted replacement recovery belong to ticket 13 and are not implemented here.
 
