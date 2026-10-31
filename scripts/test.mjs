@@ -1,0 +1,9 @@
+import { spawnSync } from 'node:child_process';
+import electron from 'electron';
+
+// Tests and the app use the same native SQLite ABI; no alternating rebuilds.
+const result = spawnSync(electron, ['node_modules/vitest/vitest.mjs', 'run', ...process.argv.slice(2)], {
+  stdio: 'inherit',
+  env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+});
+process.exit(result.status ?? 1);
