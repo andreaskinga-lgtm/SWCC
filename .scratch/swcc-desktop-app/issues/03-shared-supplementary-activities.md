@@ -4,7 +4,7 @@
 
 **Blocked by:** 02: Maintain annual self-assessment and shared learning goals.
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 - [ ] Implement C's dashboard with goals beside activities, each activity shown once with all linked G references, a leading Record an activity action, and a separate annual-workflow area rather than a metrics-card grid.
 - [ ] Implement C's development-plan goal-connection strip, activity index, and one selected activity editor. Selecting an A reference edits the same record from any linked goal; unlinked activities remain visible.
