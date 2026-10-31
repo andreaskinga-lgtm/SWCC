@@ -4,7 +4,9 @@
 
 **Blocked by:** 11: Back up all years and show trustworthy backup status.
 
-**Status:** ready-for-agent
+**Status:** claimed
+
+Claimed October 31, 2026 after ticket 11 integration; implementation branch `ticket/12`, concurrent with independent form continuations.
 
 - [ ] Use the distinct restore entry and an OS archive dialog. Identify archive type from its manifest/contents, not its extension alone; reject annual portfolio archives as non-restorable.
 - [ ] Validate full-backup manifest structure, supported archive/schema versions, app/source-set compatibility, inventories, counts, sizes, hashes, and referenced managed evidence before offering replacement.

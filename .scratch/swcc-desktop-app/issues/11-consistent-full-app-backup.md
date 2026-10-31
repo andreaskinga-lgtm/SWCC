@@ -4,7 +4,7 @@
 
 **Blocked by:** 07: Confirm step completion and record renewal declarations.
 
-**Status:** claimed
+**Status:** resolved
 
 Claimed October 31, 2026 after ticket 07 integration; implementation branch `ticket/11`, concurrent with the independent forms-export ticket 08.
 
@@ -18,3 +18,11 @@ Claimed October 31, 2026 after ticket 07 integration; implementation branch `tic
 - [ ] Updating backup operational metadata does not itself make the dataset immediately appear unbacked. Subsequent user-data changes do; failed/cancelled backup leaves successful-backup metadata unchanged.
 - [ ] Bundled source PDFs and regenerable preview caches need not be archived, but compatible source-set identities must be preserved for later restore.
 - [ ] Public-operation checks use real multiple-year datasets, SQLite/WAL state, evidence files, and ZIP inspection. Verify inventory/hashes, revisions/completion/declarations, attempted concurrent edits/deletion, failed writes/flushes, and accurate status before/after later changes. This operation has no forms-export prerequisite.
+
+## Comments
+
+### 2026-10-31 — consistent full backup integrated
+
+Implemented at `9670b66`, merged with `3156141036cd3d70eb9f6205ef59a1696d97fb4f`. Full backups use SQLite backup snapshots, verified managed evidence, streamed archive output, temporary publication, mutation protection, cancellation, and quiet last-successful/unbacked-change status in C's backup destination. The merged backup gate also protects forms consumers.
+
+Canonical verification of the combined ticket 08/11 frontier passed 86 public-operation tests, 37 real production Electron tests, typecheck, lint, and build. Restore remains explicitly unavailable pending tickets 12/13. Platform installer acceptance was not rerun and is not implied by this closure.

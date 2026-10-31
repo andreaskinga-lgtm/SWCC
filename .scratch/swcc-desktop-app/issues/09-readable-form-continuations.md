@@ -4,7 +4,9 @@
 
 **Blocked by:** 08: Export annual forms in the supplied source layouts.
 
-**Status:** ready-for-agent
+**Status:** claimed
+
+Claimed October 31, 2026 after ticket 08 integration; implementation branch `ticket/09`.
 
 - [ ] Extend the same Export Forms PDF operation to wrap/paginate all annual SAT/PDP fields at body text of at least 10 pt, using measured source-layout geometry and the bundled font.
 - [ ] Continuations preserve the original source layout and contain only remaining narrative content. Identify the annual logical document/continuation unobtrusively; repeat stable references only when needed to identify a split record.

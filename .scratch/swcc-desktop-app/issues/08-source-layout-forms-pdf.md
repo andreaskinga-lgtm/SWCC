@@ -4,7 +4,7 @@
 
 **Blocked by:** 07: Confirm step completion and record renewal declarations.
 
-**Status:** claimed
+**Status:** resolved
 
 Claimed October 31, 2026 after ticket 07 integration; implementation branch `ticket/08`.
 
@@ -20,3 +20,11 @@ Claimed October 31, 2026 after ticket 07 integration; implementation branch `tic
 - [ ] Until continuation support lands, content that cannot fit produces an explicit actionable export error and no successful truncated output. This short-content slice is not the completed long-content export delivery gate.
 - [ ] Write the complete output before reporting success; cancellation, generation errors, and destination/storage failures do not publish an apparently complete file.
 - [ ] Public-operation checks use the real templates and generated PDF content/reference counts; rendered comparisons verify checklist alignment, field placement, independent dates/standards, accents, flattened output, shared/unlinked activities, and blank drafts. File existence alone is not sufficient.
+
+## Comments
+
+### 2026-10-31 — short-content slice integrated
+
+Implemented at `92d5354`, merged with `91655ddece638503e0bbb16f6af17e4db1341342`. Real source layouts, measured checklist marks, licensed local font, flattened short-content forms, draft warnings, dialogs, and explicit overflow failures are implemented. Actual sources and generated layouts were inspected; artifacts remain in the ticket-08 worktree's `.work/forms-inspection/`.
+
+Together with ticket 11, canonical verification passed 86 operation tests and 37 real production Electron tests, typecheck, lint, and build. The implementer additionally passed four packaged arm64 checks. This closes only the specified short-content slice: complete long-content delivery still requires ticket 09. Windows and Intel installed acceptance remain unverified.
