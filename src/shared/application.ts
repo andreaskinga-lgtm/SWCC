@@ -43,6 +43,34 @@ export interface Goal {
   createdAt: string;
   updatedAt: string;
 }
+export type ActivityStatus = 'Planned' | 'In Progress' | 'Completed';
+export interface ActivityFields {
+  title: string;
+  description: string;
+  status: ActivityStatus;
+  completionDate: string;
+  evidenceDescription: string;
+  evidenceLinks: string[];
+  applicationToPractice: string;
+  goalIds: string[];
+}
+export interface Activity extends ActivityFields {
+  id: string;
+  packageId: string;
+  ref: string;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface CreateActivity extends Partial<ActivityFields> {
+  packageId: string;
+  expectedRevision: number;
+  title: string;
+}
+export interface UpdateActivity extends Partial<ActivityFields> {
+  packageId: string;
+  expectedRevision: number;
+  activityId: string;
+}
 export interface AppState {
   years: YearSummary[];
   selectedPackage: YearPackage | null;
@@ -69,6 +97,7 @@ export interface CreateGoal {
   expectedRevision: number;
   title: string;
   description?: string;
+  activityId?: string;
 }
 export interface UpdateGoal {
   packageId: string;
@@ -93,6 +122,7 @@ export interface YearPackage extends Draft {
   createdAt: string;
   updatedAt: string;
   goals: Goal[];
+  activities: Activity[];
 }
 export interface ApplicationOperations extends ReviewOperations {
   getState(): Promise<Result<AppState>>;
@@ -102,6 +132,10 @@ export interface ApplicationOperations extends ReviewOperations {
   createGoal(input: CreateGoal): Promise<Result<YearPackage>>;
   updateGoal(input: UpdateGoal): Promise<Result<YearPackage>>;
   deleteGoal(input: DeleteGoal): Promise<Result<YearPackage>>;
+  createActivity(input: CreateActivity): Promise<Result<YearPackage>>;
+  updateActivity(input: UpdateActivity): Promise<Result<YearPackage>>;
+  getPlanReadiness(packageId: string): Promise<Result<import('./plan.js').PlanReadiness>>;
+  openEvidenceLink(input: { packageId: string; activityId: string; url: string }): Promise<Result<void>>;
   acknowledgeStorage(): Promise<Result<AppState>>;
 }
 export interface DesktopOperations extends ApplicationOperations {

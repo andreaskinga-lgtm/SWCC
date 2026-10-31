@@ -1,25 +1,32 @@
-import type { ApplicationOperations, Draft, Goal, YearPackage } from '../shared/application.js';
+import type { Activity, ActivityFields, ApplicationOperations, CreateGoal, Draft, Goal, YearPackage } from '../shared/application.js';
+
+type PendingGoal = Pick<CreateGoal, 'title' | 'description' | 'activityId'>;
+type PendingActivity = Pick<ActivityFields, 'title' | 'description' | 'goalIds'>;
 
 export interface DraftState {
   record: YearPackage | null;
   status: 'Saved' | 'Saving' | 'Not saved';
   error: string | null;
-  pendingGoalCreation: { title: string; description: string } | null;
+  pendingGoalCreation: PendingGoal | null;
+  pendingActivityCreation: PendingActivity | null;
 }
 type GoalEdit = { goal: Goal; version: number };
+type ActivityEdit = { activity: Activity; version: number };
 
 function sameStandards(left: Draft['annualStandards'], right: Draft['annualStandards']) {
   return left.length === right.length && left.every(id => right.includes(id));
 }
 
 export class DraftSession {
-  private current: DraftState = { record: null, status: 'Saved', error: null, pendingGoalCreation: null };
+  private current: DraftState = { record: null, status: 'Saved', error: null, pendingGoalCreation: null, pendingActivityCreation: null };
   private version = 0;
   private savedVersion = 0;
   private draftVersion = 0;
   private savedDraftVersion = 0;
   private goalEdits = new Map<string, GoalEdit>();
-  private pendingGoalCreation: { title: string; description: string } | null = null;
+  private pendingGoalCreation: PendingGoal | null = null;
+  private activityEdits = new Map<string, ActivityEdit>();
+  private pendingActivityCreation: PendingActivity | null = null;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private saving: Promise<void> | undefined;
   private listeners = new Set<() => void>();
@@ -35,7 +42,9 @@ export class DraftSession {
     this.savedDraftVersion = 0;
     this.goalEdits.clear();
     this.pendingGoalCreation = null;
-    this.update({ record, status: 'Saved', error: null, pendingGoalCreation: null });
+    this.activityEdits.clear();
+    this.pendingActivityCreation = null;
+    this.update({ record, status: 'Saved', error: null, pendingGoalCreation: null, pendingActivityCreation: null });
   }
   edit(patch: Partial<Draft>) {
     const record = this.current.record;
@@ -50,6 +59,7 @@ export class DraftSession {
     this.update({
       record: { ...record, ...patch }, status: 'Saving', error: null,
       pendingGoalCreation: this.pendingGoalCreation,
+      pendingActivityCreation: this.pendingActivityCreation,
     });
     this.scheduleSave();
   }
@@ -64,15 +74,39 @@ export class DraftSession {
     this.update({
       record: { ...record, goals: record.goals.map(item => item.id === goalId ? goal : item) },
       status: 'Saving', error: null, pendingGoalCreation: this.pendingGoalCreation,
+      pendingActivityCreation: this.pendingActivityCreation,
     });
     this.scheduleSave();
   }
-  async createGoal(title: string, description: string) {
+  editActivity(activityId: string, patch: Partial<ActivityFields>) {
+    const record = this.current.record;
+    const existing = record?.activities.find(activity => activity.id === activityId);
+    if (!record || !existing) return;
+    const activity = { ...existing, ...patch };
+    if (Object.keys(patch).every(key => JSON.stringify(activity[key as keyof ActivityFields]) === JSON.stringify(existing[key as keyof ActivityFields]))) return;
+    this.version++;
+    this.activityEdits.set(activityId, { activity, version: this.version });
+    this.update({
+      ...this.current, record: { ...record, activities: record.activities.map(item => item.id === activityId ? activity : item) },
+      status: 'Saving', error: null,
+    });
+    this.scheduleSave();
+  }
+  async createActivity(title: string, description: string, goalIds: string[]) {
+    if (!this.current.record) throw new Error('Open a year before recording an activity.');
+    if (!title.trim()) throw new Error('Enter an activity title before saving.');
+    if (this.pendingActivityCreation) throw new Error('Retry the activity already waiting to be saved.');
+    this.version++;
+    this.pendingActivityCreation = { title, description, goalIds };
+    this.update({ ...this.current, pendingActivityCreation: this.pendingActivityCreation, status: 'Saving', error: null });
+    await this.flush();
+  }
+  async createGoal(title: string, description: string, activityId?: string) {
     if (!this.current.record) throw new Error('Open a year package before adding a learning goal.');
     if (!title.trim()) throw new Error('Enter a learning-goal title before saving.');
     if (this.pendingGoalCreation) throw new Error('A learning goal is already waiting to be saved. Retry that save first.');
     this.version++;
-    this.pendingGoalCreation = { title, description };
+    this.pendingGoalCreation = { title, description, ...(activityId ? { activityId } : {}) };
     this.update({ ...this.current, pendingGoalCreation: this.pendingGoalCreation, status: 'Saving', error: null });
     await this.flush();
   }
@@ -89,6 +123,7 @@ export class DraftSession {
   private async savePending() {
     while (this.current.record && (
       this.savedDraftVersion !== this.draftVersion || this.goalEdits.size > 0 || this.pendingGoalCreation
+      || this.activityEdits.size > 0 || this.pendingActivityCreation
     )) {
       if (this.savedDraftVersion !== this.draftVersion) {
         const draftVersion = this.draftVersion;
@@ -137,6 +172,44 @@ export class DraftSession {
         continue;
       }
 
+      if (this.activityEdits.size > 0) {
+        const [activityId, edit] = this.activityEdits.entries().next().value as [string, ActivityEdit];
+        const record = this.current.record;
+        this.update({ ...this.current, status: 'Saving', error: null });
+        let result;
+        try {
+          const { title, description, status, completionDate, evidenceDescription, evidenceLinks, applicationToPractice, goalIds } = edit.activity;
+          result = await this.operations.updateActivity({
+            packageId: record.id, expectedRevision: record.contentRevision, activityId,
+            title, description, status, completionDate, evidenceDescription, evidenceLinks, applicationToPractice, goalIds,
+          });
+        } catch { result = { ok: false as const, error: { message: 'The desktop connection failed. Keep your edits here and retry saving.' } }; }
+        if (!result.ok) {
+          this.update({ ...this.current, status: 'Not saved', error: result.error.message });
+          throw new Error(result.error.message);
+        }
+        if (this.activityEdits.get(activityId)?.version === edit.version) this.activityEdits.delete(activityId);
+        this.applySaved(result.value);
+        continue;
+      }
+
+      if (this.pendingActivityCreation) {
+        const request = this.pendingActivityCreation;
+        const record = this.current.record;
+        let result;
+        try {
+          result = await this.operations.createActivity({ ...request, packageId: record.id, expectedRevision: record.contentRevision });
+        } catch { result = { ok: false as const, error: { message: 'The desktop connection failed. Keep this activity here and retry saving.' } }; }
+        if (!result.ok) {
+          this.update({ ...this.current, status: 'Not saved', error: result.error.message });
+          throw new Error(result.error.message);
+        }
+        this.pendingActivityCreation = null;
+        this.update({ ...this.current, pendingActivityCreation: null });
+        this.applySaved(result.value);
+        continue;
+      }
+
       if (this.pendingGoalCreation) {
         const request = this.pendingGoalCreation;
         const record = this.current.record;
@@ -146,6 +219,7 @@ export class DraftSession {
           result = await this.operations.createGoal({
             packageId: record.id, expectedRevision: record.contentRevision,
             title: request.title, description: request.description,
+            ...(request.activityId ? { activityId: request.activityId } : {}),
           });
         } catch {
           result = { ok: false as const, error: { message: 'The desktop connection failed. Keep your edits here and retry saving.' } };
@@ -176,6 +250,9 @@ export class DraftSession {
       learningNeeds: current.learningNeeds,
       annualStandards: current.annualStandards,
     };
-    this.update({ ...this.current, record: { ...saved, ...draft, goals } });
+    const activities = saved.activities.map(activity => this.activityEdits.has(activity.id)
+      ? current.activities.find(item => item.id === activity.id) ?? activity
+      : activity);
+    this.update({ ...this.current, record: { ...saved, ...draft, goals, activities } });
   }
 }

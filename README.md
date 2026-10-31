@@ -1,6 +1,6 @@
 # SWCC desktop
 
-The offline Electron app includes durable annual assessment drafts, independent annual standards, shared learning goals in assessment/development-plan views, and per-year standards review. The production shell follows approved C / Learning map reference at commit `5477044`; prototype samples and simulated operations are not shipped.
+The offline Electron app includes durable annual assessment drafts, independent annual standards, shared learning goals and activities, activity evidence notes/links and reflections, and per-year standards review. The production shell follows approved C / Learning map reference at commit `5477044`; prototype samples and simulated operations are not shipped.
 
 ## Run and check
 
@@ -54,20 +54,23 @@ Startup refuses corrupt, empty, missing-from-an-existing-dataset, future-schema,
 
 | Module / seam | Current responsibility |
 | --- | --- |
-| `src/shared/application.ts` | Typed operations/results, assessment/goal records, annual standard choices, date-only validation, fixed source identity |
+| `src/shared/application.ts` | Typed operations/results, assessment/goal/activity records, annual standard choices, date-only validation, fixed source identity |
 | `src/shared/assessment.ts` | Step 2 readiness rules and missing-item descriptions |
+| `src/shared/plan.ts` | Single Step 3 readiness implementation, completion-date and HTTP/HTTPS evidence-link validation |
 | `src/main/data/application.ts` | Public SQLite operations used by IPC and integration tests |
+| `src/main/data/activities.ts` | Activity persistence, stable A references, same-year unique links, Step 3 revisions |
 | `src/main/data/migrations.ts` | Ordered transactional migrations; SQLite `user_version` is schema version |
 | `src/main/data/storage.ts` | Stable dataset/evidence/runtime/staging/journal paths |
 | `src/main/index.ts`, `preload.cts` | Single instance, restricted typed IPC, isolated/sandboxed renderer, navigation/new-window constraints, protected close |
-| `src/renderer/draft-session.ts` | Retained draft and goal edits, serialized autosave, shared flush/failure contract |
-| `src/renderer/assessment-screen.tsx` | C-style assessment writing, annual standards, shared goal editors, Step 2 readiness, and plan goal view |
+| `src/renderer/draft-session.ts` | Retained draft, goal and activity edits/creation, serialized autosave, shared flush/failure contract |
+| `src/renderer/assessment-screen.tsx` | C-style assessment writing, annual standards, shared goal editors and Step 2 readiness |
+| `src/renderer/plan-screen.tsx` | C goal-connection strip, activity index, one selected shared editor and Step 3 readiness |
 | `src/shared/review.ts` | Fixed physical-page mappings and shared Step 1 readiness/missing items |
 | `src/main/data/review.ts` | Durable per-year review operations and the fixed resources browser action |
 | `src/renderer/Review.tsx`, `PdfReader.tsx`, `review-session.ts` | C checklist, real local PDF.js worker/viewport tracking, serialized review writes and flush |
 | `src/renderer/App.tsx` | C shell, years, navigation, local storage acknowledgement, honest later-feature destinations |
 
-Future export/backup implementations belong in **main-process modules**, not renderer/file-system bridges. Introduce only their narrowly typed public operations when implemented. Activities, evidence import, manual completion, declaration, exports, and archives remain for later slices. Annual standards, shared goals, and Step 1/2 readiness are implemented; Ready never means manually Completed.
+Future export/backup implementations belong in **main-process modules**, not renderer/file-system bridges. Introduce only their narrowly typed public operations when implemented. Managed evidence files, activity/year deletion, manual completion, declaration, exports, and archives remain for later slices. Annual standards, shared goals/activities, and Step 1/2/3 readiness are implemented; Ready never means manually Completed.
 
 Public operations return `Result<T>`, not success-shaped failures. `createYear` returns a stable package and persists selection. A duplicate returns `DUPLICATE_YEAR` with `existingPackageId` for actionable opening. `openYear` persists selection without advancing content/data revisions. `saveDraft` accepts a **complete `Draft`** plus package ID and expected content revision; unknown draft fields, malformed dates, and stale revisions are rejected without overwriting the saved record.
 
@@ -75,7 +78,7 @@ Dates are `YYYY-MM-DD` strings, never converted through local instants. Blank da
 
 Meaningful draft changes advance package `contentRevision` and app `dataRevision` once, with independent `assessmentRevision` / `planRevision`. No-op saves and year navigation do not advance them. Later completion commands should compare their relevant revisions; adding goals must affect both assessment and plan revisions. Add fields/tables through a new migration, never edit the shipped migration in place.
 
-The integrated schema is version 4: foundation (1), annual standards (2), goals (3), review (4). Existing foundation and assessment/goals datasets upgrade transactionally without changing their records or revisions. The parallel ticket 06 review-only version-2 layout is explicitly recognized and gains the missing standards/goals tables while preserving review visits, position, launch timestamps and revisions. Ambiguous version-2 layouts fail rather than silently losing progress or inventing a replacement dataset.
+The integrated schema is version 5: foundation (1), annual standards (2), goals (3), review (4), activities and unique same-package links (5). Existing foundation, assessment/goals and integrated review datasets upgrade transactionally without changing their records or revisions. The parallel ticket 06 review-only version-2 layout is explicitly recognized and gains the missing standards/goals/activity tables while preserving review visits, position, launch timestamps and revisions. Ambiguous version-2 layouts fail rather than silently losing progress or inventing a replacement dataset.
 
 Each package owns `reference_counters` for `G`, `A`, and `E`, initialized at 1. When those records are introduced, allocate and advance the counter **in the same immediate transaction** as insertion. Never derive references from record counts or decrement/recycle them after deletion. Keep record foreign keys and same-package relationship ownership enforced. No premature reference-allocation operation is exposed.
 
@@ -88,6 +91,20 @@ Each package owns `reference_counters` for `G`, `A`, and `E`, initialized at 1. 
 Normal window close, app Quit, Windows session-end query, and macOS shutdown notification request that same renderer flush. Main permits termination only after a successful renderer acknowledgement. Failed flush keeps the window open with actionable status and Retry save. A retry after a failed close saves without silently closing; the worker can then close deliberately.
 
 OS Force Quit, power loss, renderer process failure, or an OS overriding a shutdown delay cannot be guaranteed to flush in-memory edits. Do not imply otherwise. Saved SQLite records remain durable; preserve/copy visible unsaved text before forced recovery.
+
+## Shared and supplementary activities
+
+The dashboard leads with **Record an activity**, shows goals beside activities, and displays each activity once with all linked G references. Development plan uses a goal-connection strip, an activity index (including supplementary work), and one selected record editor. A references in either goal's row open the same record. Selecting another activity flushes edits first; failed edits remain visible.
+
+`createActivity` and `updateActivity` accept an expected package content revision. Titles are required; description, completion date, evidence and reflection can be incomplete drafts. `goalIds` can be empty or contain several unique IDs from that package. Evidence notes, HTTP/HTTPS links and application-to-practice reflection live on the activity, not its links. `createGoal` accepts an optional same-package `activityId` to create and link a new shared goal atomically, with one increment to Steps 2 and 3. Deleting a goal removes its links but preserves activities/evidence; references are not reused.
+
+Planned and In Progress activities need no completion date. Completed needs a valid, actual nonfuture date, but evidence/reflection may remain pending and editable. Plan date is independently editable. Valid out-of-year dates warn rather than reject, and date-only strings survive timezone changes without conversion.
+
+`evaluatePlanReadiness` is the single domain implementation, also exposed by `getPlanReadiness` for subsequent completion/export callers. It requires a valid plan date, a goal, completed supporting work for every goal, and every linked activity Completed with a valid date, qualifying evidence and nonblank reflection. One additional unfinished linked activity blocks readiness even when a goal has other completed work. Supplementary activities do not block it. The domain accepts verified readable-evidence activity IDs for the later managed-file integration; this build qualifies evidence through notes or links only.
+
+Evidence links are validated and stored without fetching them. **Open in browser** flushes edits and invokes the protocol-validated main-process `openEvidenceLink` operation for a saved link on a managed activity ID. Failures are reported without removing the link. Internet is needed to view the website; OS launch success is not proof that it loaded or was read.
+
+Activity content/status/date/link/evidence/reflection edits advance only Step 3's relevant revision. Plan-date edits do the same; inline goal creation advances Steps 2 and 3. No-op activity updates, including reordered goal IDs, do not invalidate readiness-related revisions.
 
 ## Offline standards review
 
@@ -147,7 +164,14 @@ Tickets 02 + 06 integration verification on **macOS 26.6.2 (25G83) / arm64**, Oc
 - `npm run typecheck`, `npm run lint`, `npm run build` and `npm run package:dir`: passed.
 - `npx playwright test`: **15** passed (5 foundation, 3 assessment/goals, 7 review). The same **15** passed against the newly packaged `release/mac-arm64/SWCC.app/Contents/MacOS/SWCC` offline. All three bundled PDF hashes matched the originals.
 - This integration did not produce/exercise a newly installed DMG or certify Windows 11, Intel macOS, macOS 14, quarantined-download Gatekeeper behavior, cross-platform transfer, installer upgrades or OS-initiated shutdown. Browser tests exercise the OS-call boundary, not successful website loading/reading.
-- Tickets 02 and 06 are resolved. **Implementation is stopped**; later features remain unavailable and no later ticket was started.
+- Tickets 02 and 06 were resolved at that checkpoint; implementation stopped before later tickets.
+
+Ticket 03 verification on the same macOS arm64 host, October 31, 2026:
+
+- `npm test`: **25** real SQLite public-operation checks passed, including six focused activity cases and five supported historical schema layouts.
+- `npm run typecheck`, `npm run lint` and `npm run build`: passed. Build retains the existing large-bundle advisory.
+- `npx playwright test`: **18** real Electron checks passed offline against production `file://` assets, including three activity checks for shared/inline/supplementary work, completion/date rules, 620px/520px keyboard reflow, timezone restart, protected failed edits/creation, activity-selection flush, and explicit browser failure reporting.
+- This did not build or exercise a new installer, Windows/Intel macOS, or cross-platform transfer. Browser launch behavior is checked with a controlled substitute only at the OS action boundary, not by claiming an external website loaded. Managed-file evidence and manual completion remain later-ticket work.
 
 Repeat packaged checks after building/installing:
 
