@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** claimed
+**Status:** resolved
 
 - [ ] Use Electron, React, TypeScript, a Vite renderer, SQLite, and npm with locked compatible dependencies. Provide reproducible development, production-build, type-check, lint, and focused test commands.
 - [ ] A packaged application launches without a development server, development tools, CDN, or internet connection. Initial verification on an available target is distinguished from the later target-installer acceptance tickets.
@@ -18,3 +18,11 @@
 - [ ] Expose narrowly scoped typed preload operations. Enable context isolation, disable renderer Node integration, constrain navigation/new windows, and treat bundled documents as data; expose no arbitrary filesystem or shell operations.
 - [ ] Autosave incomplete assessment text, display Saving/Saved/actionable failure, and keep failed edits visible. Navigation, close, and shutdown cannot silently lose pending edits; a failed flush cannot report Saved. Establish this same flush contract for later completion/export/backup callers.
 - [ ] Integration checks use the public typed application operations with real SQLite and temporary managed storage. Renderer checks cover keyboard use, duplicate-year handling, autosave failure, and restart durability. Migration/storage/IPC failures preserve existing data and are reported rather than replaced with an empty dataset.
+
+## Comments
+
+Integrated with `--no-ff` as commit `be6ff0747a27baffe18423c7cddef77e29be74a4` from `ticket/01` at `e0f4f5d85f09ed9180cf9add831c9b2ec0ba5961`.
+
+In the integrated worktree, `npm ci` was needed because Electron was missing; `npm test` (9 SQLite operation checks), `npm run typecheck`, `npm run lint`, and `npm run build` then passed. `tests/operations.test.ts` covers durable drafts and failure recovery; `tests/desktop/drafts.spec.ts` supplies the five Electron checks. The branch README records those five checks passing against an installed, packaged macOS arm64 DMG with networking disabled.
+
+Platform limits remain: Windows, Intel macOS, the quarantined-download/Gatekeeper flow, cross-version installer upgrades, and an actual OS-initiated shutdown were not exercised. These results do not claim those acceptance paths.
