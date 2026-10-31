@@ -4,11 +4,12 @@ import { dateWarning } from '../shared/application.js';
 import { ANNUAL_STEPS } from '../shared/workflow.js';
 import type { AnnualStep, AnnualWorkflow } from '../shared/workflow.js';
 import { Dialog } from './assessment-screen.js';
+import { formsExportWarnings } from '../shared/forms.js';
 
 const labels = { review: 'Review', assessment: 'Self-assessment', plan: 'Development plan' };
-export function AnnualWorkflowPanel({ pkg, workflow, busy, navigate, complete, declare, exportInfo }: {
+export function AnnualWorkflowPanel({ pkg, workflow, busy, navigate, complete, declare, exportForms }: {
   pkg: YearPackage; workflow: AnnualWorkflow; busy: boolean;
-  navigate: (step: AnnualStep) => void; complete: (step: AnnualStep) => void; declare: () => void; exportInfo: () => void;
+  navigate: (step: AnnualStep) => void; complete: (step: AnnualStep) => void; declare: () => void; exportForms: () => void;
 }) {
   return <aside className="map-checklist" aria-label="Annual workflow">
     <h2>Close the annual loop</h2><p>Work freely. Complete deliberately.</p>
@@ -34,9 +35,34 @@ export function AnnualWorkflowPanel({ pkg, workflow, busy, navigate, complete, d
       {pkg.declarationRecordedAt && <small>Recorded in the app (UTC): <time dateTime={pkg.declarationRecordedAt}>{pkg.declarationRecordedAt}</time>. Separate from the external submission date; later edits preserve this record.</small>}
       <button className="text-button" disabled={busy} onClick={declare}>{pkg.declarationDate ? 'Edit recorded date' : 'Record submission date'}</button>
     </section>
-    <button type="button" className="secondary" disabled={busy} onClick={exportInfo}>Annual export information</button>
+    <button type="button" className="secondary" disabled={busy} onClick={exportForms}>Export Forms PDF</button>
     <p className="workflow-source">Application readiness and manual completion only. Supplied ethics: Second Edition / September 2018; assessment tool: Third Edition / 2023 reference. Not verification of current College compliance.</p>
   </aside>;
+}
+
+export function FormsExportDialog({ pkg, workflow, busy, error, exportForms, close }: {
+  pkg: YearPackage; workflow: AnnualWorkflow; busy: boolean; error: string | null;
+  exportForms: (draft: boolean) => void; close: () => void;
+}) {
+  const missing = formsExportWarnings(pkg, workflow);
+  return <Dialog title="Export annual forms" onClose={() => { if (!busy) close(); }}>
+    <p>Export the review checklist, one annual self-assessment (SAT), and one annual development plan (PDP) in the supplied layouts.</p>
+    <p>Evidence files are referenced, not embedded. This is not a restorable full-app backup. Only short content fits in this build; longer content fails explicitly until continuation pages are available.</p>
+    {missing.length > 0 && <section className="declaration-warning" aria-label="Draft export warning">
+      <h3>This annual package is incomplete.</h3>
+      <p>You can explicitly export a draft; missing fields stay blank. Application readiness and completion are not College compliance.</p>
+      <ul>{missing.map(item => <li key={item}>{item}</li>)}</ul>
+    </section>}
+    {error && <p className="goal-validation" role="alert">{error}</p>}
+    {busy && <p role="status">Exporting Forms PDF… Finish or cancel the destination dialog; wait for the complete write.</p>}
+    <div className="goal-dialog-actions">
+      <button type="button" className="secondary" disabled={busy} onClick={close}>Cancel</button>
+      <button type="button" disabled={busy} onClick={() => exportForms(missing.length > 0)}>
+        {missing.length ? 'Export draft PDF' : 'Export PDF'}
+      </button>
+    </div>
+    <p>Complete Portfolio ZIP is not available yet.</p>
+  </Dialog>;
 }
 
 export function DeclarationDialog({ pkg, incomplete, busy, save, close }: {

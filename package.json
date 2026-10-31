@@ -20,6 +20,8 @@
   },
   "main": "dist/main/index.js",
   "dependencies": {
+    "@pdf-lib/fontkit": "1.1.1",
+    "pdf-lib": "1.17.1",
     "pdfjs-dist": "5.4.624",
     "lucide-react": "1.66.0",
     "better-sqlite3": "12.11.1",
@@ -49,7 +51,8 @@
     "extraResources": [
       { "from": "Code-of-Ethics-and-Standards-of-Practice-September-7-2018 (1).pdf", "to": "sources/ethics-2018.pdf" },
       { "from": "Step One SWCC.pdf", "to": "sources/step-one.pdf" },
-      { "from": "OCSWSSW-CCP-Assess-Tool-2026-English.pdf", "to": "sources/assessment-2026.pdf" }
+      { "from": "OCSWSSW-CCP-Assess-Tool-2026-English.pdf", "to": "sources/assessment-2026.pdf" },
+      { "from": "resources/fonts", "to": "fonts" }
     ],
     "asarUnpack": ["node_modules/better-sqlite3/**/*"],
     "mac": { "target": "dmg", "category": "public.app-category.productivity", "minimumSystemVersion": "14.0", "identity": null },

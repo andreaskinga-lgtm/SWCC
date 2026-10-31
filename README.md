@@ -1,6 +1,6 @@
 # SWCC desktop
 
-The offline Electron app includes durable annual assessment drafts, independent annual standards, shared learning goals and activities, managed evidence files with integrity checks and repair, activity notes/links and reflections, per-year standards review, explicit annual step completion and external declaration records. The production shell follows approved C / Learning map reference at commit `5477044`; prototype samples and simulated operations are not shipped.
+The offline Electron app includes durable annual assessment drafts, independent annual standards, shared learning goals and activities, managed evidence files with integrity checks and repair, activity notes/links and reflections, per-year standards review, explicit annual step completion and external declaration records, and short-content annual Forms PDF export. The production shell follows approved C / Learning map reference at commit `5477044`; prototype samples and simulated operations are not shipped.
 
 ## Run and check
 
@@ -72,9 +72,10 @@ Startup refuses corrupt, empty, missing-from-an-existing-dataset, future-schema,
 | `src/main/data/review.ts` | Durable per-year review operations and the fixed resources browser action |
 | `src/renderer/Review.tsx`, `PdfReader.tsx`, `review-session.ts` | C checklist, real local PDF.js worker/viewport tracking, serialized review writes and flush |
 | `src/renderer/App.tsx` | C shell, years, navigation, local storage acknowledgement, honest later-feature destinations |
-| `src/renderer/annual-workflow.tsx` | C's adjacent annual checklist, declaration entry/warnings and honest export information |
+| `src/renderer/annual-workflow.tsx` | C's adjacent annual checklist, declaration entry/warnings and explicit forms draft export |
+| `src/shared/forms.ts`, `src/main/export/forms.ts` | Draft-export warnings, measured source-template projection, local font appearances, flattening and complete PDF publication |
 
-Future export/backup implementations belong in **main-process modules**, not renderer/file-system bridges. Introduce only their narrowly typed public operations when implemented. Exports and archives remain for later slices; the dashboard's export information action explains that no file is generated. Record deletion, managed evidence and repair, readiness, manual completion, and external declaration recording are implemented. Ready never means manually Completed.
+Export/backup implementations belong in **main-process modules**, not renderer/file-system bridges. The dashboard's **Export Forms PDF** action invokes the narrowly typed `exportForms` operation. Continuation pages, portfolio archives, and full backup/restore remain later slices. Record deletion, managed evidence and repair, readiness, manual completion, and external declaration recording are implemented. Ready never means manually Completed.
 
 Public operations return `Result<T>`, not success-shaped failures. `createYear` returns a stable package and persists selection. A duplicate returns `DUPLICATE_YEAR` with `existingPackageId` for actionable opening. `openYear` persists selection without advancing content/data revisions. `saveDraft` accepts a **complete `Draft`** plus package ID and expected content revision; unknown draft fields, malformed dates, and stale revisions are rejected without overwriting the saved record.
 
@@ -140,7 +141,34 @@ Current manual completion requires matching relevant/completed revisions. Assess
 
 `recordDeclaration({ packageId, date, expectedRevision, confirmIncomplete? })` stores the date-only **actual external submission date** and a separate app-entry UTC timestamp. It expects the package content revision. If any manual completion is not current, it requires acknowledgement of the incomplete-steps warning (`confirmIncomplete: true`); historical declarations are allowed. Entry or correction advances content/data revisions but no step's relevant revision. An unchanged date preserves the entry timestamp. Later edits or reopening steps preserve both declaration fields; no external submission history is reconstructed and SWCC neither submits nor verifies declarations.
 
-A year is Complete only with all three current manual confirmations and a declaration date. Dashboard and year-list status refresh after actions and survive restart. C's independent annual checklist, declaration and export information sit beside the relationship board, with labelled keyboard actions, readable blockers and the source-edition/application-readiness caveat. Export information remains available for incomplete years; exports/backup are not implemented by this ticket.
+A year is Complete only with all three current manual confirmations and a declaration date. Dashboard and year-list status refresh after actions and survive restart. C's independent annual checklist, declaration and forms export controls sit beside the relationship board, with labelled keyboard actions, readable blockers and the source-edition/application-readiness caveat. Forms export remains available for incomplete years after explicit draft acknowledgement.
+
+## Annual Forms PDF — short-content slice
+
+Choose **Export Forms PDF** beside the annual workflow, review the missing readiness/manual-completion/declaration items, then explicitly choose **Export draft PDF** when incomplete. Empty drafts still emit the checklist, one SAT and one PDP; missing fields remain blank. An OS save dialog chooses the destination. Cancellation is not success; generation and storage errors remain visible and retryable.
+
+The renderer flushes both draft and review sessions before opening export and again before generation. A failed flush retains edits and prevents consuming stale records. Main captures the package, review, evidence metadata/integrity and warning state **synchronously in one SQLite read transaction, before any asynchronous work**. Later edits, resets or evidence deletions do not mix revisions into that forms snapshot. Forms only reference evidence metadata; they do not collect attachment bytes or need an archive mutation lock. Main prevents overlapping Forms PDF requests and waits for an active forms write before approving normal close.
+
+`pdf-lib` and `@pdf-lib/fontkit` use byte-identical local templates: checklist physical page 1, SAT assessment-tool page 8, and PDP page 11. The checklist's thirteen checkbox centers were measured on the actual 612 × 792 pt image background; generated X glyphs are centered using local font glyph bounds, independent of Step 1 confirmation. Annual standards use the twelve SAT checkboxes independently of review progress and goals. SAT/PDP dates remain separate date-only strings.
+
+Each selected page is filled in an isolated template document, its appearances updated, and the form flattened **before** page copying/merging. Output has no interactive form widgets or scripting. Each annual narrative and goal occurs once within its logical form. Shared activities list all G links once; supplementary ones say **No linked goal**. A references connect activities, evidence and reflection; E references retain original attachment names without embedding their bytes. Broken evidence is explicitly labelled for repair rather than silently hidden.
+
+Noto Sans Regular is bundled under `resources/fonts/`, unmodified, with its SIL Open Font License and pinned upstream revision. No font fetch occurs at runtime. Actual field rectangles, 1–2 pt padding, font metrics and 10 pt body text drive line wrapping, including long unbroken words/URLs. Unsupported glyphs fail explicitly rather than disappear.
+
+**Ticket 09 continuation pages are not implemented.** If any field cannot fit at 10 pt, export returns an actionable `OVERFLOW` error and publishes nothing. Do not shorten text automatically or treat this short-content slice as the completed long-content export delivery gate. Complete Portfolio ZIP is also not implemented here.
+
+The entire PDF is generated before writing a unique private partial file beside the destination. The file is completely written, flushed and closed before rename publishes it. Errors preserve any previous complete destination, and success is reported only after publication. A forms export is **not** a restorable full-app backup.
+
+`tests/forms-export.test.ts` exercises public operations with real SQLite, managed evidence and actual templates. It checks flattened content/reference counts, synchronous snapshot consistency, cancellation/failures, overflow, raster checklist/standard alignment, and wrapped text inside measured fields at ≥10 pt. To inspect the generated example locally:
+
+```sh
+SWCC_EXPORT_INSPECT=1 npm test -- tests/forms-export.test.ts
+# .work/forms-inspection/{annual.pdf,checklist.png,sat.png,pdp.png}
+```
+
+`tests/desktop/forms.spec.ts` exercises the production offline Electron renderer, keyboard draft confirmation, destination cancellation, busy/error feedback, and failed-save retention followed by exporting the latest text. OS chooser responses and injected disk errors are controlled system-boundary fixtures; generated PDFs and renderer actions are real.
+
+Ticket 08 verification on October 31, 2026, macOS 26.6.2 / arm64: `npm ci`, all 75 public-operation tests, typecheck, lint, build, and 13 targeted desktop forms/completion/draft checks passed. The actual checklist/SAT/PDP sources and generated raster layouts were visually inspected. `package:dir` also passed, and all four forms renderer checks passed offline against the resulting unsigned app bundle with its bundled PDFs/font, including normal-close protection during export. This was an app-bundle smoke, not a DMG installation or Windows/macOS Intel acceptance; those targets were not exercised for this slice. Vite retains its existing large-chunk advisory.
 
 ## Fixed read-only source set
 

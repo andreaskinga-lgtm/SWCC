@@ -7,7 +7,7 @@ import { AssessmentScreen, Dialog } from './assessment-screen.js';
 import { PlanScreen } from './plan-screen.js';
 import { ANNUAL_STEPS, evaluateWorkflow } from '../shared/workflow.js';
 import type { AnnualStep } from '../shared/workflow.js';
-import { AnnualWorkflowPanel, DeclarationDialog } from './annual-workflow.js';
+import { AnnualWorkflowPanel, DeclarationDialog, FormsExportDialog } from './annual-workflow.js';
 import { ReviewSession } from './review-session.js';
 import { Review } from './Review.js';
 
@@ -41,7 +41,8 @@ export function App({ operations }: { operations: DesktopOperations }) {
   const [deletingYear, setDeletingYear] = useState<{ id: string; year: number } | null>(null);
   const [yearDeleteError, setYearDeleteError] = useState<string | null>(null);
   const [declaring, setDeclaring] = useState(false);
-  const [exportInfo, setExportInfo] = useState(false);
+  const [showFormsExport, setShowFormsExport] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState('');
   const [evidenceByPackage, setEvidenceByPackage] = useState<Record<string, EvidenceAttachment[]>>({});
   const [evidenceErrors, setEvidenceErrors] = useState<Record<string, string>>({});
@@ -219,6 +220,39 @@ export function App({ operations }: { operations: DesktopOperations }) {
       setFeedback('External submission date recorded. SWCC has not submitted or verified a declaration.');
     } finally { setBusy(false); }
   }
+  function openExport() {
+    void run(async () => {
+      const current = session.getSnapshot().record;
+      if (!current) return;
+      session.acceptSaved(unwrap(await operations.openYear(current.id)));
+      await reviewSession.open(current.id);
+      await refreshEvidence(current.id);
+      setExportError(null);
+      setShowFormsExport(true);
+    });
+  }
+  async function exportForms(confirmDraft: boolean) {
+    if (busy) return;
+    setBusy(true);
+    setExportError(null);
+    setFeedback('');
+    try {
+      await Promise.all([session.flush(), reviewSession.flush()]);
+      const current = session.getSnapshot().record;
+      if (!current) throw new Error('Open a year before exporting its forms.');
+      const outcome = unwrap(await operations.exportForms({
+        packageId: current.id, ...(confirmDraft ? { confirmDraft: true as const } : {}),
+      }));
+      if (outcome.cancelled) {
+        setFeedback('Forms PDF export cancelled. No output was published.');
+      } else {
+        setShowFormsExport(false);
+        setFeedback(`Forms PDF written: ${outcome.fileName} (${outcome.pageCount} pages). This is not a full-app backup.`);
+      }
+    } catch (failure) {
+      setExportError(failure instanceof Error ? failure.message : String(failure));
+    } finally { setBusy(false); }
+  }
   return <div className="map-layout">
     <aside className="map-rail" aria-label="Portfolio navigation">
       <div className="map-mark"><Sprout size={29} aria-hidden="true" /><span className="sr-only">SWCC</span></div>
@@ -292,7 +326,7 @@ export function App({ operations }: { operations: DesktopOperations }) {
           <button className="secondary" onClick={() => navigate('plan')}>View development plan</button></div>
         </div><p className="board-footer">Evidence and reflection will stay with each activity, never with its links.</p></section>
           {workflow && <AnnualWorkflowPanel pkg={pkg} workflow={workflow} busy={busy} navigate={navigate}
-            complete={complete} declare={openDeclaration} exportInfo={() => void run(async () => setExportInfo(true))} />}
+            complete={complete} declare={openDeclaration} exportForms={openExport} />}
           </div></>}
       {screen === 'assessment' && pkg && <AssessmentScreen pkg={pkg} session={session} operations={operations}
         complete={() => complete('assessment')} busy={busy} />}
@@ -320,10 +354,8 @@ export function App({ operations }: { operations: DesktopOperations }) {
       {declaring && pkg && workflow && <DeclarationDialog pkg={pkg} busy={busy}
         incomplete={ANNUAL_STEPS.some(step => workflow.steps[step].status !== 'Completed')}
         save={saveDeclaration} close={() => setDeclaring(false)} />}
-      {exportInfo && <Dialog title="Annual export information" onClose={() => setExportInfo(false)}>
-        <p>Annual Forms PDF and Complete Portfolio ZIP are not implemented in this build. No export file has been created.</p>
-        <p>When available, annual exports will remain accessible for incomplete packages after a draft warning. A portfolio export is not a restorable full-app backup.</p>
-      </Dialog>}
+      {showFormsExport && pkg && workflow && <FormsExportDialog pkg={pkg} workflow={workflow} busy={busy} error={exportError}
+        exportForms={draft => void exportForms(draft)} close={() => setShowFormsExport(false)} />}
       {state && <footer className="source-note"><strong>Supplied baseline, not regulatory verification.</strong><p>The ethics document is Second Edition, amended September 2018. The assessment tool references Third Edition / 2023. The same fixed source set applies to every year; SWCC does not verify current-year College compliance.</p></footer>}
     </main></div>
   </div>;
