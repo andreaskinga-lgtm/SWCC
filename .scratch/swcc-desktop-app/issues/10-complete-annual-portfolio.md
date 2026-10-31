@@ -4,7 +4,9 @@
 
 **Blocked by:** 09: Carry long annual narratives onto readable continuation pages.
 
-**Status:** ready-for-agent
+**Status:** claimed
+
+Claimed October 31, 2026 after ticket 09 integration; implementation branch `ticket/10`.
 
 - [ ] Offer Export Complete Portfolio ZIP separately from Forms PDF through C's dashboard export controls and an OS destination dialog. Preserve the approved year-based archive/form naming contract.
 - [ ] Include the generated forms PDF, a text evidence index, a portfolio manifest, and every managed attachment's original bytes grouped by stable E reference.
