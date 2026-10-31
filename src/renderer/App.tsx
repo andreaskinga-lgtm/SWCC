@@ -1,9 +1,11 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { BookOpen, ClipboardList, Home, Layers, HardDrive, Sprout, Network } from 'lucide-react';
 import type { AppState, DesktopOperations, OperationError, Result } from '../shared/application.js';
-import { localDate, SOURCE_DOCUMENTS } from '../shared/application.js';
+import { localDate } from '../shared/application.js';
 import { DraftSession } from './draft-session.js';
 import { AssessmentScreen, PlanScreen } from './assessment-screen.js';
+import { ReviewSession } from './review-session.js';
+import { Review } from './Review.js';
 
 type Screen = 'years' | 'overview' | 'assessment' | 'plan' | 'review' | 'backup';
 function unwrap<T>(result: Result<T>): T {
@@ -21,7 +23,9 @@ const destinations = [
 
 export function App({ operations }: { operations: DesktopOperations }) {
   const [session] = useState(() => new DraftSession(operations));
+  const [reviewSession] = useState(() => new ReviewSession(operations));
   const draft = useSyncExternalStore(session.subscribe, session.getSnapshot);
+  const review = useSyncExternalStore(reviewSession.subscribe, reviewSession.getSnapshot);
   const [state, setState] = useState<AppState | null>(null);
   const [screen, setScreen] = useState<Screen>('years');
   const [year, setYear] = useState(localDate().slice(0, 4));
@@ -37,17 +41,17 @@ export function App({ operations }: { operations: DesktopOperations }) {
       if (result.value.selectedPackage) setScreen('overview');
     }).catch(() => setError('Cannot connect to local records. Preserve your storage folder and restart SWCC.'));
     return operations.onCloseRequested(() => {
-      void session.flush().then(() => operations.completeClose()).then(result => {
+      void Promise.all([session.flush(), reviewSession.flush()]).then(() => operations.completeClose()).then(result => {
         if (!result.ok) setError(result.error.message);
       }).catch(() => { /* The session displays the retained edit and retry action. */ });
     });
-  }, [operations, session]);
+  }, [operations, session, reviewSession]);
   async function run(work: () => Promise<void>) {
     if (busy) return;
     setBusy(true);
     setError(null);
-    try { await session.flush(); await work(); }
-    catch (failure) { if (!session.getSnapshot().error) setError(failure instanceof Error ? failure.message : String(failure)); }
+    try { await Promise.all([session.flush(), reviewSession.flush()]); await work(); }
+    catch (failure) { if (!session.getSnapshot().error && !reviewSession.getSnapshot().error) setError(failure instanceof Error ? failure.message : String(failure)); }
     finally { setBusy(false); }
   }
   function navigate(next: Screen) {
@@ -90,7 +94,7 @@ export function App({ operations }: { operations: DesktopOperations }) {
         {!pkg && <option value="">Choose a year</option>}
         {state?.years.map(row => <option key={row.id} value={row.id}>{row.year}</option>)}
       </select></label>
-      <span className={`save-status ${draft.status === 'Not saved' ? 'warning' : ''}`} role="status" aria-label="Save status">{state ? draft.status : error ? 'Unavailable' : 'Opening records'}</span>
+      <span className={`save-status ${draft.status === 'Not saved' || review.status === 'Not saved' ? 'warning' : ''}`} role="status" aria-label="Save status">{state ? [draft.status, review.status].includes('Not saved') ? 'Not saved' : [draft.status, review.status].includes('Saving') ? 'Saving' : 'Saved' : error ? 'Unavailable' : 'Opening records'}</span>
     </header>
     <main id="main-content">
       {state && !state.acknowledgedAt && <section className="storage-note" aria-labelledby="local-storage-title">
@@ -131,10 +135,7 @@ export function App({ operations }: { operations: DesktopOperations }) {
           </aside></div></>}
       {screen === 'assessment' && pkg && <AssessmentScreen pkg={pkg} session={session} operations={operations} />}
       {screen === 'plan' && pkg && <PlanScreen pkg={pkg} session={session} operations={operations} />}
-      {screen === 'review' && <><div className="page-heading"><h1>Review the supplied standards.</h1></div><section className="surface">
-        <p>The original source PDFs are bundled read-only. The offline reader and page-visit checklist are not available in this foundation build.</p>
-        <ul>{SOURCE_DOCUMENTS.map(document => <li key={document.id}>{document.title}</li>)}</ul>
-      </section></>}
+      {screen === 'review' && pkg && <Review packageId={pkg.id} year={pkg.year} operations={operations} session={reviewSession} />}
       {screen === 'backup' && <><div className="page-heading"><h1>Protect your portfolio.</h1><p>Full-app backup and restore are distinct from annual exports.</p></div>
         <section className="surface"><h2>Local storage</h2><p className="storage-path">{state?.storageDirectory}</p>
           <p>Full backup and restore are not available in this foundation build. Until available, quit SWCC after Saved and preserve a copy of the entire dataset folder, including database and evidence. Never copy a database while SWCC is running.</p>

@@ -54,7 +54,7 @@ export interface AppState {
   lastBackupRevision: number | null;
 }
 export interface OperationError {
-  code: 'VALIDATION' | 'DUPLICATE_YEAR' | 'NOT_FOUND' | 'CONFLICT' | 'STORAGE' | 'IPC';
+  code: 'VALIDATION' | 'DUPLICATE_YEAR' | 'NOT_FOUND' | 'CONFLICT' | 'STORAGE' | 'IPC' | 'BROWSER' | 'INACTIVE';
   message: string;
   existingPackageId?: string;
 }
@@ -89,11 +89,12 @@ export interface YearPackage extends Draft {
   contentRevision: number;
   assessmentRevision: number;
   planRevision: number;
+  reviewRevision: number;
   createdAt: string;
   updatedAt: string;
   goals: Goal[];
 }
-export interface ApplicationOperations {
+export interface ApplicationOperations extends ReviewOperations {
   getState(): Promise<Result<AppState>>;
   createYear(year: number): Promise<Result<YearPackage>>;
   openYear(packageId: string): Promise<Result<YearPackage>>;
@@ -104,6 +105,8 @@ export interface ApplicationOperations {
   acknowledgeStorage(): Promise<Result<AppState>>;
 }
 export interface DesktopOperations extends ApplicationOperations {
+  getReaderActive(): Promise<Result<boolean>>;
+  onReaderActiveChanged(handler: (active: boolean) => void): () => void;
   onCloseRequested(handler: () => void): () => void;
   completeClose(): Promise<Result<void>>;
 }
@@ -120,3 +123,4 @@ export function dateWarning(value: string, year: number): string | null {
   return validDate(value) && Number(value.slice(0, 4)) !== year
     ? `This date is outside ${year}. You can keep it for backfilled work.` : null;
 }
+import type { ReviewOperations } from './review.js';

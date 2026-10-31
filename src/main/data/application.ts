@@ -8,6 +8,8 @@ import type {
 } from '../../shared/application.js';
 import { migrate, SCHEMA_VERSION } from './migrations.js';
 import { storageLayout } from './storage.js';
+import { reviewOperations } from './review.js';
+import type { ReviewSystem } from './review.js';
 
 class ApplicationFailure extends Error {
   constructor(readonly detail: OperationError) { super(detail.message); }
@@ -60,7 +62,7 @@ function validateDeleteGoal(input: DeleteGoal) {
   identifier(request.goalId);
 }
 
-export function openApplication(storageRoot: string, clock: { now?: () => Date; today?: () => string } = {}) {
+export function openApplication(storageRoot: string, clock: { now?: () => Date; today?: () => string } = {}, reviewSystem?: ReviewSystem) {
   const paths = storageLayout(storageRoot);
   const dataset = paths.dataset;
   const databaseFile = paths.database;
@@ -88,7 +90,7 @@ export function openApplication(storageRoot: string, clock: { now?: () => Date; 
   const packageSelect = `SELECT id, year, source_set_id AS sourceSetId, assessment_date AS assessmentDate,
     plan_date AS planDate, strengths, peer_feedback AS peerFeedback, learning_needs AS learningNeeds,
     content_revision AS contentRevision, assessment_revision AS assessmentRevision, plan_revision AS planRevision,
-    created_at AS createdAt, updated_at AS updatedAt FROM year_packages`;
+    review_revision AS reviewRevision, created_at AS createdAt, updated_at AS updatedAt FROM year_packages`;
   function getGoals(packageId: string): Goal[] {
     const rows = database.prepare(`SELECT id, package_id AS packageId, reference_number AS referenceNumber,
       title, description, created_at AS createdAt, updated_at AS updatedAt
@@ -138,6 +140,7 @@ export function openApplication(storageRoot: string, clock: { now?: () => Date; 
     }
   }
   const operations: ApplicationOperations = {
+    ...reviewOperations(database, now, reviewSystem),
     getState: () => operation(state),
     createYear: year => operation(() => database.transaction(() => {
       if (!Number.isInteger(year) || year < 1 || year > 9999) fail('VALIDATION', 'Enter a calendar year from 1 to 9999.');

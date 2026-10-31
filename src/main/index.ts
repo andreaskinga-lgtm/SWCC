@@ -1,7 +1,7 @@
-import { app, BrowserWindow, dialog, ipcMain, powerMonitor } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, powerMonitor, shell } from 'electron';
 import { join, isAbsolute } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { mkdirSync, existsSync } from 'node:fs';
+import { mkdirSync, existsSync, readFileSync } from 'node:fs';
 import { openApplication } from './data/application.js';
 import { SOURCE_DOCUMENTS } from '../shared/application.js';
 import type { ApplicationOperations, Result } from '../shared/application.js';
@@ -52,13 +52,18 @@ if (startupFailure) {
   });
   app.whenReady().then(async () => {
     try {
-      application = openApplication(storageRoot);
+      const directory = fileURLToPath(new URL('.', import.meta.url));
+      application = openApplication(storageRoot, {}, {
+        openExternal: url => shell.openExternal(url),
+        readDocument: () => readFileSync(app.isPackaged
+          ? join(process.resourcesPath, 'sources', 'ethics-2018.pdf')
+          : join(directory, '../../Code-of-Ethics-and-Standards-of-Practice-September-7-2018 (1).pdf')),
+      });
       if (app.isPackaged) {
         for (const document of SOURCE_DOCUMENTS) {
           if (!existsSync(join(process.resourcesPath, 'sources', document.file))) throw new Error(`Bundled source document ${document.file} is missing. Reinstall SWCC; your dataset has not been replaced.`);
         }
       }
-      const directory = fileURLToPath(new URL('.', import.meta.url));
       window = new BrowserWindow({
         title: 'SWCC — My learning portfolio',
         width: 1280, height: 900, minWidth: 520, minHeight: 550,
@@ -94,6 +99,10 @@ if (startupFailure) {
         'swcc:get-state': 'getState', 'swcc:create-year': 'createYear', 'swcc:open-year': 'openYear',
         'swcc:save-draft': 'saveDraft', 'swcc:create-goal': 'createGoal', 'swcc:update-goal': 'updateGoal',
         'swcc:delete-goal': 'deleteGoal', 'swcc:acknowledge-storage': 'acknowledgeStorage',
+        'swcc:get-review': 'getReview', 'swcc:save-review-position': 'saveReviewPosition',
+        'swcc:record-review-visits': 'recordReviewVisits', 'swcc:reset-review-section': 'resetReviewSection',
+        'swcc:launch-review-resources': 'launchReviewResources', 'swcc:reset-review-resources': 'resetReviewResources',
+        'swcc:get-review-document': 'getReviewDocument',
       };
       function trusted(event: Electron.IpcMainInvokeEvent) {
         return event.sender === window?.webContents && event.senderFrame === window.webContents.mainFrame
@@ -102,10 +111,23 @@ if (startupFailure) {
       for (const [channel, key] of Object.entries(channels)) {
         ipcMain.handle(channel, (event, input: unknown) => {
           if (!trusted(event)) return { ok: false, error: { code: 'IPC', message: 'Request denied: untrusted application content.' } };
+          if (key === 'recordReviewVisits' && (!window?.isVisible() || !window.isFocused() || window.isMinimized()))
+            return { ok: false, error: { code: 'INACTIVE', message: 'Return to the active reader to track this page.' } };
           const operation = operations[key] as (input: unknown) => Promise<Result<unknown>>;
           return operation(input);
         });
       }
+      const readerActive = () => Boolean(window?.isVisible() && window.isFocused() && !window.isMinimized());
+      ipcMain.handle('swcc:reader-active', event => trusted(event)
+        ? { ok: true, value: readerActive() }
+        : { ok: false, error: { code: 'IPC', message: 'Request denied: untrusted application content.' } });
+      const notifyReaderActive = () => window?.webContents.send('swcc:reader-active-changed', readerActive());
+      window.on('focus', notifyReaderActive);
+      window.on('blur', notifyReaderActive);
+      window.on('show', notifyReaderActive);
+      window.on('hide', notifyReaderActive);
+      window.on('minimize', notifyReaderActive);
+      window.on('restore', notifyReaderActive);
       ipcMain.handle('swcc:complete-close', event => {
         if (!trusted(event) || !closeRequested) return { ok: false, error: { code: 'IPC', message: 'No close request is pending.' } };
         approvedClose = true;

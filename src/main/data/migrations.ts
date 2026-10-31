@@ -1,8 +1,9 @@
 import type Database from 'better-sqlite3';
 import { assessmentMigration } from './assessment-migration.js';
 import { goalsMigration } from './goals-migration.js';
+import { reviewMigration } from './review-migration.js';
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 const migrations = [
   `
   CREATE TABLE year_packages (
@@ -38,12 +39,28 @@ const migrations = [
   `,
   assessmentMigration,
   goalsMigration,
+  reviewMigration,
 ];
 
 export function migrate(db: Database.Database) {
   const version = db.pragma('user_version', { simple: true }) as number;
   if (version > SCHEMA_VERSION) throw new Error(`Dataset schema ${version} is newer than supported schema ${SCHEMA_VERSION}. Install a compatible SWCC build. Existing records were not replaced.`);
   db.transaction(() => {
+    // Ticket 06's parallel build used version 2 for review, before assessment/goals merged.
+    if (version === 2) {
+      const hasTable = (name: string) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name));
+      const reviewColumn = (db.pragma('table_info(year_packages)') as { name: string }[]).some(column => column.name === 'review_revision');
+      if (hasTable('review_states') || hasTable('review_visits') || reviewColumn) {
+        if (!hasTable('review_states') || !hasTable('review_visits') || !reviewColumn
+          || hasTable('annual_standards') || hasTable('learning_goals')) {
+          throw new Error('Dataset schema 2 has an unrecognized migration layout. Preserve the dataset and recover with a compatible SWCC build.');
+        }
+        db.exec(assessmentMigration);
+        db.exec(goalsMigration);
+        db.pragma(`user_version = ${SCHEMA_VERSION}`);
+        return;
+      }
+    }
     for (let index = version; index < migrations.length; index++) {
       db.exec(migrations[index]);
       db.pragma(`user_version = ${index + 1}`);

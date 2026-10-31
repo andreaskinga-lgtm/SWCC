@@ -16,6 +16,19 @@ const operations: DesktopOperations = {
   updateGoal: input => invoke('swcc:update-goal', input),
   deleteGoal: input => invoke('swcc:delete-goal', input),
   acknowledgeStorage: () => invoke('swcc:acknowledge-storage'),
+  getReview: id => invoke('swcc:get-review', id),
+  saveReviewPosition: position => invoke('swcc:save-review-position', position),
+  recordReviewVisits: input => invoke('swcc:record-review-visits', input),
+  resetReviewSection: input => invoke('swcc:reset-review-section', input),
+  launchReviewResources: id => invoke('swcc:launch-review-resources', id),
+  resetReviewResources: id => invoke('swcc:reset-review-resources', id),
+  getReviewDocument: () => invoke('swcc:get-review-document'),
+  getReaderActive: () => invoke('swcc:reader-active'),
+  onReaderActiveChanged: handler => {
+    const listener = (_event: Electron.IpcRendererEvent, active: boolean) => handler(active);
+    ipcRenderer.on('swcc:reader-active-changed', listener);
+    return () => ipcRenderer.removeListener('swcc:reader-active-changed', listener);
+  },
   completeClose: () => invoke('swcc:complete-close'),
   onCloseRequested: handler => {
     const listener = () => handler();
