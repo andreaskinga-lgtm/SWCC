@@ -4,7 +4,7 @@
 
 **Blocked by:** 11: Back up all years and show trustworthy backup status.
 
-**Status:** claimed
+**Status:** resolved
 
 Claimed October 31, 2026 after ticket 11 integration; implementation branch `ticket/12`, concurrent with independent form continuations.
 
@@ -17,3 +17,11 @@ Claimed October 31, 2026 after ticket 11 integration; implementation branch `tic
 - [ ] Archive inspection, failed validation, and cancellation leave the live dataset, evidence, pending edits, completion/declarations, and backup status unchanged. Clean up only the operation's scoped staging artifacts.
 - [ ] Provide progress and actionable errors without presenting preview success as completed restoration. Replacement remains unavailable until the recoverable-restore ticket supplies its safe transaction.
 - [ ] Public-operation/renderer checks use a genuine full backup and modified hostile/corrupt fixtures: portfolio type, malformed/future/source-incompatible manifest, traversal/absolute paths, duplicate entries, symlinks, undeclared/missing evidence, incorrect hashes/sizes, actual oversized extraction, and database relationship/integrity failure. Assert current data remains usable and unchanged.
+
+## Comments
+
+### 2026-10-31 — validated inspection integrated
+
+Implemented at `baa80a47b9f62d03ff8ccb2cbb353adff6a78c0e`, merged with `8d7a33deed7901a3373b5b915214b78d1d0507b6`. Strict full-backup archive/schema/source/inventory validation, bounded staging, genuine database/evidence checks, replacement preview, cancellation, and C restore UI are implemented. Inspection does not replace live records; replacement remains disabled pending ticket 13.
+
+Canonical tree matched the tested implementation and passed 138 operation tests (including 51 restore checks), typecheck, lint, and build. The implementer passed 13 real restore/backup/forms desktop checks; graphical checks were not duplicated during concurrent ticket 10 work. Archive version 1/schema 7 are supported with documented inspection ceilings. Windows acceptance remains unverified, and new installer work is deferred by user.
