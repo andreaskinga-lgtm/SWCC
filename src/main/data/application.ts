@@ -16,6 +16,9 @@ import { evidenceOperations, EvidenceCleanupFailure, recoverEvidenceDeletions } 
 import type { EvidenceSystem } from './evidence.js';
 import { ANNUAL_STEPS, evaluateWorkflow, packageStatus } from '../../shared/workflow.js';
 import type { AnnualStep, StepCompletion } from '../../shared/workflow.js';
+import { createFullBackup } from './backup.js';
+import type { BackupSystem } from './backup.js';
+import type { BackupProgress } from '../../shared/backup.js';
 
 class ApplicationFailure extends Error {
   constructor(readonly detail: OperationError) { super(detail.message); }
@@ -84,6 +87,7 @@ export function openApplication(
   clock: { now?: () => Date; today?: () => string } = {},
   reviewSystem?: ReviewSystem,
   evidenceSystem?: EvidenceSystem,
+  backupSystem?: BackupSystem,
 ) {
   const paths = storageLayout(storageRoot);
   const dataset = paths.dataset;
@@ -170,7 +174,7 @@ export function openApplication(
       storageDirectory: dataset,
     };
   }
-  async function operation<T>(work: () => T | Promise<T>): Promise<Result<T>> {
+  async function operation<T>(work: () => T | Promise<T>, failureMessage = 'Local records could not be saved or read'): Promise<Result<T>> {
     try { return { ok: true, value: await work() }; }
     catch (error) {
       if (error instanceof EvidenceCleanupFailure) return {
@@ -179,12 +183,36 @@ export function openApplication(
       };
       return { ok: false, error: error instanceof ApplicationFailure ? error.detail : {
         code: 'STORAGE',
-        message: `Local records could not be saved or read: ${error instanceof Error ? error.message : String(error)}. Keep this window open, check available disk space and folder permissions, then retry.`,
+        message: `${failureMessage}: ${error instanceof Error ? error.message : String(error)}. Keep this window open, check available disk space and folder permissions, then retry.`,
       } };
     }
   }
   const evidence = evidenceOperations(database, paths.evidence, getPackage, now, fail, identifier, evidenceSystem);
+  let backupController: AbortController | null = null;
+  const idleProgress = (): BackupProgress => ({
+    phase: 'idle', filesCompleted: 0, filesTotal: 0, bytesCompleted: 0, bytesTotal: 0,
+  });
+  let backupProgress = idleProgress();
+  const mutations = new Set<Promise<unknown>>();
   const operations: ApplicationOperations = {
+    createFullBackup: () => operation(async () => {
+      if (backupController) fail('BUSY', 'A full backup is already running. Wait for it to finish.');
+      backupController = new AbortController();
+      backupProgress = { ...idleProgress(), phase: 'choosing' };
+      try {
+        return await createFullBackup(database, paths, now(), backupSystem, backupController.signal,
+          async () => { await Promise.allSettled([...mutations]); },
+          progress => { backupProgress = progress; }, fail);
+      } finally {
+        backupController = null;
+        backupProgress = idleProgress();
+      }
+    }, 'Full backup could not be completed. The last successful backup status is unchanged'),
+    getBackupProgress: () => operation(() => ({ ...backupProgress })),
+    cancelFullBackup: () => operation(() => {
+      if (backupProgress.phase === 'publishing') fail('BUSY', 'The complete archive is being published. Wait for publication to finish.');
+      backupController?.abort();
+    }),
     ...reviewOperations(database, now, reviewSystem),
     getWorkflow: id => operation(() => {
       identifier(id);
@@ -439,5 +467,27 @@ export function openApplication(
       return state();
     }),
   };
-  return { operations, close: () => database.close() };
+  const writingOperations = [
+    'completeStep', 'recordDeclaration', 'createYear', 'openYear', 'saveDraft', 'createGoal', 'updateGoal',
+    'deleteGoal', 'createActivity', 'updateActivity', 'deleteActivity', 'deleteYear',
+    'importEvidence', 'replaceEvidence', 'removeEvidence', 'acknowledgeStorage',
+    'saveReviewPosition', 'recordReviewVisits', 'resetReviewSection', 'launchReviewResources', 'resetReviewResources',
+  ] as const satisfies readonly (keyof ApplicationOperations)[];
+  for (const key of writingOperations) {
+    const original = operations[key] as (input: unknown) => Promise<Result<unknown>>;
+    const guarded = async (input: unknown): Promise<Result<unknown>> => {
+      if (backupController) return {
+        ok: false, error: { code: 'BUSY', message: 'A full backup is collecting your records and evidence. Wait for it to finish, then retry; your edit has not been applied.' },
+      };
+      const running = original(input);
+      mutations.add(running);
+      try { return await running; }
+      finally { mutations.delete(running); }
+    };
+    Object.assign(operations, { [key]: guarded });
+  }
+  return { operations, close: () => {
+    if (backupController) throw new Error('Wait for the full backup to finish before closing local records.');
+    database.close();
+  } };
 }

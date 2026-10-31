@@ -72,6 +72,16 @@ if (startupFailure) {
           return result.canceled ? null : result.filePaths[0] ?? null;
         },
         openPath: path => shell.openPath(path),
+      }, {
+        chooseDestination: async suggestedName => {
+          const options = {
+            title: 'Back up all years', defaultPath: suggestedName,
+            filters: [{ name: 'SWCC full backup ZIP', extensions: ['zip'] }],
+          };
+          const result = window ? await dialog.showSaveDialog(window, options) : await dialog.showSaveDialog(options);
+          if (result.canceled || !result.filePath) return null;
+          return result.filePath.endsWith('.swcc-backup.zip') ? result.filePath : `${result.filePath}.swcc-backup.zip`;
+        },
       });
       if (app.isPackaged) {
         for (const document of SOURCE_DOCUMENTS) {
@@ -110,6 +120,8 @@ if (startupFailure) {
       });
       const operations = application.operations;
       const channels: Record<string, keyof ApplicationOperations> = {
+        'swcc:create-full-backup': 'createFullBackup', 'swcc:get-backup-progress': 'getBackupProgress',
+        'swcc:cancel-full-backup': 'cancelFullBackup',
         'swcc:get-workflow': 'getWorkflow', 'swcc:complete-step': 'completeStep',
         'swcc:record-declaration': 'recordDeclaration',
         'swcc:get-state': 'getState', 'swcc:create-year': 'createYear', 'swcc:open-year': 'openYear',
@@ -150,8 +162,12 @@ if (startupFailure) {
       window.on('hide', notifyReaderActive);
       window.on('minimize', notifyReaderActive);
       window.on('restore', notifyReaderActive);
-      ipcMain.handle('swcc:complete-close', event => {
+      ipcMain.handle('swcc:complete-close', async event => {
         if (!trusted(event) || !closeRequested) return { ok: false, error: { code: 'IPC', message: 'No close request is pending.' } };
+        const progress = await operations.getBackupProgress();
+        if (!progress.ok || progress.value.phase !== 'idle') return {
+          ok: false, error: { code: 'BUSY', message: 'A full backup is still running. Wait for it to finish or cancel it, then close SWCC deliberately.' },
+        };
         approvedClose = true;
         // Allow the IPC acknowledgement to reach the renderer before destruction.
         setImmediate(() => app.quit());

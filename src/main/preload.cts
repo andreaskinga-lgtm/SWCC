@@ -8,6 +8,9 @@ async function invoke<T>(channel: string, input?: unknown): Promise<Result<T>> {
   }
 }
 const operations: DesktopOperations = {
+  createFullBackup: () => invoke('swcc:create-full-backup'),
+  getBackupProgress: () => invoke('swcc:get-backup-progress'),
+  cancelFullBackup: () => invoke('swcc:cancel-full-backup'),
   getWorkflow: id => invoke('swcc:get-workflow', id),
   completeStep: input => invoke('swcc:complete-step', input),
   recordDeclaration: input => invoke('swcc:record-declaration', input),

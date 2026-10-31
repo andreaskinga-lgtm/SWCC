@@ -10,6 +10,8 @@ import type { AnnualStep } from '../shared/workflow.js';
 import { AnnualWorkflowPanel, DeclarationDialog } from './annual-workflow.js';
 import { ReviewSession } from './review-session.js';
 import { Review } from './Review.js';
+import { BackupScreen } from './backup-screen.js';
+import type { BackupProgress } from '../shared/backup.js';
 
 type Screen = 'years' | 'overview' | 'assessment' | 'plan' | 'review' | 'backup';
 function unwrap<T>(result: Result<T>): T {
@@ -36,6 +38,10 @@ export function App({ operations }: { operations: DesktopOperations }) {
   const [error, setError] = useState<string | null>(null);
   const [duplicate, setDuplicate] = useState<OperationError | null>(null);
   const [busy, setBusy] = useState(false);
+  const [backupRunning, setBackupRunning] = useState(false);
+  const [backupProgress, setBackupProgress] = useState<BackupProgress>({
+    phase: 'idle', filesCompleted: 0, filesTotal: 0, bytesCompleted: 0, bytesTotal: 0,
+  });
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
   const [recordRequested, setRecordRequested] = useState(false);
   const [deletingYear, setDeletingYear] = useState<{ id: string; year: number } | null>(null);
@@ -53,6 +59,17 @@ export function App({ operations }: { operations: DesktopOperations }) {
   const effectivePackage = pkg ? { ...pkg, reviewRevision: reviewRecord?.reviewRevision ?? pkg.reviewRevision } : null;
   const workflow = effectivePackage ? evaluateWorkflow(effectivePackage,
     reviewRecord ?? { visitedPages: [], resourcesLaunchedAt: null }, undefined, readableEvidenceActivityIds) : null;
+  useEffect(() => {
+    if (!backupRunning) return;
+    let active = true;
+    const update = async () => {
+      const result = await operations.getBackupProgress();
+      if (active && result.ok) setBackupProgress(result.value);
+    };
+    void update();
+    const timer = setInterval(() => void update(), 150);
+    return () => { active = false; clearInterval(timer); };
+  }, [backupRunning, operations]);
   useEffect(() => {
     if (pkg) void reviewSession.open(pkg.id).catch(() => {});
   }, [pkg?.id, reviewSession]);
@@ -105,6 +122,19 @@ export function App({ operations }: { operations: DesktopOperations }) {
     try { await Promise.all([session.flush(), reviewSession.flush()]); await work(); }
     catch (failure) { if (!session.getSnapshot().error && !reviewSession.getSnapshot().error) setError(failure instanceof Error ? failure.message : String(failure)); }
     finally { setBusy(false); }
+  }
+  function backup() {
+    void run(async () => {
+      setBackupRunning(true);
+      setBackupProgress({ phase: 'choosing', filesCompleted: 0, filesTotal: 0, bytesCompleted: 0, bytesTotal: 0 });
+      try {
+        const result = unwrap(await operations.createFullBackup());
+        setError(null);
+        setState(unwrap(await operations.getState()));
+        setFeedback(result.cancelled ? 'Backup cancelled. The last successful backup is unchanged.'
+          : `Full backup saved: ${result.fileName}. Keep this copy beyond this device.`);
+      } finally { setBackupRunning(false); }
+    });
   }
   function navigate(next: Screen) {
     void run(async () => {
@@ -303,11 +333,8 @@ export function App({ operations }: { operations: DesktopOperations }) {
         complete={() => complete('plan')} busy={busy} />}
       {screen === 'review' && pkg && workflow && <Review packageId={pkg.id} year={pkg.year} operations={operations} session={reviewSession}
         feedback={workflow.steps.review} complete={() => complete('review')} busy={busy} />}
-      {screen === 'backup' && <><div className="page-heading"><h1>Protect your portfolio.</h1><p>Full-app backup and restore are distinct from annual exports.</p></div>
-        <section className="surface"><h2>Local storage</h2><p className="storage-path">{state?.storageDirectory}</p>
-          <p>Full backup and restore are not available in this foundation build. Until available, quit SWCC after Saved and preserve a copy of the entire dataset folder, including database and evidence. Never copy a database while SWCC is running.</p>
-          <p>Last successful full-app backup: {state?.lastBackupAt ?? 'None recorded'}</p><p>{state && state.dataRevision > (state.lastBackupRevision ?? -1) ? 'Local changes have not been backed up by SWCC.' : 'No changes since the last full backup.'}</p>
-        </section></>}
+      {screen === 'backup' && state && <BackupScreen state={state} busy={busy} running={backupRunning} progress={backupProgress}
+        backup={backup} cancel={() => void operations.cancelFullBackup().then(result => { if (!result.ok) setError(result.error.message); })} />}
       {deletingYear && <Dialog title={`Delete year ${deletingYear.year}?`} onClose={() => {
         if (!busy) { setDeletingYear(null); setYearDeleteError(null); }
       }}>
