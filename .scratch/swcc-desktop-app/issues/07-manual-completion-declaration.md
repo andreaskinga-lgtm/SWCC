@@ -4,7 +4,9 @@
 
 **Blocked by:** 05: Delete records without losing unrelated learning evidence; 06: Track actual offline standards review by year.
 
-**Status:** ready-for-agent
+**Status:** claimed
+
+Claimed October 31, 2026 on resume from integration commit `6597dd8`; implementation branch `ticket/07`.
 
 - [ ] C's dashboard annual-workflow panel shows independent readable readiness/missing-item lists, manual completion controls, declaration entry, and export access beside the relationship board. All destinations and completion actions remain unlocked.
 - [ ] Use the existing domain readiness rules for all three steps. Distinguish Draft/In Progress, Ready, and Completed; no visit, autosave, computed readiness, or activity completion automatically completes an annual step.
