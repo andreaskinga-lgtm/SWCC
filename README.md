@@ -140,6 +140,15 @@ Ticket 06 review verification on the same macOS arm64 host, October 31, 2026:
 - Browser success/failure is injected **only at the OS `shell.openExternal` boundary** in automated checks. The real main-process action persists the actual successful launch result; these checks do not claim that an external website loaded or was read.
 - This is an available-host packaged application smoke, not a newly mounted DMG installation or Windows/Intel/macOS 14 certification. Manual step completion remains ticket 07.
 
+Tickets 02 + 06 integration verification on **macOS 26.6.2 (25G83) / arm64**, October 31, 2026:
+
+- No-ff ticket06 merge: `9ee16ae42a6d0fde66bca389e3f244505afe4dfb`, preserving the already merged assessment/goal contracts.
+- `npm test`: **18** real SQLite checks passed, including foundation/assessment/goal/review behavior, four existing schema upgrade layouts and explicit ambiguous-schema rejection.
+- `npm run typecheck`, `npm run lint`, `npm run build` and `npm run package:dir`: passed.
+- `npx playwright test`: **15** passed (5 foundation, 3 assessment/goals, 7 review). The same **15** passed against the newly packaged `release/mac-arm64/SWCC.app/Contents/MacOS/SWCC` offline. All three bundled PDF hashes matched the originals.
+- This integration did not produce/exercise a newly installed DMG or certify Windows 11, Intel macOS, macOS 14, quarantined-download Gatekeeper behavior, cross-platform transfer, installer upgrades or OS-initiated shutdown. Browser tests exercise the OS-call boundary, not successful website loading/reading.
+- Tickets 02 and 06 are resolved. **Implementation is stopped**; later features remain unavailable and no later ticket was started.
+
 Repeat packaged checks after building/installing:
 
 ```sh
