@@ -4,7 +4,7 @@
 
 **Blocked by:** 04: Retain, inspect, and repair managed evidence files.
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 - [ ] Deleting a goal removes only that goal and its activity links. Its activities, evidence notes/links, reflections, and managed files survive, including activities linked to another goal or now supplementary.
 - [ ] Activity deletion requires explicit confirmation explaining that its links and evidence records/files will be removed. Cancelling changes nothing; shared goals and other activities' evidence are unaffected.
