@@ -28,3 +28,5 @@ Claimed October 31, 2026 after ticket 07 integration; implementation branch `tic
 Implemented at `92d5354`, merged with `91655ddece638503e0bbb16f6af17e4db1341342`. Real source layouts, measured checklist marks, licensed local font, flattened short-content forms, draft warnings, dialogs, and explicit overflow failures are implemented. Actual sources and generated layouts were inspected; artifacts remain in the ticket-08 worktree's `.work/forms-inspection/`.
 
 Together with ticket 11, canonical verification passed 86 operation tests and 37 real production Electron tests, typecheck, lint, and build. The implementer additionally passed four packaged arm64 checks. This closes only the specified short-content slice: complete long-content delivery still requires ticket 09. Windows and Intel installed acceptance remain unverified.
+
+After integration, the completed implementer worktree was removed. Inspection artifacts were preserved outside the repository at `/Users/andreasking/.copilot/session-state/0c86f7c4-6bec-490f-b057-a7d3d6df13b0/files/forms-inspection/`.
