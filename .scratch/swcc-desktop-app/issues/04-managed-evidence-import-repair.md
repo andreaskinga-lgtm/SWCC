@@ -4,7 +4,7 @@
 
 **Blocked by:** 03: Record shared and supplementary learning activities.
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 - [ ] Import files through an OS file dialog into managed storage, never depend on their original paths, and never accept directory imports.
 - [ ] Support pdf, png, jpg, jpeg, webp, gif, bmp, doc, docx, xls, xlsx, ppt, pptx, rtf, txt, and csv. Permit exactly 50 MiB (52,428,800 bytes) per file and reject larger inputs; impose no total yearly quota.
