@@ -365,6 +365,13 @@ test('an invalid recovery journal refuses ordinary initialization and a correcte
   expect(refused.stderr).toContain('recovery journal is invalid');
   expect(existsSync(resolve(f.root, 'dataset'))).toBe(false);
   expect(existsSync(journalPath)).toBe(true);
+  rmSync(journalPath);
+  symlinkSync('missing-journal-target', journalPath);
+  const unsafe = restarted(f.root, f.archive);
+  expect(unsafe.status, unsafe.stderr).not.toBe(0);
+  expect(unsafe.stderr).toContain('recovery journal is unsafe');
+  expect(existsSync(resolve(f.root, 'dataset'))).toBe(false);
+  rmSync(journalPath);
   writeFileSync(journalPath, saved);
   const recovered = restarted(f.root, f.archive);
   expect(recovered.status, recovered.stderr).toBe(0);

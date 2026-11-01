@@ -26,7 +26,7 @@ import { exportAnnualPortfolio } from '../export/portfolio.js';
 import type { PortfolioSystem } from '../export/portfolio.js';
 import type { PortfolioProgress } from '../../shared/portfolio.js';
 import { datasetSummary, inspectArchive, RestoreCleanupFailure } from './restore.js';
-import { recoverRestore, replaceDataset } from './restore-recovery.js';
+import { recoverRestore, recoveryJournalExists, replaceDataset } from './restore-recovery.js';
 import type { RestoreSystem } from './restore.js';
 import type { RestoreProgress } from '../../shared/restore.js';
 import { rm } from 'node:fs/promises';
@@ -257,13 +257,13 @@ export function openApplication(
         replacing = false;
         validatedPreview = null;
         previewRevision = null;
-        if (restoreDirectory && !existsSync(paths.recoveryJournal)) await rm(restoreDirectory, { recursive: true, force: true });
+        if (restoreDirectory && !recoveryJournalExists(paths)) await rm(restoreDirectory, { recursive: true, force: true });
         restoreDirectory = null;
         restoreProgress = idleRestore();
       }
     }),
     exportPortfolio: input => operation(async () => {
-      if (backupController || portfolioController || restoreController || replacing || !database.open || existsSync(paths.recoveryJournal))
+      if (backupController || portfolioController || restoreController || replacing || !database.open || recoveryJournalExists(paths))
         fail('BUSY', 'An archive operation or restore recovery is running. Wait for it to finish before exporting a portfolio.');
       if (!input || typeof input !== 'object' || Array.isArray(input)
         || Object.keys(input).some(key => !['packageId', 'confirmDraft'].includes(key))
@@ -314,7 +314,7 @@ export function openApplication(
       portfolioController?.abort();
     }),
     inspectFullBackup: () => {
-      if (restoreController || restoreDirectory || backupController || portfolioController || replacing || !database.open || existsSync(paths.recoveryJournal))
+      if (restoreController || restoreDirectory || backupController || portfolioController || replacing || !database.open || recoveryJournalExists(paths))
         return operation(() => fail('BUSY', 'Finish or cancel the current archive operation or recover local records before choosing another archive.'));
       restoreController = new AbortController();
       const controller = restoreController;
@@ -366,7 +366,7 @@ export function openApplication(
       restoreProgress = idleRestore();
     }),
     createFullBackup: () => operation(async () => {
-      if (backupController || restoreController || portfolioController || replacing || !database.open || existsSync(paths.recoveryJournal))
+      if (backupController || restoreController || portfolioController || replacing || !database.open || recoveryJournalExists(paths))
         fail('BUSY', 'An archive operation or restore recovery is already running. Wait for it to finish.');
       backupController = new AbortController();
       backupProgress = { ...idleProgress(), phase: 'choosing' };
@@ -670,7 +670,7 @@ export function openApplication(
   for (const key of protectedOperations) {
     const original = operations[key] as (input: unknown) => Promise<Result<unknown>>;
     const guarded = async (input: unknown): Promise<Result<unknown>> => {
-      if (backupController || restoreController || portfolioController || replacing || !database.open || existsSync(paths.recoveryJournal)) return {
+      if (backupController || restoreController || portfolioController || replacing || !database.open || recoveryJournalExists(paths)) return {
         ok: false, error: { code: 'BUSY', message: backupController || portfolioController
           ? `A ${portfolioController ? 'portfolio export' : 'full backup'} is collecting your records and evidence. Wait for it to finish, then retry; your edit has not been applied.`
           : 'Restore or recovery is running. Wait for it to finish, then retry; your edit has not been applied.' },
@@ -690,7 +690,7 @@ export function openApplication(
     const original = operations[key] as (input: unknown) => Promise<Result<unknown>>;
     Object.assign(operations, { [key]: (input: unknown): Promise<Result<unknown>> => {
       if (replacing) return operation(() => fail('BUSY', 'Dataset replacement is running. Wait for full validation or recovery before reading restored records.'));
-      if (!database.open || existsSync(paths.recoveryJournal)) return operation(() =>
+      if (!database.open || recoveryJournalExists(paths)) return operation(() =>
         fail('STORAGE', `Recovery has not finished. Records are unavailable, not empty. Preserve ${paths.recoveryJournal} and the recovery copies; restart SWCC to retry.`));
       return original(input);
     } });

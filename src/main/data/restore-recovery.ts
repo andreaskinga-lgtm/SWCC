@@ -68,6 +68,13 @@ function readJournal(paths: Paths): Journal {
     throw new Error('The restore recovery journal is invalid. Preserve the dataset and recovery folder; no empty dataset will be opened.');
   return journal;
 }
+export function recoveryJournalExists(paths: Paths) {
+  try { lstatSync(paths.recoveryJournal); return true; }
+  catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return false;
+    return true;
+  }
+}
 function manifest(path: string): FullBackupManifest {
   const info = lstatSync(path);
   if (!info.isFile() || info.isSymbolicLink() || info.size > 4 * 1024 * 1024) throw new Error('Unsafe recovery manifest; preserve the recovery copies.');
@@ -103,7 +110,7 @@ function finish(paths: Paths, journal: Journal) {
   }
 }
 export function recoverRestore(paths: Paths, boundary?: RestoreSystem['boundary'], reopen?: () => void): string | null {
-  if (!existsSync(paths.recoveryJournal)) return null;
+  if (!recoveryJournalExists(paths)) return null;
   const journal = readJournal(paths);
   const owned = recoveryPaths(paths, journal);
   const priorManifest = manifest(join(owned.directory, 'prior-manifest.json'));
