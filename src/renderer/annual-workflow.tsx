@@ -7,9 +7,10 @@ import { Dialog } from './assessment-screen.js';
 import { formsExportWarnings } from '../shared/forms.js';
 
 const labels = { review: 'Review', assessment: 'Self-assessment', plan: 'Development plan' };
-export function AnnualWorkflowPanel({ pkg, workflow, busy, navigate, complete, declare, exportForms }: {
+export function AnnualWorkflowPanel({ pkg, workflow, busy, navigate, complete, declare, exportForms, exportPortfolio }: {
   pkg: YearPackage; workflow: AnnualWorkflow; busy: boolean;
   navigate: (step: AnnualStep) => void; complete: (step: AnnualStep) => void; declare: () => void; exportForms: () => void;
+  exportPortfolio: () => void;
 }) {
   return <aside className="map-checklist" aria-label="Annual workflow">
     <h2>Close the annual loop</h2><p>Work freely. Complete deliberately.</p>
@@ -35,7 +36,10 @@ export function AnnualWorkflowPanel({ pkg, workflow, busy, navigate, complete, d
       {pkg.declarationRecordedAt && <small>Recorded in the app (UTC): <time dateTime={pkg.declarationRecordedAt}>{pkg.declarationRecordedAt}</time>. Separate from the external submission date; later edits preserve this record.</small>}
       <button className="text-button" disabled={busy} onClick={declare}>{pkg.declarationDate ? 'Edit recorded date' : 'Record submission date'}</button>
     </section>
-    <button type="button" className="secondary" disabled={busy} onClick={exportForms}>Export Forms PDF</button>
+    <div className="annual-export-controls" aria-label="Annual exports">
+      <button type="button" className="secondary" disabled={busy} onClick={exportForms}>Export Forms PDF</button>
+      <button type="button" className="secondary" disabled={busy} onClick={exportPortfolio}>Export Complete Portfolio ZIP</button>
+    </div>
     <p className="workflow-source">Application readiness and manual completion only. Supplied ethics: Second Edition / September 2018; assessment tool: Third Edition / 2023 reference. Not verification of current College compliance.</p>
   </aside>;
 }
@@ -61,7 +65,7 @@ export function FormsExportDialog({ pkg, workflow, busy, error, exportForms, clo
         {missing.length ? 'Export draft PDF' : 'Export PDF'}
       </button>
     </div>
-    <p>Complete Portfolio ZIP is not available yet.</p>
+    <p>For original evidence bytes, use the dashboard’s separate Complete Portfolio ZIP action.</p>
   </Dialog>;
 }
 

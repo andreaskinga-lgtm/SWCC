@@ -8,6 +8,9 @@ async function invoke<T>(channel: string, input?: unknown): Promise<Result<T>> {
   }
 }
 const operations: DesktopOperations = {
+  exportPortfolio: input => invoke('swcc:export-portfolio', input),
+  getPortfolioProgress: () => invoke('swcc:get-portfolio-progress'),
+  cancelPortfolioExport: () => invoke('swcc:cancel-portfolio-export'),
   inspectFullBackup: () => invoke('swcc:inspect-full-backup'),
   getRestoreProgress: () => invoke('swcc:get-restore-progress'),
   cancelRestorePreview: () => invoke('swcc:cancel-restore-preview'),

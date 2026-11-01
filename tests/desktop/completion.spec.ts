@@ -114,7 +114,7 @@ test('keyboard manual completion works in any order beside C’s map; historical
   await expect(workflow).toContainText('Submission date recorded: 2024-12-20');
   await expect(page.getByRole('status', { name: 'Annual package status' })).toHaveText('In Progress');
   await workflow.getByRole('button', { name: 'Export Forms PDF' }).click();
-  await expect(page.getByRole('dialog', { name: 'Export annual forms' })).toContainText('Complete Portfolio ZIP is not available yet');
+  await expect(page.getByRole('dialog', { name: 'Export annual forms' })).toContainText('separate Complete Portfolio ZIP action');
   await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
   const composition = await page.locator('.map-overview').evaluate(element => {
     const board = element.querySelector('.relationship-board')!.getBoundingClientRect();
