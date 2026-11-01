@@ -49,6 +49,10 @@
 .image-evidence-preview img { max-width: 100%; max-height: 68vh; object-fit: contain; }
 .activity-editor > .narrative:last-child { margin-top: 24px; }
 .goal-nodes, .activity-nodes { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.overview-goal-column { display: flex; flex-direction: column; align-items: flex-start; gap: 20px; min-width: 0; }
+.overview-goal-column > h2 { margin: 0; }
+.overview-goal-column > .goal-nodes { width: 100%; }
+.overview-goal-column > .goal-nodes > p { margin: 0; }
 .goal-node { background: var(--leaf); border-radius: 4px 16px 16px 4px; padding: 20px; color: #303b25; }
 .goal-node h3, .activity-node h3 { margin: 12px 0; overflow-wrap: anywhere; }
 .goal-node p { color: var(--muted); font-size: 12px; }

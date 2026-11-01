@@ -203,8 +203,8 @@ export function AssessmentScreen({ pkg, session, operations, complete, busy, flu
   const [deleting, setDeleting] = useState<Goal | null>(null);
   return <>
     <PageHeading title="Reflect on your practice." description={`Your ${pkg.year} annual self-assessment. Incomplete writing and selections can be saved as a draft.`} />
-    <div className="assessment-layout">
-      <section className="surface assessment-writing">
+    <div className="assessment-flow">
+      <section className="surface assessment-writing" aria-label="Self-assessment writing">
         <DateField pkg={pkg} session={session} field="assessmentDate" label="Assessment date" />
         <label className="field narrative"><span>Strengths</span><small>What are you doing well in your practice?</small>
           <textarea aria-label="Strengths" rows={5} value={pkg.strengths} onChange={event => session.edit({ strengths: event.target.value })} /></label>
@@ -223,14 +223,14 @@ export function AssessmentScreen({ pkg, session, operations, complete, busy, flu
             <span>{standard.label}</span>
           </label>)}
         </fieldset>
-      </section>
-      <aside className="assessment-side">
-        <section className="goals-section">
-          <div className="section-heading"><h2>Learning goals</h2><button type="button" className="text-button" onClick={() => setCreating(true)}><Plus size={15} />Add goal</button></div>
+        <section className="goals-section" aria-labelledby="assessment-goals-title">
+          <div className="section-heading"><h2 id="assessment-goals-title">Learning goals</h2><button type="button" className="text-button" onClick={() => setCreating(true)}><Plus size={15} />Add goal</button></div>
           <p className="quiet">One shared set of goals for the self-assessment and development plan.</p>
           {pkg.goals.map(goal => <GoalEditor key={goal.id} goal={goal} session={session} onDelete={setDeleting} />)}
           {!pkg.goals.length && <p className="empty">Add a learning goal here or from the development plan.</p>}
         </section>
+      </section>
+      <aside className="assessment-side" aria-label="Self-assessment readiness">
         <ReadinessPanel pkg={pkg} complete={complete} busy={busy} />
       </aside>
     </div>

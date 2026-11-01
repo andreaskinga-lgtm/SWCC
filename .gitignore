@@ -1,5 +1,5 @@
 .scratch/
-node_modules/
+node_modules
 prototype-dist/
 dist/
 release/

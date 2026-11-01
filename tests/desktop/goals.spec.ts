@@ -45,16 +45,52 @@ function failWrites(enabled: boolean) {
   if (fixture.status !== 0) throw new Error(fixture.stderr);
 }
 
+async function expectAssessmentTabOrder(goalRefs: string[]) {
+  const standards = page.getByRole('group', { name: 'Relevant annual standards' });
+  await standards.getByRole('checkbox').last().focus();
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('button', { name: 'Add goal', exact: true })).toBeFocused();
+  for (const ref of goalRefs) {
+    await page.keyboard.press('Tab');
+    await expect(page.getByRole('button', { name: `Delete goal ${ref}`, exact: true })).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(page.getByLabel(`Goal title ${ref}`)).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(page.getByLabel(`Goal description ${ref}`)).toBeFocused();
+  }
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('button', { name: 'Complete Step 2', exact: true })).toBeFocused();
+}
+
 test('assessment readiness and shared goals persist across both views and restart', async () => {
   await page.getByRole('button', { name: 'I understand' }).click();
   await page.getByLabel('New package year').fill('2024');
   await page.getByLabel('New package year').press('Enter');
   await page.getByRole('navigation').getByRole('button', { name: 'Self-assessment', exact: true }).click();
+  await page.setViewportSize({ width: 1440, height: 1000 });
 
   const status = page.getByRole('status', { name: 'Step 2 readiness' });
-  await expect(status).toHaveText('In progress');
+  const writing = page.getByRole('region', { name: 'Self-assessment writing' });
+  const readiness = page.getByRole('complementary', { name: 'Self-assessment readiness' });
+  const goals = page.getByRole('region', { name: 'Learning goals' });
   const standards = page.getByRole('group', { name: 'Relevant annual standards' });
+  await expect(status).toHaveText('In progress');
   await expect(standards.getByRole('checkbox')).toHaveCount(12);
+  await expect(writing.getByRole('region', { name: 'Learning goals' })).toHaveCount(1);
+  const wideWriting = await writing.boundingBox();
+  const wideReadiness = await readiness.boundingBox();
+  const wideGoals = await goals.boundingBox();
+  const wideStandards = await standards.boundingBox();
+  expect(wideWriting).not.toBeNull();
+  expect(wideReadiness).not.toBeNull();
+  expect(wideGoals).not.toBeNull();
+  expect(wideStandards).not.toBeNull();
+  expect(wideReadiness!.x + wideReadiness!.width).toBeLessThan(wideWriting!.x);
+  expect(wideGoals!.x).toBeGreaterThanOrEqual(wideWriting!.x);
+  expect(wideGoals!.x + wideGoals!.width).toBeLessThanOrEqual(wideWriting!.x + wideWriting!.width);
+  expect(wideGoals!.y).toBeGreaterThan(wideStandards!.y + wideStandards!.height);
+  await expectAssessmentTabOrder([]);
+
   const initialAssessmentDate = await page.getByLabel('Assessment date').inputValue();
   await page.getByLabel('Assessment date').fill('');
   await expect(page.getByText('Enter a valid assessment date.', { exact: true })).toBeVisible();
@@ -90,6 +126,21 @@ test('assessment readiness and shared goals persist across both views and restar
 
   await page.getByRole('navigation').getByRole('button', { name: 'Self-assessment', exact: true }).click();
   await expect(page.getByLabel('Goal title G2')).toHaveValue('Explore trauma-informed approaches');
+  await page.setViewportSize({ width: 960, height: 1000 });
+  const narrowWriting = await writing.boundingBox();
+  const narrowReadiness = await readiness.boundingBox();
+  const narrowGoals = await goals.boundingBox();
+  const narrowStandards = await standards.boundingBox();
+  expect(narrowWriting).not.toBeNull();
+  expect(narrowReadiness).not.toBeNull();
+  expect(narrowGoals).not.toBeNull();
+  expect(narrowStandards).not.toBeNull();
+  expect(narrowGoals!.x).toBeGreaterThanOrEqual(narrowWriting!.x);
+  expect(narrowGoals!.x + narrowGoals!.width).toBeLessThanOrEqual(narrowWriting!.x + narrowWriting!.width);
+  expect(narrowGoals!.y).toBeGreaterThan(narrowStandards!.y + narrowStandards!.height);
+  expect(narrowReadiness!.y).toBeGreaterThan(narrowWriting!.y + narrowWriting!.height);
+  await expectAssessmentTabOrder(['G1', 'G2']);
+
   await page.getByLabel('Assessment date').fill('2023-12-30');
   await expect(page.getByText(/This date is outside 2024\./)).toBeVisible();
   await page.setViewportSize({ width: 620, height: 800 });

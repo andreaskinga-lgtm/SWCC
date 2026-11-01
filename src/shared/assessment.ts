@@ -6,6 +6,16 @@ export interface AssessmentReadiness {
   missing: string[];
 }
 
+export function hasSubstantiveAssessmentContent(record: Pick<
+  YearPackage,
+  'strengths' | 'peerFeedback' | 'learningNeeds' | 'annualStandards'
+>): boolean {
+  return record.strengths.trim().length > 0
+    || record.peerFeedback.trim().length > 0
+    || record.learningNeeds.trim().length > 0
+    || record.annualStandards.length > 0;
+}
+
 export function evaluateAssessmentReadiness(record: Pick<
   YearPackage,
   'assessmentDate' | 'strengths' | 'learningNeeds' | 'annualStandards' | 'goals'
