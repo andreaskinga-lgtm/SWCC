@@ -1,7 +1,7 @@
 # Implement approved A motion and interaction feedback
 
 Type: task
-Status: ready-for-agent
+Status: resolved
 
 ## Specification
 

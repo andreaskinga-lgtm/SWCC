@@ -1,6 +1,6 @@
 # Implement the approved A interaction design
 
-Status: ready-for-agent
+Status: resolved
 
 ## Problem Statement
 
