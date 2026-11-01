@@ -4,6 +4,8 @@ import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { openApplication } from '../src/main/data/application.js';
 import type { Result } from '../src/shared/application.js';
+import Database from 'better-sqlite3';
+import { DraftSession } from '../src/renderer/draft-session.js';
 
 function value<T>(result: Result<T>): T {
   if (!result.ok) throw new Error(result.error.message);
@@ -93,6 +95,54 @@ test('completion needs a real nonfuture date; drafts and out-of-year dates remai
   } finally {
     if (previousTZ === undefined) delete process.env.TZ;
     else process.env.TZ = previousTZ;
+  }
+});
+
+test('a missing completion date keeps a failed activity save actionable until the retained edit is written', async () => {
+  const root = storage();
+  const app = openApplication(root, { today: () => '2026-10-31' });
+  apps.push(app);
+  let pkg = value(await app.operations.createYear(2024));
+  pkg = value(await app.operations.createActivity({
+    packageId: pkg.id, expectedRevision: pkg.contentRevision, title: 'Original activity',
+  }));
+  const activityId = pkg.activities[0].id;
+  const fixture = new Database(resolve(root, 'dataset/database.sqlite'));
+  fixture.exec(`CREATE TRIGGER simulate_activity_write_failure BEFORE UPDATE ON learning_activities BEGIN SELECT RAISE(FAIL, 'disk full'); END`);
+  const session = new DraftSession(app.operations);
+  session.open(pkg);
+
+  try {
+    session.editActivity(activityId, { title: 'Retained activity title' });
+    await expect(session.flush()).rejects.toThrow('disk full');
+    expect(session.getSnapshot()).toMatchObject({
+      status: 'Not saved',
+      error: expect.stringContaining('disk full'),
+      record: { activities: [{ title: 'Retained activity title', status: 'Planned' }] },
+    });
+
+    session.editActivity(activityId, { status: 'Completed', completionDate: '' });
+    await expect(session.flush()).rejects.toThrow('Completed activities require an actual completion date.');
+    expect(session.getSnapshot()).toMatchObject({
+      status: 'Not saved',
+      error: expect.stringContaining('disk full'),
+      record: { activities: [{ title: 'Retained activity title', status: 'Completed', completionDate: '' }] },
+    });
+    expect(value(await app.operations.getState()).selectedPackage?.activities[0])
+      .toMatchObject({ title: 'Original activity', status: 'Planned', completionDate: '' });
+
+    fixture.exec('DROP TRIGGER simulate_activity_write_failure');
+    session.editActivity(activityId, { completionDate: '2024-01-15' });
+    await session.flush();
+    expect(session.getSnapshot()).toMatchObject({
+      status: 'Saved',
+      error: null,
+      record: { activities: [{ title: 'Retained activity title', status: 'Completed', completionDate: '2024-01-15' }] },
+    });
+    expect(value(await app.operations.getState()).selectedPackage?.activities[0])
+      .toMatchObject({ title: 'Retained activity title', status: 'Completed', completionDate: '2024-01-15' });
+  } finally {
+    fixture.close();
   }
 });
 

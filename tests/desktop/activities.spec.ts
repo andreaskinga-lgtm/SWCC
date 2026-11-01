@@ -192,8 +192,9 @@ test('a missing Completed date stays pending without a write error and protects 
   await expect(editor.getByText('Completed activities require an actual completion date.', { exact: true })).toBeVisible();
   await page.waitForTimeout(600);
 
-  await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Saving');
-  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Not saved');
+  await expect(page.getByRole('button', { name: 'Retry save', exact: true })).toBeVisible();
+  await expect(page.locator('.error-panel')).toHaveCount(0);
   await expect(page.locator('.action-feedback-dialog')).toBeHidden();
   const savedActivity = await page.evaluate(async () => {
     const state = await window.swcc.getState();
@@ -221,7 +222,8 @@ test('a missing Completed date stays pending without a write error and protects 
   await date.fill('9999-12-31');
   await expect(editor.getByText('The completion date cannot be in the future.', { exact: true })).toBeVisible();
   await page.waitForTimeout(600);
-  await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Saving');
+  await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Not saved');
+  await expect(page.getByRole('button', { name: 'Retry save', exact: true })).toBeVisible();
   const stillPlanned = await page.evaluate(async () => {
     const state = await window.swcc.getState();
     if (!state.ok) throw new Error(state.error.message);
@@ -237,6 +239,75 @@ test('a missing Completed date stays pending without a write error and protects 
     return state.value.selectedPackage?.activities[0];
   });
   expect(completedActivity).toMatchObject({ status: 'Completed', completionDate: '2023-12-30' });
+});
+
+test('a missing completion date keeps Retry beside its inline message without an error panel or modal', async () => {
+  await navigate('Development plan');
+  await addActivity('Inline date recovery');
+  const editor = page.getByRole('article', { name: 'Activity editor A1' });
+  const date = editor.getByLabel('Completion date');
+  const status = page.getByRole('status', { name: 'Save status' });
+
+  try {
+    await editor.getByLabel('Activity status').selectOption('Completed');
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(600);
+    await expect(status).toHaveText('Not saved');
+    await expect(editor.getByText('Completed activities require an actual completion date.', { exact: true })).toBeVisible();
+    await expect(page.locator('.error-panel')).toHaveCount(0);
+    const retry = page.getByRole('button', { name: 'Retry save', exact: true });
+    await expect(retry).toBeVisible();
+    await retry.click();
+    await expect(status).toHaveText('Not saved');
+    await expect(editor.getByText('Completed activities require an actual completion date.', { exact: true })).toBeVisible();
+    await expect(page.locator('.action-feedback-dialog')).toBeHidden();
+  } finally {
+    if (await date.count()) {
+      await page.keyboard.press('Escape');
+      await date.fill('2024-01-15');
+      await expect(status).toHaveText('Saved');
+    }
+  }
+});
+
+test('an incomplete date cannot clear a genuine failed-save retry before a successful write', async () => {
+  await navigate('Development plan');
+  await addActivity('Original activity');
+  const editor = page.getByRole('article', { name: 'Activity editor A1' });
+  failWrites(true);
+  await editor.getByLabel('Activity title', { exact: true }).fill('Retained activity title');
+  await expectActionFeedback(page, 'disk full');
+  await dismissActionFeedback(page);
+  await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Not saved');
+  await expect(page.getByRole('button', { name: 'Retry save', exact: true })).toBeVisible();
+
+  await editor.getByLabel('Activity status').selectOption('Completed');
+  const date = editor.getByLabel('Completion date');
+  await expect(date).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(editor.getByText('Completed activities require an actual completion date.', { exact: true })).toBeVisible();
+  await page.waitForTimeout(600);
+
+  await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Not saved');
+  await expect(page.getByRole('alert')).toContainText('disk full');
+  await expect(page.getByRole('button', { name: 'Retry save', exact: true })).toBeVisible();
+  await expect(page.locator('.action-feedback-dialog')).toBeHidden();
+  const persistedActivity = await page.evaluate(async () => {
+    const state = await window.swcc.getState();
+    if (!state.ok) throw new Error(state.error.message);
+    return state.value.selectedPackage?.activities[0];
+  });
+  expect(persistedActivity).toMatchObject({ title: 'Original activity', status: 'Planned', completionDate: '' });
+
+  failWrites(false);
+  await date.fill('2024-01-15');
+  await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Saved');
+  const savedActivity = await page.evaluate(async () => {
+    const state = await window.swcc.getState();
+    if (!state.ok) throw new Error(state.error.message);
+    return state.value.selectedPackage?.activities[0];
+  });
+  expect(savedActivity).toMatchObject({ title: 'Retained activity title', status: 'Completed', completionDate: '2024-01-15' });
 });
 
 test('failed activity edits and creations remain visible, block navigation and close, and retry once', async () => {
@@ -305,4 +376,32 @@ test('invalid links remain protected; only explicit valid browser actions launch
   await expectActionFeedback(page, 'Browser launch unavailable');
   await expect(editor.getByLabel('Evidence links')).toHaveValue('https://example.org/notes');
   await dismissActionFeedback(page);
+});
+
+test('explicit retry of an invalid evidence link shows failure feedback and keeps the edit retryable', async () => {
+  await navigate('Development plan');
+  await addActivity('Invalid evidence link');
+  const editor = page.getByRole('article', { name: 'Activity editor A1' });
+  const links = editor.getByLabel('Evidence links');
+  const feedback = page.locator('.action-feedback-dialog');
+
+  try {
+    await links.fill('file:///etc/passwd');
+    await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Not saved');
+    await expect(page.getByRole('button', { name: 'Retry save', exact: true })).toBeVisible();
+    await expect(feedback).toBeHidden();
+
+    await page.getByRole('button', { name: 'Retry save', exact: true }).click();
+    const failure = await expectActionFeedback(page, 'Use valid HTTP or HTTPS evidence links');
+    await expect(failure.getByRole('alert')).toContainText('Use valid HTTP or HTTPS evidence links');
+    await expect(links).toHaveValue('file:///etc/passwd');
+    await dismissActionFeedback(page);
+    await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Not saved');
+    await expect(page.getByRole('button', { name: 'Retry save', exact: true })).toBeVisible();
+    await expect(links).toHaveValue('file:///etc/passwd');
+  } finally {
+    if (await feedback.isVisible().catch(() => false)) await dismissActionFeedback(page);
+    await links.fill('https://example.org/notes');
+    await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Saved');
+  }
 });

@@ -100,6 +100,7 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
   const [fallbackCalendarOpen, setFallbackCalendarOpen] = useState(false);
   const [nativePickerUnavailable, setNativePickerUnavailable] = useState(false);
   const error = activityDateError(activity);
+  const saveState = session.getSnapshot();
   const warning = dateWarning(activity.completionDate, pkg.year);
   const attached = evidence.filter(entry => entry.activityId === activity.id);
   useLayoutEffect(() => {
@@ -304,7 +305,11 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
       }} onClose={() => setFallbackCalendarOpen(false)} />}
     </div>}
     </div>
-    {error && <p className="goal-validation" role="status">{error}</p>}
+    {error && <>
+      <p className="goal-validation" role="status">{error}</p>
+      {saveState.status === 'Not saved' && !saveState.error && <button type="button" className="secondary"
+        onClick={() => void session.retry().catch(() => {})}>Retry save</button>}
+    </>}
     <p className="quiet">Planned and In Progress drafts need no invented date. Completed can still have pending evidence or reflection.</p>
     <fieldset className="goal-link-editor"><legend>Linked learning goals</legend>
       {pkg.goals.map(goal => <label key={goal.id}><input type="checkbox" checked={activity.goalIds.includes(goal.id)}

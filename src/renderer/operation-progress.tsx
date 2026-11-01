@@ -57,5 +57,7 @@ export function ProgressFailure({ monitor, label }: { monitor: ProgressMonitor; 
       action: { label: `Retry ${label} progress`, onClick: monitor.retry },
     });
   }, [label, monitor.error, monitor.retry, showFeedback]);
-  return null;
+  return monitor.error
+    ? <button type="button" className="secondary" onClick={monitor.retry}>Retry {label} progress</button>
+    : null;
 }
