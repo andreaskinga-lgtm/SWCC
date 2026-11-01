@@ -63,7 +63,7 @@ test('annual portfolio warns for drafts and archives complete forms and original
   writeFileSync(source, original);
   let suggested = '';
   const app = openApplication(root, { now: () => new Date('2026-10-31T12:00:00Z') }, undefined,
-    { chooseFile: async () => source }, templates, undefined, {
+    { chooseFile: async () => source }, templates, undefined, undefined, {
       chooseDestination: async name => { suggested = name; return destination; },
     });
 
@@ -172,7 +172,7 @@ test('original awkward and reserved filenames become portable while duplicate an
   const root = storage();
   const destination = resolve(storage(), 'CCP-2024-portfolio.zip');
   let selected = '';
-  const app = openApplication(root, {}, undefined, { chooseFile: async () => selected }, templates, undefined,
+  const app = openApplication(root, {}, undefined, { chooseFile: async () => selected }, templates, undefined, undefined,
     { chooseDestination: async () => destination });
   apps.push(app);
   let pkg = value(await app.operations.createYear(2024));
@@ -222,7 +222,7 @@ test('portfolio drains admitted evidence writes and prevents concurrent edits, d
   const selection = new Promise<string>(resolveSelection => { release = resolveSelection; });
   const app = openApplication(root, {}, undefined, { chooseFile: () => selection }, templates, {
     chooseDestination: async () => resolve(storage(), 'backup.zip'),
-  }, { chooseDestination: async () => destination });
+  }, undefined, { chooseDestination: async () => destination });
   apps.push(app);
   const operations = app.operations;
   let pkg = value(await operations.createYear(2024));
@@ -260,6 +260,7 @@ test('portfolio drains admitted evidence writes and prevents concurrent edits, d
     expect(await operations.exportPortfolio({ packageId: pkg.id, confirmDraft: true }))
       .toMatchObject({ ok: false, error: { code: 'BUSY' } });
     expect(await operations.createFullBackup()).toMatchObject({ ok: false, error: { code: 'BUSY' } });
+    expect(await operations.inspectFullBackup()).toMatchObject({ ok: false, error: { code: 'BUSY' } });
     await expect.poll(async () => value(await operations.getPortfolioProgress()).phase).toBe('waiting');
     expect(value(await operations.getState()).selectedPackage?.activities[0].title).toBe('Initial activity');
   } finally {
@@ -288,7 +289,7 @@ test.each(['missing', 'corrupt', 'changed-during-archive', 'symlink'] as const)(
     writeFileSync(source, 'original evidence');
     writeFileSync(destination, 'previous complete portfolio');
     let managed = '';
-    const app = openApplication(root, {}, undefined, { chooseFile: async () => source }, templates, undefined, {
+    const app = openApplication(root, {}, undefined, { chooseFile: async () => source }, templates, undefined, undefined, {
       chooseDestination: async () => destination,
       openOutput: path => {
         if (failure === 'changed-during-archive') writeFileSync(managed, 'modified evidence');
@@ -328,7 +329,7 @@ test.each(['disk', 'pdf', 'destination', 'cancel-dialog', 'cancel-archive'] as c
     const writing = new Promise<void>(resolveWriting => { started = resolveWriting; });
     const app = openApplication(root, {}, undefined, undefined, {
       ...templates, readFont: () => failure === 'pdf' ? new Uint8Array() : templates.readFont(),
-    }, undefined, {
+    }, undefined, undefined, {
       chooseDestination: async () => failure === 'cancel-dialog' ? null : failure === 'destination'
         ? resolve(root, 'dataset', 'unsafe.zip') : destination,
       openOutput: path => {
@@ -366,7 +367,7 @@ test('cancelling while waiting for an admitted import leaves that independent im
   writeFileSync(source, 'retained original');
   let release!: (path: string) => void;
   const selected = new Promise<string>(resolveSelection => { release = resolveSelection; });
-  const app = openApplication(root, {}, undefined, { chooseFile: () => selected }, templates, undefined,
+  const app = openApplication(root, {}, undefined, { chooseFile: () => selected }, templates, undefined, undefined,
     { chooseDestination: async () => destination });
   apps.push(app);
   let pkg = value(await app.operations.createYear(2024));
@@ -393,7 +394,7 @@ test('portfolio is rejected while full backup owns collection, and drains an alr
   const formsSelection = new Promise<string | null>(resolveSelection => { releaseForms = resolveSelection; });
   const app = openApplication(root, {}, undefined, undefined, {
     ...templates, chooseDestination: () => formsSelection,
-  }, { chooseDestination: () => backupSelection }, {
+  }, { chooseDestination: () => backupSelection }, undefined, {
     chooseDestination: async () => resolve(output, 'CCP-2024-portfolio.zip'),
   });
   apps.push(app);
@@ -416,4 +417,20 @@ test('portfolio is rejected while full backup owns collection, and drains an alr
   value(await forms);
   value(await portfolio);
   expect((await contents(resolve(output, 'CCP-2024-portfolio.zip'))).has('CCP-2024-forms.pdf')).toBe(true);
+});
+
+test('a real published portfolio cannot be mistaken for a restorable full backup', async () => {
+  const root = storage();
+  const destination = resolve(storage(), 'CCP-2024-portfolio.zip');
+  const app = openApplication(root, {}, undefined, undefined, templates, undefined,
+    { chooseArchive: async () => destination }, { chooseDestination: async () => destination });
+  apps.push(app);
+  const pkg = value(await app.operations.createYear(2024));
+  const before = value(await app.operations.getState());
+  value(await app.operations.exportPortfolio({ packageId: pkg.id, confirmDraft: true }));
+  expect(await app.operations.inspectFullBackup()).toMatchObject({
+    ok: false, error: { code: 'VALIDATION', message: expect.stringContaining('portfolio archives are not restorable') },
+  });
+  expect(value(await app.operations.getState())).toEqual(before);
+  expect(value(await app.operations.getRestoreProgress()).phase).toBe('idle');
 });

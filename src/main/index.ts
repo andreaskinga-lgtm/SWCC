@@ -97,6 +97,15 @@ if (startupFailure) {
           return result.filePath.endsWith('.swcc-backup.zip') ? result.filePath : `${result.filePath}.swcc-backup.zip`;
         },
       }, {
+        chooseArchive: async () => {
+          const options = {
+            title: 'Preview a full-app backup', properties: ['openFile'] as ['openFile'],
+            filters: [{ name: 'Full backup ZIP', extensions: ['zip'] }, { name: 'All files', extensions: ['*'] }],
+          };
+          const result = window ? await dialog.showOpenDialog(window, options) : await dialog.showOpenDialog(options);
+          return result.canceled ? null : result.filePaths[0] ?? null;
+        },
+      }, {
         chooseDestination: async suggestedName => {
           const options = { title: 'Export Complete Portfolio ZIP', defaultPath: suggestedName,
             filters: [{ name: 'Annual portfolio ZIP (not a full backup)', extensions: ['zip'] }] };
@@ -144,6 +153,8 @@ if (startupFailure) {
       const channels: Record<string, keyof ApplicationOperations> = {
         'swcc:export-portfolio': 'exportPortfolio', 'swcc:get-portfolio-progress': 'getPortfolioProgress',
         'swcc:cancel-portfolio-export': 'cancelPortfolioExport',
+        'swcc:inspect-full-backup': 'inspectFullBackup', 'swcc:get-restore-progress': 'getRestoreProgress',
+        'swcc:cancel-restore-preview': 'cancelRestorePreview',
         'swcc:export-forms': 'exportForms',
         'swcc:create-full-backup': 'createFullBackup', 'swcc:get-backup-progress': 'getBackupProgress',
         'swcc:cancel-full-backup': 'cancelFullBackup',
@@ -203,6 +214,12 @@ if (startupFailure) {
         if (!portfolio.ok || portfolio.value.phase !== 'idle') return {
           ok: false, error: { code: 'BUSY', message: 'A portfolio export is still running. Wait for it to finish or cancel it, then close SWCC deliberately.' },
         };
+        const restore = await operations.getRestoreProgress();
+        if (!restore.ok || !['idle', 'preview'].includes(restore.value.phase)) return {
+          ok: false, error: { code: 'BUSY', message: 'Backup inspection is still running. Wait for it or cancel inspection, then close SWCC deliberately.' },
+        };
+        const cancelled = await operations.cancelRestorePreview();
+        if (!cancelled.ok) return cancelled;
         approvedClose = true;
         // Allow the IPC acknowledgement to reach the renderer before destruction.
         setImmediate(() => app.quit());

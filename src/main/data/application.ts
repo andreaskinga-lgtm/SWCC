@@ -25,6 +25,10 @@ import type { BackupProgress } from '../../shared/backup.js';
 import { exportAnnualPortfolio } from '../export/portfolio.js';
 import type { PortfolioSystem } from '../export/portfolio.js';
 import type { PortfolioProgress } from '../../shared/portfolio.js';
+import { datasetSummary, inspectArchive, RestoreCleanupFailure } from './restore.js';
+import type { RestoreSystem } from './restore.js';
+import type { RestoreProgress } from '../../shared/restore.js';
+import { rm } from 'node:fs/promises';
 
 class ApplicationFailure extends Error {
   constructor(readonly detail: OperationError) { super(detail.message); }
@@ -95,6 +99,7 @@ export function openApplication(
   evidenceSystem?: EvidenceSystem,
   formsSystem?: FormsSystem,
   backupSystem?: BackupSystem,
+  restoreSystem?: RestoreSystem,
   portfolioSystem?: PortfolioSystem,
 ) {
   const paths = storageLayout(storageRoot);
@@ -203,10 +208,15 @@ export function openApplication(
   });
   let backupProgress = idleProgress();
   let portfolioProgress: PortfolioProgress = idleProgress();
+  let restoreController: AbortController | null = null;
+  let restoreDirectory: string | null = null;
+  const idleRestore = (): RestoreProgress => ({ phase: 'idle', filesCompleted: 0, filesTotal: 0, bytesCompleted: 0, bytesTotal: 0 });
+  let restoreProgress = idleRestore();
+  let inspecting: Promise<Result<import('../../shared/restore.js').RestoreInspectionOutcome>> | null = null;
   const mutations = new Set<Promise<unknown>>();
   const operations: ApplicationOperations = {
     exportPortfolio: input => operation(async () => {
-      if (backupController || portfolioController) fail('BUSY', 'An archive operation is already running. Wait for it to finish before exporting a portfolio.');
+      if (backupController || portfolioController || restoreController) fail('BUSY', 'An archive operation is already running. Wait for it to finish before exporting a portfolio.');
       if (!input || typeof input !== 'object' || Array.isArray(input)
         || Object.keys(input).some(key => !['packageId', 'confirmDraft'].includes(key))
         || (input.confirmDraft !== undefined && input.confirmDraft !== true))
@@ -255,8 +265,53 @@ export function openApplication(
       if (portfolioProgress.phase === 'publishing') fail('BUSY', 'The complete portfolio is being published. Wait for publication to finish.');
       portfolioController?.abort();
     }),
+    inspectFullBackup: () => {
+      if (restoreController || restoreDirectory || backupController || portfolioController) return operation(() => fail('BUSY', 'Finish or cancel the current archive operation before choosing another archive.'));
+      restoreController = new AbortController();
+      const controller = restoreController;
+      restoreProgress = { ...idleRestore(), phase: 'choosing' };
+      inspecting = operation(async () => {
+        try {
+          if (!restoreSystem) fail('VALIDATION', 'The backup archive dialog is unavailable.');
+          const archive = await restoreSystem.chooseArchive();
+          if (!archive || controller.signal.aborted) return { cancelled: true as const };
+          const inspected = await inspectArchive(archive, paths, () => datasetSummary(database), controller.signal,
+            progress => { restoreProgress = progress; });
+          restoreDirectory = inspected.directory;
+          restoreProgress = { ...restoreProgress, phase: 'preview' };
+          return { cancelled: false as const, preview: inspected.preview };
+        } catch (error) {
+          if (error instanceof RestoreCleanupFailure) {
+            restoreDirectory = error.directory;
+            restoreProgress = { ...restoreProgress, phase: 'cleanup' };
+            fail('STORAGE', error.message);
+          }
+          if (controller.signal.aborted) return { cancelled: true as const };
+          fail('VALIDATION', `Backup inspection failed: ${error instanceof Error ? error.message : String(error)} Live records have not been replaced. Choose a complete, compatible full backup.`);
+        } finally {
+          restoreController = null;
+          inspecting = null;
+          if (!restoreDirectory) restoreProgress = idleRestore();
+        }
+      });
+      return inspecting;
+    },
+    getRestoreProgress: () => operation(() => ({ ...restoreProgress })),
+    cancelRestorePreview: () => operation(async () => {
+      restoreController?.abort();
+      if (inspecting) await inspecting;
+      if (restoreDirectory) {
+        try { await rm(restoreDirectory, { recursive: true, force: true }); }
+        catch (error) {
+          restoreProgress = { ...restoreProgress, phase: 'cleanup' };
+          fail('STORAGE', new RestoreCleanupFailure(restoreDirectory, error).message);
+        }
+        restoreDirectory = null;
+      }
+      restoreProgress = idleRestore();
+    }),
     createFullBackup: () => operation(async () => {
-      if (backupController || portfolioController) fail('BUSY', 'An archive operation is already running. Wait for it to finish.');
+      if (backupController || restoreController || portfolioController) fail('BUSY', 'An archive operation is already running. Wait for it to finish.');
       backupController = new AbortController();
       backupProgress = { ...idleProgress(), phase: 'choosing' };
       try {
@@ -558,8 +613,10 @@ export function openApplication(
   for (const key of protectedOperations) {
     const original = operations[key] as (input: unknown) => Promise<Result<unknown>>;
     const guarded = async (input: unknown): Promise<Result<unknown>> => {
-      if (backupController || portfolioController) return {
-        ok: false, error: { code: 'BUSY', message: `A ${portfolioController ? 'portfolio export' : 'full backup'} is collecting your records and evidence. Wait for it to finish, then retry; your edit has not been applied.` },
+      if (backupController || restoreController || portfolioController) return {
+        ok: false, error: { code: 'BUSY', message: backupController || portfolioController
+          ? `A ${portfolioController ? 'portfolio export' : 'full backup'} is collecting your records and evidence. Wait for it to finish, then retry; your edit has not been applied.`
+          : 'Backup inspection is running. Wait for it or cancel inspection, then retry; your edit has not been applied.' },
       };
       const running = original(input);
       mutations.add(running);
@@ -570,6 +627,7 @@ export function openApplication(
   }
   return { operations, close: () => {
     if (backupController || portfolioController) throw new Error('Wait for the archive operation to finish before closing local records.');
+    if (restoreController || restoreDirectory) throw new Error('Cancel the restore inspection or preview before closing local records.');
     database.close();
   } };
 }

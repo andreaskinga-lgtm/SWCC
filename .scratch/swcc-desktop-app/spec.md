@@ -404,3 +404,9 @@ The user selected option C: "I like option C. Lets amend the spec to make sure t
 **Answer:** Use **C (Learning map)** for the production desktop application. The relationship-first layout is now the binding visual direction, including C's navigation shell, goal/activity dashboard, plan editor, typography, and palette. The prototype remains preserved on `prototype/swcc-desktop-ui` at `5477044`; view the chosen design at `http://127.0.0.1:5173/prototype/swcc?variant=C`.
 
 Both this feature spec and the authoritative `IMPLEMENTATION_SPEC.md` now require C and include a design-fidelity acceptance criterion. The prior visual-selection milestone is complete. Functional implementation is still required, so the feature remains `ready-for-agent`; this approval does not promote throwaway code or simulation behavior into production.
+
+### 2026-10-31: Development-first delivery scope
+
+The user requested: "Once you've completed the base functionality, don't worry about making the installers - I want to fully walk through the application in dev mode before I actually try to deploy it in anything other than a dev environment".
+
+For this implementation run, finish the functional tickets through 13, review/fix the integration branch, and provide the working development application and run instructions. Do not build new installers or claim installed-target/cross-platform-transfer acceptance. Tickets 14-16 remain deferred and unresolved for a later deployment phase; the target-platform contracts in `IMPLEMENTATION_SPEC.md` are not removed or treated as passed.

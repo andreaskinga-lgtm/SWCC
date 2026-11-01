@@ -59,7 +59,7 @@ test('C backup screen creates a real full archive after flushing drafts; quiet s
   await navigate('Backup and restore');
   await expect(page.getByRole('status', { name: 'Backup status' })).toContainText('No successful full backup');
   await expect(page.getByRole('heading', { name: 'Restore all years' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Restore all years' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Preview full backup' })).toBeEnabled();
   await saveDialog();
   const backup = page.getByRole('button', { name: 'Create full backup', exact: true });
   await backup.focus();

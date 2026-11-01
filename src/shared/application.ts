@@ -186,6 +186,9 @@ export interface ApplicationOperations extends ReviewOperations {
   exportPortfolio(input: import('./forms.js').ExportForms): Promise<Result<import('./portfolio.js').PortfolioExportOutcome>>;
   getPortfolioProgress(): Promise<Result<import('./portfolio.js').PortfolioProgress>>;
   cancelPortfolioExport(): Promise<Result<void>>;
+  inspectFullBackup(): Promise<Result<import('./restore.js').RestoreInspectionOutcome>>;
+  getRestoreProgress(): Promise<Result<import('./restore.js').RestoreProgress>>;
+  cancelRestorePreview(): Promise<Result<void>>;
   exportForms(input: import('./forms.js').ExportForms): Promise<Result<import('./forms.js').FormsExportOutcome>>;
   createFullBackup(): Promise<Result<import('./backup.js').FullBackupOutcome>>;
   getBackupProgress(): Promise<Result<import('./backup.js').BackupProgress>>;

@@ -4,7 +4,9 @@
 
 **Blocked by:** 12: Inspect and validate a backup without changing live records.
 
-**Status:** ready-for-agent
+**Status:** claimed
+
+Claimed October 31, 2026 after ticket 12 integration; implementation branch `ticket/13`. Complete the recovery functionality in development mode; installer/deployment work is deferred by user.
 
 - [ ] Enable replacement only after successful staged validation and explicit confirmation of the previewed whole-dataset replacement. Support cancellation before confirmation with no live-data change; introduce no merge behavior.
 - [ ] Flush/protect pending edits and prevent conflicting mutations/deletions during the restore transaction. Show progress and explain any failure rather than reporting a successful empty application.
