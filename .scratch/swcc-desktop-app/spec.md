@@ -410,3 +410,11 @@ Both this feature spec and the authoritative `IMPLEMENTATION_SPEC.md` now requir
 The user requested: "Once you've completed the base functionality, don't worry about making the installers - I want to fully walk through the application in dev mode before I actually try to deploy it in anything other than a dev environment".
 
 For this implementation run, finish the functional tickets through 13, review/fix the integration branch, and provide the working development application and run instructions. Do not build new installers or claim installed-target/cross-platform-transfer acceptance. Tickets 14-16 remain deferred and unresolved for a later deployment phase; the target-platform contracts in `IMPLEMENTATION_SPEC.md` are not removed or treated as passed.
+
+### 2026-10-31: Core functionality and integration review completed
+
+Functional tickets 01-13 are integrated and resolved on `integration/swcc-desktop-app`. The two-axis review compared `ebd9507...1267c80`: Standards reported three hard violations and two duplication judgment calls; Spec reported three behavior gaps. All eight were fixed in one fresh implementer branch at `e9cd18810a0a70685a7971d748d55d1245df905b`, merged with `e97025a7a2c0215c9f76b5aeeb9980d9bfbc04ca`.
+
+Standards fixes: durable old-evidence cleanup retry with explicit errors; actionable progress/reader IPC failures and retry; common draft-and-review consumer flushing; shared managed-path confinement and autosave failure handling. Spec fixes: forms destinations cannot overwrite SWCC storage; in-flight evidence edits retain text and adopt committed revisions while navigation waits; generated full backups obey the same archive limits as restore inspection before success is recorded. No schema or yearly-data quota change was introduced.
+
+Canonical final checks passed 179 public-operation tests, 61 serialized real Electron desktop checks, typecheck, lint, and build on macOS arm64. `README.md` documents `npm run dev`, storage, exports, backup/recovery, and the development-first scope. Installers, installed Windows/Intel acceptance, and cross-platform transfer remain deferred, not passed; tickets 14-16 are intentionally unresolved.
