@@ -59,7 +59,7 @@ test('the empty-goals overview action is clearly separated and opens self-assess
   expect(await gapAfter(emptyGoals, action)).toBeGreaterThan(16);
 
   await action.click();
-  await expect(page.getByRole('heading', { name: 'Reflect on your practice.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Self-assessment', exact: true })).toBeVisible();
   await addGoal('First learning goal');
   await showOverview();
 
@@ -111,7 +111,8 @@ test('the development-plan overview action matches self-assessment spacing with 
     await expectMatchingSpacing();
   }
 
-  await page.getByRole('button', { name: 'Record an activity', exact: true }).click();
+  await page.getByRole('button', { name: 'View development plan', exact: true }).click();
+  await page.getByRole('button', { name: 'Add activity', exact: true }).click();
   const activity = page.getByRole('dialog', { name: 'Record an activity' });
   await activity.getByLabel('Activity title', { exact: true }).fill('Existing learning activity');
   await activity.getByRole('button', { name: 'Save activity', exact: true }).click();

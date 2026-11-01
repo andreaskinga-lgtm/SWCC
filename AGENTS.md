@@ -1,7 +1,5 @@
 # Agent instructions
 
-Before planning or implementing the app, read `IMPLEMENTATION_SPEC.md`.
-
 ## Agent skills
 
 ### Issue tracker

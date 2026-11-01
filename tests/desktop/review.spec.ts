@@ -48,7 +48,7 @@ test.beforeEach(async () => {
   await expect(page.getByRole('button', { name: 'Create year package', exact: true })).toBeEnabled();
   await page.getByLabel('New package year').fill('2026');
   await page.getByLabel('New package year').press('Enter');
-  await expect(page.getByRole('heading', { name: 'Connect learning to practice.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Year overview' })).toBeVisible();
   await page.getByRole('navigation').getByRole('button', { name: 'Review', exact: true }).click();
 });
 test.afterEach(async () => {

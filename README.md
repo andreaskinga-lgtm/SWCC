@@ -264,7 +264,7 @@ All years store source identity `swcc-supplied-2018-2026-v1`. Packaged resources
 
 | Packaged path | Original |
 | --- | --- |
-| `sources/ethics-2018.pdf` | `Code-of-Ethics-and-Standards-of-Practice-September-7-2018 (1).pdf` |
+| `sources/ethics-2018.pdf` | `resources/sources/Code-of-Ethics-and-Standards-of-Practice-September-7-2018.pdf` |
 | `sources/step-one.pdf` | `Step One SWCC.pdf` |
 | `sources/assessment-2026.pdf` | `OCSWSSW-CCP-Assess-Tool-2026-English.pdf` |
 

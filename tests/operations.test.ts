@@ -383,7 +383,7 @@ test('review resets reopen only Step 1; rereading, position, and browser success
       launches.push(url);
       if (browserFailure) throw new Error('No browser association');
     },
-    readDocument: () => new Uint8Array(readFileSync('Code-of-Ethics-and-Standards-of-Practice-September-7-2018 (1).pdf')),
+    readDocument: () => new Uint8Array(readFileSync('resources/sources/Code-of-Ethics-and-Standards-of-Practice-September-7-2018.pdf')),
   };
   const app = openApplication(root, { now: () => new Date('2026-10-31T20:00:00Z') }, system);
   const record = value(await app.operations.createYear(2026));

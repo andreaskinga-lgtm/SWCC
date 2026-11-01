@@ -120,7 +120,7 @@ test('assessment readiness and shared goals persist across both views and restar
   const planDate = await page.getByLabel('Plan date').inputValue();
   await expect(page.getByRole('article', { name: /G1 Build reflective supervision practice/ })).toBeVisible();
   await page.getByRole('button', { name: 'Add goal', exact: true }).click();
-  const planDialog = page.getByRole('dialog', { name: 'Create a shared learning goal' });
+  const planDialog = page.getByRole('dialog', { name: 'Create a learning goal' });
   await planDialog.getByLabel('Goal title').fill('Explore trauma-informed approaches');
   await planDialog.getByRole('button', { name: 'Create goal', exact: true }).click();
   await expect(page.getByRole('article', { name: /G2 Explore trauma-informed approaches/ })).toBeVisible();

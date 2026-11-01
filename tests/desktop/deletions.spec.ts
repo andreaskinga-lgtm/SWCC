@@ -42,7 +42,7 @@ function failActivityDeletes(enabled: boolean) {
 
 async function addGoal(title: string) {
   await page.getByRole('button', { name: 'Add goal', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Create a shared learning goal' });
+  const dialog = page.getByRole('dialog', { name: 'Create a learning goal' });
   await dialog.getByLabel('Goal title').fill(title);
   await dialog.getByRole('button', { name: 'Create goal', exact: true }).click();
   await expect(dialog).toHaveCount(0);
@@ -151,7 +151,7 @@ test('activity and year cleanup preserve other years and navigate without creati
   await page.getByRole('button', { name: 'Select activity A1', exact: true }).click();
   await page.getByRole('button', { name: 'Delete activity A1', exact: true }).click();
   const activityConfirmation = page.getByRole('dialog', { name: 'Delete activity A1?' });
-  await expect(activityConfirmation).toContainText('evidence records and managed files');
+  await expect(activityConfirmation).toContainText('permanently deletes A1, its evidence files');
   await activityConfirmation.getByRole('button', { name: 'Delete A1', exact: true }).click();
   await expect(activityConfirmation).toHaveCount(0);
   await expect(page.getByRole('article', { name: 'Activity editor A2' })).toBeVisible();
@@ -171,7 +171,8 @@ test('activity and year cleanup preserve other years and navigate without creati
   const olderYearConfirmation = page.getByRole('dialog', { name: 'Delete year 2024?' });
   await olderYearConfirmation.getByRole('button', { name: 'Delete 2024 year package', exact: true }).click();
   await expect(olderYearConfirmation).toHaveCount(0);
-  await expect(page.getByText('Your 2025 goals and the experiences that move them forward.')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Year overview', exact: true })).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Year package', exact: true }).locator('option:checked')).toHaveText('2025');
   await navigate('Development plan');
   await expect(page.getByRole('article', { name: 'Evidence E1' })).toContainText('Readable');
 

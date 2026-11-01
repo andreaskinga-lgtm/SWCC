@@ -174,6 +174,6 @@ export function PdfReader({ operations, position, onPosition, onVisit }: {
     </div>
     {activationError && <div className="reader-message" role="alert"><p>{activationError}</p>
       <button onClick={() => setActivationRetry(value => value + 1)}>Retry review tracking</button></div>}
-    <p className="reader-note">Physical pages include the cover as page 1. Only qualifying displays in the active window are tracked, not fetching or skipped pages. This is navigation tracking, not proof of comprehension.</p>
+    <p className="reader-note">Page 1 is the cover. Only pages displayed in the active window count as viewed; this does not verify comprehension.</p>
   </section>;
 }

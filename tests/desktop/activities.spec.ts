@@ -76,7 +76,8 @@ test('selected activity borders keep the same corner radii as unselected cards',
 });
 
 test('C learning map edits one shared activity from either goal, keeps supplementary work, and reflows for keyboard use', async () => {
-  await page.getByRole('button', { name: 'Record an activity', exact: true }).click();
+  await navigate('Development plan');
+  await page.getByRole('button', { name: 'Add activity', exact: true }).click();
   const create = page.getByRole('dialog', { name: 'Record an activity' });
   await create.getByLabel('Activity title').fill('Shared consultation');
   await create.getByRole('button', { name: 'Save activity', exact: true }).click();
@@ -84,7 +85,7 @@ test('C learning map edits one shared activity from either goal, keeps supplemen
   await expect(editor).toBeVisible();
   await expect(editor.getByLabel('Completion date')).toHaveCount(0);
   await editor.getByRole('button', { name: 'Create and link a goal', exact: true }).click();
-  const goal = page.getByRole('dialog', { name: 'Create a shared learning goal' });
+  const goal = page.getByRole('dialog', { name: 'Create a learning goal' });
   await goal.getByLabel('Goal title').fill('Reflective supervision');
   await goal.getByRole('button', { name: 'Create goal', exact: true }).click();
   await expect(goal).toHaveCount(0);
@@ -236,10 +237,10 @@ test('a missing Completed date stays pending without a write error and protects 
   await page.getByLabel('Year package').selectOption({ label: '2023' });
   await expect(page.getByLabel('Year package')).toHaveValue(selectedYear);
   await navigate('Year overview');
-  await expect(page.getByRole('heading', { name: 'Give your learning a place.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Development plan', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Export Forms PDF' })).toHaveCount(0);
   await navigate('Backup and restore');
-  await expect(page.getByRole('heading', { name: 'Give your learning a place.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Development plan', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Create full backup' })).toHaveCount(0);
   await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
   expect(desktop.windows()).toHaveLength(1);

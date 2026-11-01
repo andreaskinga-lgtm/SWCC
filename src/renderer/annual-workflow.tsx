@@ -14,7 +14,7 @@ export function AnnualWorkflowPanel({ pkg, workflow, busy, navigate, declare, ex
   exportPortfolio: () => void;
 }) {
   return <aside className="map-checklist" aria-label="Annual workflow">
-    <h2>Close the annual loop</h2><p>Work freely. Complete deliberately.</p>
+    <h2>Annual progress</h2>
     <span className="package-status" role="status" aria-label="Annual package status">{workflow.status}</span>
     <ol className="annual-step-list">{ANNUAL_STEPS.map((step, index) => {
       const feedback = workflow.steps[step];
@@ -24,21 +24,20 @@ export function AnnualWorkflowPanel({ pkg, workflow, busy, navigate, declare, ex
         <span className={`readiness-status ${feedback.ready ? 'ready' : ''}`} role="status" aria-label={`Step ${index + 1} readiness`}>{feedback.status}</span>
         {feedback.missing.length ? <ul className="workflow-missing" aria-label={`Step ${index + 1} missing items`}>
           {feedback.missing.map(item => <li key={item}>{item}</li>)}
-        </ul> : <p>All application readiness items are present.</p>}
+        </ul> : null}
         {feedback.completedAt && <small>{feedback.status === 'Completed' ? 'Manually confirmed' : 'Previous confirmation; relevant edits reopened this step'}:
           {' '}<time dateTime={feedback.completedAt}>{new Date(feedback.completedAt).toLocaleString()}</time></small>}
       </li>;
     })}</ol>
     <section className="declaration-card"><h3>External renewal declaration</h3>
       <p>{pkg.declarationDate ? `Submission date recorded: ${pkg.declarationDate}` : 'Record the actual date after submitting through the College’s renewal process.'}</p>
-      {pkg.declarationRecordedAt && <small>Recorded in the app (UTC): <time dateTime={pkg.declarationRecordedAt}>{pkg.declarationRecordedAt}</time>. Separate from the external submission date; later edits preserve this record.</small>}
+      {pkg.declarationRecordedAt && <small>Recorded in SWCC (UTC): <time dateTime={pkg.declarationRecordedAt}>{pkg.declarationRecordedAt}</time></small>}
       <button className="text-button" disabled={busy} onClick={declare}>{pkg.declarationDate ? 'Edit recorded date' : 'Record submission date'}</button>
     </section>
     <div className="annual-export-controls" aria-label="Annual exports">
       <button type="button" className="secondary" disabled={busy} onClick={exportForms}>Export Forms PDF</button>
       <button type="button" className="secondary" disabled={busy} onClick={exportPortfolio}>Export Complete Portfolio ZIP</button>
     </div>
-    <p className="workflow-source">Application readiness and manual completion only. Supplied ethics: Second Edition / September 2018; assessment tool: Third Edition / 2023 reference. Not verification of current College compliance.</p>
   </aside>;
 }
 
@@ -48,11 +47,11 @@ export function FormsExportDialog({ pkg, workflow, busy, exportForms, close }: {
 }) {
   const missing = formsExportWarnings(pkg, workflow);
   return <Dialog title="Export annual forms" onClose={() => { if (!busy) close(); }}>
-    <p>Export the review checklist, one annual self-assessment (SAT), and one annual development plan (PDP) in the supplied layouts.</p>
-    <p>Long narratives use readable continuation pages in the same layouts, without repeating their content. Evidence files are referenced, not embedded. This is not a restorable full-app backup.</p>
+    <p>Includes the review checklist, self-assessment (SAT), and development plan (PDP), with readable continuation pages for long answers.</p>
+    <p>Evidence files are not included. Use Complete Portfolio ZIP to include them. This PDF is not a restorable full-app backup.</p>
     {missing.length > 0 && <section className="declaration-warning" aria-label="Draft export warning">
-      <h3>This annual package is incomplete.</h3>
-      <p>You can explicitly export a draft; missing fields stay blank. Application readiness and completion are not College compliance.</p>
+      <h3>Incomplete annual package</h3>
+      <p>Export a draft with missing fields left blank. This does not verify College compliance.</p>
       <ul>{missing.map(item => <li key={item}>{item}</li>)}</ul>
     </section>}
     {busy && <p role="status">Exporting Forms PDF… Finish or cancel the destination dialog; wait for the complete write.</p>}
@@ -62,7 +61,6 @@ export function FormsExportDialog({ pkg, workflow, busy, exportForms, close }: {
         {missing.length ? 'Export draft PDF' : 'Export PDF'}
       </button>
     </div>
-    <p>For original evidence bytes, use the dashboard’s separate Complete Portfolio ZIP action.</p>
   </Dialog>;
 }
 
@@ -84,13 +82,13 @@ export function DeclarationDialog({ pkg, incomplete, busy, save, close }: {
     }
   }
   return <Dialog title="Record external submission date" onClose={() => { if (!busy) close(); }}>
-    <p>Enter the date you actually submitted through the College’s renewal process. SWCC does not submit or verify renewal declarations.</p>
-    {incomplete && <p className="declaration-warning" role="alert">Your application steps are incomplete. You may still record an external submission that already happened; recording it does not complete any application step.</p>}
+    <p>Enter the date you submitted through the College’s renewal process. SWCC does not submit or verify renewal declarations.</p>
+    {incomplete && <p className="declaration-warning" role="alert">Your application steps are incomplete. Recording a submission date does not complete them.</p>}
     <form onSubmit={event => { event.preventDefault(); void submit(); }}>
       <label className="field"><span>Actual external submission date</span><input autoFocus type="date" required
         value={date} disabled={busy} onChange={event => setDate(event.target.value)} /></label>
       {warning && <p className="warning">{warning}</p>}
-      {pkg.declarationRecordedAt && <p>Previously recorded in the app (UTC): {pkg.declarationRecordedAt}. This timestamp is separate from the actual submission date.</p>}
+      {pkg.declarationRecordedAt && <p>Previously recorded in SWCC (UTC): {pkg.declarationRecordedAt}</p>}
       <div className="goal-dialog-actions"><button type="button" className="secondary" disabled={busy} onClick={close}>Cancel</button>
         <button type="submit" disabled={busy}>Record submission date</button></div>
     </form>

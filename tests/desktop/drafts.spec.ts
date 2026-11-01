@@ -77,6 +77,50 @@ test('keyboard creation, duplicate recovery and autosaved dates survive producti
   expect(remoteRequests).toEqual([]);
 });
 
+test('plain page headings replace slogans while useful prompts and warnings remain', async () => {
+  await page.getByRole('button', { name: 'I understand' }).click();
+  await page.getByLabel('New package year').fill('2024');
+  await page.getByLabel('New package year').press('Enter');
+
+  for (const name of ['Year overview', 'Self-assessment', 'Development plan', 'Backup and restore']) {
+    await page.getByRole('navigation').getByRole('button', { name, exact: true }).click();
+    await expect(page.getByRole('heading', { name, level: 1, exact: true })).toBeVisible();
+    await expect(page.locator('.page-heading p')).toHaveCount(0);
+  }
+  await expect(page.getByRole('main')).toContainText('Backups are not encrypted');
+  await expect(page.getByRole('main')).toContainText('It does not merge them');
+
+  await page.getByRole('navigation').getByRole('button', { name: 'Development plan', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'No activities yet', exact: true })).toBeVisible();
+  await expect(page.getByRole('main')).toContainText('Select Add activity');
+  await page.getByRole('button', { name: 'Add activity', exact: true }).click();
+  const activity = page.getByRole('dialog', { name: 'Record an activity', exact: true });
+  await expect(activity.getByLabel('Activity title', { exact: true })).toBeVisible();
+  await expect(activity.getByRole('group', { name: 'Linked goals (optional)' })).toBeVisible();
+  await expect(activity).not.toContainText('Record it once');
+  await activity.getByRole('button', { name: 'Cancel', exact: true }).click();
+
+  await page.getByRole('navigation').getByRole('button', { name: 'Self-assessment', exact: true }).click();
+  await expect(page.getByRole('main')).toContainText('What are you doing well in your practice?');
+  await expect(page.getByRole('list', { name: 'Step 2 missing items' })).toContainText('Add your strengths');
+
+  await page.getByRole('navigation').getByRole('button', { name: 'Year overview', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Annual progress', exact: true })).toBeVisible();
+  await expect(page.getByRole('main')).not.toContainText('Close the annual loop');
+  await expect(page.getByRole('main')).not.toContainText('Work freely. Complete deliberately.');
+  await expect(page.locator('.board-footer')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Export Forms PDF', exact: true }).click();
+  const forms = page.getByRole('dialog', { name: 'Export annual forms', exact: true });
+  await expect(forms).toContainText('Evidence files are not included');
+  await expect(forms).toContainText('not a restorable full-app backup');
+  await expect(forms.getByRole('button', { name: 'Export draft PDF', exact: true })).toBeEnabled();
+  await forms.getByRole('button', { name: 'Cancel', exact: true }).click();
+
+  await page.getByRole('navigation').getByRole('button', { name: 'Review', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Standards review', level: 1, exact: true })).toBeVisible();
+  await expect(page.locator('.page-heading')).toContainText('Code of Ethics and Standards of Practice');
+});
+
 function failWrites(enabled: boolean) {
   const fixture = spawnSync(electronExecutable, ['tests/desktop/storage-fixture.mjs', resolve(root, 'dataset/database.sqlite'), String(enabled)], {
     env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8',
@@ -236,12 +280,12 @@ for (const viewport of [
     expect(scrolledRail!.height).toBeLessThanOrEqual(viewport.height);
     await expect(page.getByRole('banner')).not.toBeInViewport();
     const destinations = [
-      { name: 'Year overview', heading: 'Connect learning to practice.' },
-      { name: 'Review', heading: 'Review the standards.' },
-      { name: 'Self-assessment', heading: 'Reflect on your practice.' },
-      { name: 'Development plan', heading: 'Give your learning a place.' },
+      { name: 'Year overview', heading: 'Year overview' },
+      { name: 'Review', heading: 'Standards review' },
+      { name: 'Self-assessment', heading: 'Self-assessment' },
+      { name: 'Development plan', heading: 'Development plan' },
       { name: 'All years', heading: 'Your year packages' },
-      { name: 'Backup and restore', heading: 'Keep a copy beyond this device.' },
+      { name: 'Backup and restore', heading: 'Backup and restore' },
     ];
     const documentScroll = await page.evaluate(() => window.scrollY);
     if (viewport.height < 400) {

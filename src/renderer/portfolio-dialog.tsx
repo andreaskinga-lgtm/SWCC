@@ -22,18 +22,17 @@ export function PortfolioExportDialog({ pkg, workflow, busy, running, progress, 
 }) {
   const missing = formsExportWarnings(pkg, workflow);
   return <Dialog title="Export complete annual portfolio" onClose={() => { if (!busy) close(); }}>
-    <p>Keep or share one year: complete Forms PDF with readable continuation pages, an evidence index, a portfolio manifest, and every original evidence file.</p>
-    <p>Shared and supplementary activities are retained once. This is not a restorable full-app backup and is not encrypted; choose who can access this copy.</p>
-    <p>Default name: CCP-{pkg.year}-portfolio.zip. Evidence uses stable E references and portable filenames; original names stay in the index and manifest.</p>
+    <p>Includes the {pkg.year} forms PDF, evidence index, manifest, and original evidence files.</p>
+    <p>This is not a restorable full-app backup and is not encrypted. Share it only with people who should have access to your records.</p>
     {missing.length > 0 && <section className="declaration-warning" aria-label="Draft export warning">
-      <h3>This annual package is incomplete.</h3>
-      <p>You can explicitly export a draft; missing fields stay blank. Application readiness and completion are not College compliance.</p>
+      <h3>Incomplete annual package</h3>
+      <p>Export a draft with missing fields left blank. This does not verify College compliance.</p>
       <ul>{missing.map(item => <li key={item}>{item}</li>)}</ul>
     </section>}
     <ProgressFailure monitor={monitor} label="portfolio" />
     {running && <section className="backup-progress" role="status" aria-label="Portfolio export progress">
       <p>{phaseLabels[progress.phase]}</p>
-      <p>Editing and deletion are temporarily paused to keep records and evidence consistent. Only a completely written archive is published.</p>
+      <p>Editing and deletion are paused during export.</p>
       {progress.bytesTotal > 0 && <>
         <progress aria-label="Portfolio bytes written" max={progress.bytesTotal} value={progress.bytesCompleted} />
         <p>{progress.filesCompleted} of {progress.filesTotal} files verified · {Math.round(progress.bytesCompleted / 1024)} of {Math.round(progress.bytesTotal / 1024)} KiB read</p>
@@ -46,6 +45,6 @@ export function PortfolioExportDialog({ pkg, workflow, busy, running, progress, 
         {missing.length ? 'Export draft ZIP' : 'Export ZIP'}
       </button>
     </div>
-    <p>Missing or corrupt managed evidence stops this export. Replace or remove a broken entry in Development plan, then retry; no files are silently omitted.</p>
+    <p>Replace or remove missing or corrupt evidence files in Development plan before exporting.</p>
   </Dialog>;
 }

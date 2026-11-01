@@ -241,7 +241,7 @@ test('the real C renderer previews a genuine backup, shows replacement counts an
   await expect(dialog.locator('.restore-compare section').nth(0)).toContainText('1 goals · 1 activities · 1 evidence files');
   await expect(dialog.locator('.restore-compare section').nth(1)).toContainText('2025, 2024');
   await expect(dialog.getByRole('button', { name: 'Replace all years', exact: true })).toBeEnabled();
-  await expect(dialog).toContainText('No records have been restored');
+  await expect(dialog).toContainText('This replaces all current years and evidence; it does not merge them');
   expect(await page.evaluate(() => window.swcc.getState())).toEqual(before);
   await page.setViewportSize({ width: 620, height: 800 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);

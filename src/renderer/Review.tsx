@@ -28,14 +28,14 @@ export function Review({ packageId, year, operations, session, feedback, complet
     });
   }, [showFeedback, snapshot.error, snapshot.status]);
   return <>
-    <div className="page-heading"><h1>Review the standards.</h1><p>{year} · Supplied Second Edition, amended September 7, 2018. Resume, browse, or revisit any section.</p></div>
+    <div className="page-heading"><h1>Standards review</h1><p>{year} · Code of Ethics and Standards of Practice, Second Edition (September 2018).</p></div>
     {snapshot.error && snapshot.status === 'Not saved' && <section className="error-panel" role="alert"><p>{snapshot.error}</p>
       {snapshot.status === 'Not saved' && <><p>Your pending review changes are retained. Navigation and close wait for a successful retry.</p>
         <button disabled={busy} onClick={() => void (state ? session.retry() : session.open(packageId)).catch(() => {})}>Retry review save</button></>}
     </section>}
     {!state && <p role="status">Opening this year’s review…</p>}
     {state && <div className="review-layout"><aside className="review-sections">
-      <h2>Section checklist</h2><p className="quiet">Every mapped page must appear in the active reader. Checks are automatic; step completion needs your manual confirmation.</p>
+      <h2>Section checklist</h2><p className="quiet">Sections are checked when all their pages are viewed. Confirm completion below.</p>
       <div className="review-list">{state.readiness.sections.map(section => <div className="review-row" key={section.id}>
         <button type="button" className={section.pages.some(page => page === state.page) ? 'reading' : ''}
           aria-label={`${section.label} — ${section.checked ? 'reviewed' : 'not reviewed'}`}
@@ -48,19 +48,18 @@ export function Review({ packageId, year, operations, session, feedback, complet
       </div>)}</div>
       <section className="resources-row"><h3>Other required resources</h3>
         {state.resourcesAvailable ? <>
-          <p>The College website needs internet access. Launching it proves neither loading nor reading.</p>
+          <p>Opens the College website in your browser. Internet access is required.</p>
           <button className="secondary" disabled={snapshot.status === 'Saving'} onClick={() => session.launchResources()}>Open resources</button>
-        </> : <p>Available after physical page 48 actually appears in the active reader. Skipped sections stay unchecked.</p>}
+        </> : <p>View page 48 to unlock these resources.</p>}
         {state.resourcesLaunchedAt && <><p className="resources-checked">✓ Default-browser launch recorded: <time dateTime={state.resourcesLaunchedAt}>{new Date(state.resourcesLaunchedAt).toLocaleString()}</time></p>
           <button className="text-button" disabled={snapshot.status === 'Saving'} onClick={() => session.resetResources()}>Reset resources action</button></>}
       </section>
       <section className="review-readiness" aria-label="Step 1 application readiness"><h3>Step 1 · <span role="status" aria-label="Step 1 readiness">{feedback.status}</span></h3>
-        {state.readiness.ready ? <p>{feedback.status === 'Completed' ? 'You manually confirmed this step. Ordinary rereading does not reopen it.' : 'Ready for your manual confirmation; not marked Completed.'}</p>
-          : <ul>{state.readiness.missing.map(item => <li key={item}>{item}</li>)}</ul>}
+        {!state.readiness.ready && <ul>{state.readiness.missing.map(item => <li key={item}>{item}</li>)}</ul>}
+        {feedback.status === 'Completed' && <p>Rereading does not reopen this step.</p>}
         <button type="button" className="secondary" disabled={busy} aria-label="Complete Step 1" onClick={complete}>
           {feedback.status === 'Completed' ? 'Confirm Step 1 again' : 'Complete Step 1'}
         </button>
-        <p>Application readiness is not College compliance.</p>
       </section>
     </aside><PdfReader key={packageId} operations={operations} position={state} onPosition={(page, offset, zoom) => session.move(page, offset, zoom)} onVisit={page => session.visit(page)} /></div>}
   </>;

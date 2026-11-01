@@ -106,7 +106,6 @@ export function EvidencePreviewDialog({ preview, onClose }: { preview: EvidenceP
         {error && <p role="alert">{error}</p>}
         <canvas role="img" aria-label={`Evidence PDF page ${page}`} hidden={!rendered || Boolean(error)} ref={canvas} />
       </div>
-      <p className="quiet">This local preview does not execute content embedded in the imported document.</p>
     </section> : <section className="evidence-preview image-evidence-preview">
       {imageUrl && <img src={imageUrl} alt={`Evidence preview ${preview.ref} · ${preview.originalName}`}
         onError={() => setError(`The image ${preview.originalName} could not be displayed.`)} />}

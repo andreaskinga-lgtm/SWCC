@@ -112,7 +112,7 @@ test('every development-plan reason remains separately readable in a constrained
     }
   });
   await page.reload();
-  await expect(page.getByRole('heading', { name: 'Connect learning to practice.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Year overview' })).toBeVisible();
   await navigate('Development plan');
   await page.setViewportSize({ width: 520, height: 300 });
   const completePlan = page.getByRole('button', { name: 'Complete Step 3', exact: true });

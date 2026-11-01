@@ -8,10 +8,6 @@ import { currentCompletion } from '../shared/workflow.js';
 import { DraftSession } from './draft-session.js';
 import './assessment.css';
 
-function PageHeading({ title, description }: { title: string; description: string }) {
-  return <div className="page-heading"><h1>{title}</h1><p>{description}</p></div>;
-}
-
 export function DateField({ pkg, session, label, field }: {
   pkg: YearPackage;
   session: DraftSession;
@@ -69,7 +65,7 @@ export function GoalCreateDialog({ source, session, onClose, activityId, flushEd
   const [validationError, setValidationError] = useState('');
   const [submitted, setSubmitted] = useState(false);
   const pending = state.pendingGoalCreation !== null;
-  const titleText = source === 'plan' ? 'Create a shared learning goal' : 'Add a learning goal';
+  const titleText = source === 'plan' ? 'Create a learning goal' : 'Add a learning goal';
   const actionText = source === 'plan' ? 'Create goal' : 'Add goal';
   useEffect(() => {
     if (submitted && !state.pendingGoalCreation && state.status === 'Saved') onClose();
@@ -98,9 +94,7 @@ export function GoalCreateDialog({ source, session, onClose, activityId, flushEd
     catch (error) { setValidationError(error instanceof Error ? error.message : String(error)); }
   }
   return <Dialog title={titleText} onClose={close}>
-    <p className="goal-dialog-copy">{source === 'plan'
-      ? 'This goal appears in both your annual self-assessment and development plan.'
-      : 'The same goal will appear in your development plan. Goals do not have individual standards.'}</p>
+    <p className="goal-dialog-copy">Goals appear in both your self-assessment and development plan.</p>
     <form onSubmit={event => void submit(event)}>
       <label className="field"><span>Goal title</span><input autoFocus aria-label="Goal title" value={pending ? state.pendingGoalCreation?.title ?? title : title}
         disabled={pending} onChange={event => setTitle(event.target.value)} /></label>
@@ -153,7 +147,7 @@ export function GoalDeleteDialog({ goal, session, operations, onClose, flushEdit
     catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
   }
   return <Dialog title={`Delete ${goal.ref}?`} onClose={() => { if (!busy) onClose(); }}>
-    <p>This removes {goal.ref} and its activity links from the shared goal set. Activities, evidence notes and links, managed files, and reflections stay; activities with no remaining links stay as supplementary learning. The reference will not be reused.</p>
+    <p>This deletes {goal.ref} and its activity links. Activities, evidence, and reflections are kept. Activities with no remaining goals become supplementary learning. The reference will not be reused.</p>
     {error && <p className="goal-validation" role="alert">{error}</p>}
     {draftState.status === 'Not saved' && <div className="goal-retry">
       <p>{draftState.error || 'Some edits remain unsaved.'}</p>
@@ -179,15 +173,13 @@ function ReadinessPanel({ pkg, complete, busy }: { pkg: YearPackage; complete: (
         {completed ? 'Completed' : readiness.ready ? 'Ready' : 'In progress'}
       </span>
     </div>
-    <p>{readiness.ready ? 'All Step 2 readiness items are present.' : 'Use this checklist while you work. Drafts remain saveable.'}</p>
     {!readiness.ready && <ul aria-label="Step 2 missing items" className="readiness-missing">
       {readiness.missing.map(item => <li key={item}>{item}</li>)}
     </ul>}
-    {completed && <p>You manually confirmed this step. Meaningful assessment or goal edits reopen it.</p>}
+    {completed && <p>Changes to the assessment or goals can reopen this step.</p>}
     <button type="button" className="secondary" disabled={busy} aria-label="Complete Step 2" onClick={complete}>
       {completed ? 'Confirm Step 2 again' : 'Complete Step 2'}
     </button>
-    <small>Application readiness is not College compliance. Completion checks and saves your latest edits.</small>
   </section>;
 }
 
@@ -202,7 +194,7 @@ export function AssessmentScreen({ pkg, session, operations, complete, busy, flu
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState<Goal | null>(null);
   return <>
-    <PageHeading title="Reflect on your practice." description={`Your ${pkg.year} annual self-assessment. Incomplete writing and selections can be saved as a draft.`} />
+    <div className="page-heading"><h1>Self-assessment</h1></div>
     <div className="assessment-flow">
       <section className="surface assessment-writing" aria-label="Self-assessment writing">
         <DateField pkg={pkg} session={session} field="assessmentDate" label="Assessment date" />
@@ -225,9 +217,8 @@ export function AssessmentScreen({ pkg, session, operations, complete, busy, flu
         </fieldset>
         <section className="goals-section" aria-labelledby="assessment-goals-title">
           <div className="section-heading"><h2 id="assessment-goals-title">Learning goals</h2><button type="button" className="text-button" onClick={() => setCreating(true)}><Plus size={15} />Add goal</button></div>
-          <p className="quiet">One shared set of goals for the self-assessment and development plan.</p>
           {pkg.goals.map(goal => <GoalEditor key={goal.id} goal={goal} session={session} onDelete={setDeleting} />)}
-          {!pkg.goals.length && <p className="empty">Add a learning goal here or from the development plan.</p>}
+          {!pkg.goals.length && <p className="empty">No learning goals yet.</p>}
         </section>
       </section>
       <aside className="assessment-side" aria-label="Self-assessment readiness">

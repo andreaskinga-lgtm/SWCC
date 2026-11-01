@@ -46,8 +46,8 @@ async function preparePlan() {
   await goal.getByLabel('Goal title', { exact: true }).fill('Deepen supervision');
   await goal.getByRole('button', { name: 'Add goal', exact: true }).click();
   await expect(goal).not.toBeVisible();
-  await navigate('Year overview');
-  await page.getByRole('button', { name: 'Record an activity', exact: true }).click();
+  await navigate('Development plan');
+  await page.getByRole('button', { name: 'Add activity', exact: true }).click();
   const activity = page.getByRole('dialog', { name: 'Record an activity' });
   await activity.getByLabel('Activity title', { exact: true }).fill('Peer consultation');
   await activity.getByRole('checkbox', { name: 'G1 Deepen supervision' }).check();
@@ -97,6 +97,7 @@ test('year overview puts workflow first and leaves step completion on individual
   await page.setViewportSize({ width: 1280, height: 800 });
   const workflow = page.getByRole('complementary', { name: 'Annual workflow' });
   await expect(workflow).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Record an activity', exact: true })).toHaveCount(0);
   const composition = await page.locator('.map-overview').evaluate(element => {
     const board = element.querySelector('.relationship-board')!.getBoundingClientRect();
     const checklist = element.querySelector('.map-checklist')!.getBoundingClientRect();
@@ -153,7 +154,7 @@ test('keyboard manual completion works in any order beside C’s map; historical
   await expectActionFeedback(page, 'SWCC has not submitted or verified a declaration');
   await dismissActionFeedback(page);
   await workflow.getByRole('button', { name: 'Export Forms PDF' }).click();
-  await expect(page.getByRole('dialog', { name: 'Export annual forms' })).toContainText('separate Complete Portfolio ZIP action');
+  await expect(page.getByRole('dialog', { name: 'Export annual forms' })).toContainText('Use Complete Portfolio ZIP to include them');
   await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
   const composition = await page.locator('.map-overview').evaluate(element => {
     const board = element.querySelector('.relationship-board')!.getBoundingClientRect();

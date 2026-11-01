@@ -41,7 +41,7 @@ test('C dashboard export warns for blank drafts, keyboard confirms, and writes r
   const warning = page.getByRole('dialog', { name: 'Export annual forms' });
   await expect(warning).toContainText('Add your strengths.');
   await expect(warning).toContainText('Step 1 is not manually completed.');
-  await expect(warning).toContainText('missing fields stay blank');
+  await expect(warning).toContainText('missing fields left blank');
   expect(existsSync(path)).toBe(false);
   await warning.getByRole('button', { name: 'Export draft PDF', exact: true }).focus();
   await page.keyboard.press('Enter');
@@ -136,15 +136,15 @@ test('long edited narratives export through the same desktop action with readabl
   const reflection = `${'Appliquer une réflexion différente. '.repeat(90)}FIN-REFLEXION`;
   await page.getByRole('navigation').getByRole('button', { name: 'Self-assessment', exact: true }).click();
   await page.getByLabel('Strengths', { exact: true }).fill(`${strengths}\n🧠`);
-  await page.getByRole('navigation').getByRole('button', { name: 'Year overview', exact: true }).click();
-  await page.getByRole('button', { name: 'Record an activity', exact: true }).click();
+  await page.getByRole('navigation').getByRole('button', { name: 'Development plan', exact: true }).click();
+  await page.getByRole('button', { name: 'Add activity', exact: true }).click();
   const activity = page.getByRole('dialog', { name: 'Record an activity' });
   await activity.getByLabel('Activity title').fill('Atelier partagé — unique');
   await activity.getByRole('button', { name: 'Save activity', exact: true }).click();
   const editor = page.getByRole('article', { name: 'Activity editor A1' });
   for (const title of ['Premier but', 'Deuxième but']) {
     await editor.getByRole('button', { name: 'Create and link a goal', exact: true }).click();
-    const goal = page.getByRole('dialog', { name: 'Create a shared learning goal' });
+    const goal = page.getByRole('dialog', { name: 'Create a learning goal' });
     await goal.getByLabel('Goal title').fill(title);
     await goal.getByRole('button', { name: 'Create goal', exact: true }).click();
     await expect(goal).toHaveCount(0);

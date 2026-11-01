@@ -19,14 +19,11 @@ export function PlanReadinessPanel({ pkg, readableEvidenceActivityIds = new Set<
   return <section className={`readiness-panel ${readiness.ready ? 'ready' : ''}`} aria-labelledby="plan-readiness-title">
     <div className="readiness-heading"><h2 id="plan-readiness-title">Step 3 · Development plan</h2>
       <span className={`readiness-status ${readiness.ready ? 'ready' : ''}`} role="status" aria-label="Step 3 readiness">{completed ? 'Completed' : readiness.ready ? 'Ready' : 'In progress'}</span></div>
-    {readiness.ready ? <p>All application readiness checks are satisfied. Manual completion is separate.</p>
-      : <ul className="readiness-missing" aria-label="Step 3 missing items">{readiness.missing.map(item => <li key={item}>{item}</li>)}</ul>}
-    <small>Supplementary activities do not block readiness. Files are optional when notes or a valid link qualify; missing or corrupt files do not count.</small>
-    {completed && <p>You manually confirmed this step. Meaningful goal, plan or activity edits reopen it.</p>}
+    {!readiness.ready && <ul className="readiness-missing" aria-label="Step 3 missing items">{readiness.missing.map(item => <li key={item}>{item}</li>)}</ul>}
+    {completed && <p>Changes to goals, the plan, or activities can reopen this step.</p>}
     <button type="button" className="secondary" disabled={busy} aria-label="Complete Step 3" onClick={complete}>
       {completed ? 'Confirm Step 3 again' : 'Complete Step 3'}
     </button>
-    <small>Application readiness is not College compliance. Completion saves and checks your latest edits.</small>
   </section>;
 }
 
@@ -62,7 +59,6 @@ function ActivityCreateDialog({ pkg, session, onClose, onCreated, flushEdits }: 
     catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
   }
   return <Dialog title="Record an activity" onClose={close}>
-    <p>Record it once. Link several goals, or leave it supplementary. Add evidence and reflection on the same record afterward.</p>
     <form onSubmit={event => { event.preventDefault(); void save(); }}>
       <label className="field"><span>Activity title</span><input autoFocus aria-label="Activity title" value={title} disabled={pending} onChange={event => setTitle(event.target.value)} /></label>
       <label className="field"><span>Description (optional)</span><textarea aria-label="Activity description" value={description} disabled={pending} onChange={event => setDescription(event.target.value)} /></label>
@@ -265,7 +261,7 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
     }
   }
   return <article className="activity-editor" aria-label={`Activity editor ${activity.ref}`}>
-    <div className="activity-editor-header"><span className="goal-reference">{activity.ref}</span><small>One record · all linked goals</small>
+    <div className="activity-editor-header"><span className="goal-reference">{activity.ref}</span>
       <button type="button" className="text-button delete-record" disabled={fileBusy} aria-label={`Delete activity ${activity.ref}`}
         onClick={() => { setDeleteError(''); setDeletingActivity(true); }}>Delete</button>
     </div>
@@ -310,7 +306,6 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
       {saveState.status === 'Not saved' && !saveState.error && <button type="button" className="secondary"
         onClick={() => void session.retry().catch(() => {})}>Retry save</button>}
     </>}
-    <p className="quiet">Planned and In Progress drafts need no invented date. Completed can still have pending evidence or reflection.</p>
     <fieldset className="goal-link-editor"><legend>Linked learning goals</legend>
       {pkg.goals.map(goal => <label key={goal.id}><input type="checkbox" checked={activity.goalIds.includes(goal.id)}
         onChange={event => session.editActivity(activity.id, { goalIds: event.target.checked ? [...activity.goalIds, goal.id] : activity.goalIds.filter(id => id !== goal.id) })} />
@@ -318,10 +313,10 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
       <button type="button" className="text-button" onClick={addGoal}>Create and link a goal</button>
       {!activity.goalIds.length && <p>No linked goal · supplementary learning. This activity does not block Step 3.</p>}
     </fieldset>
-    <label className="field narrative"><span>Evidence notes</span><small>A description or a valid link can qualify without a file.</small>
+    <label className="field narrative"><span>Evidence notes</span><small>Notes or a valid link can satisfy the evidence requirement without a file.</small>
       <textarea aria-label="Evidence notes" rows={4} value={activity.evidenceDescription}
         onChange={event => session.editActivity(activity.id, { evidenceDescription: event.target.value })} /></label>
-    <label className="field"><span>Evidence links</span><small>HTTP/HTTPS, one per line. Stored offline; never fetched automatically.</small>
+    <label className="field"><span>Evidence links</span><small>One HTTP or HTTPS URL per line. Links open in your browser.</small>
       <textarea aria-label="Evidence links" rows={3} value={linksText} onChange={event => {
         setLinksText(event.target.value);
         session.editActivity(activity.id, { evidenceLinks: event.target.value.split('\n').map(link => link.trim()).filter(Boolean) });
@@ -330,16 +325,15 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
       <span>{url}</span>{validEvidenceLink(url) ? <button type="button" className="text-button" onClick={() => void openLink(url)} aria-label={`Open evidence link ${index + 1}`}>Open in browser</button>
         : <small className="goal-validation">Enter a valid HTTP or HTTPS link.</small>}
     </li>)}</ul>
-    <small className="quiet">Opening a link needs internet to view its website. A successful launch does not verify loading or reading.</small>
     <section className="managed-evidence" aria-labelledby={`managed-evidence-title-${activity.id}`}>
       <div className="managed-evidence-heading"><div><h3 id={`managed-evidence-title-${activity.id}`}>Attached evidence files</h3>
-        <p>Optional files are copied into SWCC storage. Supported types are PDF, images, and common office/text documents; maximum 50 MiB each.</p></div>
+        <p>PDF, images, and office or text documents, up to 50 MiB each. Files are copied into SWCC storage.</p></div>
         <button type="button" disabled={fileBusy} onClick={() => void chooseEvidence()}>Import evidence file</button>
       </div>
       <button type="button" className="text-button evidence-recheck" disabled={fileBusy} onClick={() => void recheckEvidence()}>Check file integrity</button>
       {evidenceError && <div role="alert" className="goal-validation">Evidence integrity could not be checked: {evidenceError}</div>}
       {!evidenceLoaded && !evidenceError && <p role="status" className="quiet">Checking attached evidence…</p>}
-      {evidenceLoaded && !attached.length && <p className="quiet">No file evidence is attached to this activity yet.</p>}
+      {evidenceLoaded && !attached.length && <p className="quiet">No files attached.</p>}
       {attached.map(entry => {
         const previewable = entry.type === 'pdf' || ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'].includes(entry.type);
         const integrityMessage = entry.integrity === 'missing' ? `${entry.ref} is missing; replace it or remove it.`
@@ -364,7 +358,7 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
       onChange={event => session.editActivity(activity.id, { applicationToPractice: event.target.value })} /></label>
     {preview && <EvidencePreviewDialog preview={preview} onClose={() => setPreview(null)} />}
     {deletingActivity && <Dialog title={`Delete activity ${activity.ref}?`} onClose={() => { if (!deleteBusy) setDeletingActivity(false); }}>
-      <p className="goal-dialog-copy">This deletes {activity.ref}, its goal links, evidence notes and links, evidence records and managed files, and its application-to-practice reflection. Linked goals, other activities, and their evidence stay.</p>
+      <p className="goal-dialog-copy">This permanently deletes {activity.ref}, its evidence files, notes, links, and reflection. Linked goals and other activities are kept.</p>
       {deleteError && <p role="alert" className="goal-validation">{deleteError}</p>}
       {session.getSnapshot().status === 'Not saved' && <div className="goal-retry">
         <p>{session.getSnapshot().error || 'Some edits remain unsaved.'}</p>
@@ -452,7 +446,7 @@ export function PlanScreen({ pkg, session, operations, selectedId, select, recor
   function closeCreate() { setCreating(false); clearRecordRequest(); }
   function created(id: string) { select(id); closeCreate(); }
   return <>
-    <div className="page-heading map-heading"><div><h1>Give your learning a place.</h1><p>Activities support zero, one, or several goals. Evidence and reflections belong to each activity.</p></div>
+    <div className="page-heading map-heading"><h1>Development plan</h1>
       <button type="button" onClick={() => setCreating(true)}>Add activity</button></div>
     <section className="goal-connection-strip" aria-labelledby="plan-goals-title">
       <div className="section-heading"><h2 id="plan-goals-title">Goal connections</h2><button type="button" className="text-button" onClick={() => setCreatingGoal({})}>Add goal</button></div>
@@ -462,8 +456,8 @@ export function PlanScreen({ pkg, session, operations, selectedId, select, recor
             className={activity?.id === item.id ? 'chosen' : 'secondary'} aria-label={`Edit ${item.ref} from ${goal.ref}`} onClick={() => void selectActivity(item.id)}>{item.ref}</button>)}</div></div>
         <button type="button" className="text-button" aria-label={`Delete goal ${goal.ref}`} onClick={() => setDeletingGoal(goal)}>Remove</button>
       </article>)}</div>
-      {!pkg.goals.length && <p className="empty">Add a goal here or in self-assessment. Both views share the same goal.</p>}
-      <p className="quiet">Select an A reference to edit its single shared record. Unlinked activities stay in the index below.</p>
+      {!pkg.goals.length && <p className="empty">No learning goals yet.</p>}
+      {pkg.activities.some(item => item.goalIds.length > 0) && <p className="quiet">Select an activity reference to edit it.</p>}
     </section>
     <div className="map-plan-body"><aside><h2>Activity records</h2><div className="activity-index">
       {pkg.activities.map(item => <button type="button" key={item.id} aria-label={`Select activity ${item.ref}`} aria-pressed={activity?.id === item.id}
@@ -472,13 +466,13 @@ export function PlanScreen({ pkg, session, operations, selectedId, select, recor
         <small>{item.goalIds.length ? pkg.goals.filter(goal => item.goalIds.includes(goal.id)).map(goal => goal.ref).join(', ') : 'No linked goal · supplementary'}</small>
       </button>)}</div>
       <DateField pkg={pkg} session={session} field="planDate" label="Plan date" />
-      <p className="quiet">Plan date is independent of assessment date.</p><PlanReadinessPanel pkg={pkg}
+      <PlanReadinessPanel pkg={pkg}
         readableEvidenceActivityIds={new Set(evidence.filter(entry => entry.integrity === 'readable').map(entry => entry.activityId))}
         complete={complete} busy={busy} /></aside>
       {activity ? <ActivityEditor key={activity.id} activity={activity} pkg={pkg} session={session} operations={operations}
         addGoal={() => setCreatingGoal({ activityId: activity.id })} evidence={evidence} evidenceError={evidenceError}
         evidenceLoaded={evidenceLoaded} refreshEvidence={refreshEvidence} onDeleted={select} reportError={reportError} flushEdits={flushEdits} />
-        : <section className="surface empty-editor"><h2>Make room for learning.</h2><p>Record an activity, then connect goals or keep it supplementary.</p></section>}
+        : <section className="surface empty-editor"><h2>No activities yet</h2><p>Select Add activity to record learning and attach evidence.</p></section>}
     </div>
     {creating && <ActivityCreateDialog pkg={pkg} session={session} flushEdits={flushEdits} onClose={closeCreate} onCreated={created} />}
     {creatingGoal && <GoalCreateDialog source="plan" session={session} flushEdits={flushEdits} activityId={creatingGoal.activityId} onClose={() => setCreatingGoal(null)} />}

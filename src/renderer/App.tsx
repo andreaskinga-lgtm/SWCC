@@ -220,7 +220,7 @@ export function App({ operations, prototypeOverview: Overview = OverviewContent,
           kind: 'info',
         } : {
           title: 'Full backup saved',
-          message: `${result.fileName} is ready. Keep this copy beyond this device.`,
+          message: `${result.fileName} was saved. Store this backup on another device.`,
           kind: 'success',
         });
       } finally { setBackupRunning(false); }
@@ -575,8 +575,7 @@ export function App({ operations, prototypeOverview: Overview = OverviewContent,
               <button type="button" className="text-button year-delete" disabled={busy}
                 aria-label={`Delete year ${row.year}`} onClick={() => setDeletingYear(row)}>Delete</button></div></li>)}</ul>
         </section></>}
-      {screen === 'overview' && pkg && <><div className="page-heading map-heading"><div><h1>Connect learning to practice.</h1><p>Your {pkg.year} goals and the experiences that move them forward.</p></div>
-        <button type="button" disabled={busy} onClick={() => activityEntry(null)}>Record an activity</button></div>
+      {screen === 'overview' && pkg && <><div className="page-heading map-heading"><h1>Year overview</h1></div>
         <div className="map-overview">
           {workflow && <AnnualWorkflowPanel pkg={pkg} workflow={workflow} busy={busy} navigate={navigate}
             declare={openDeclaration} exportForms={() => openExport('forms')} exportPortfolio={() => openExport('portfolio')} />}
@@ -595,16 +594,15 @@ export function App({ operations, prototypeOverview: Overview = OverviewContent,
               {hasSubstantiveAssessmentContent(pkg) ? 'Update your self assessment' : 'Write your self assessment'}
             </button>
           </div>
-          <div className="overview-column"><h2>Activities & experiences</h2><div className="activity-nodes">{pkg.activities.map(activity => <button type="button" key={activity.id}
+          <div className="overview-column"><h2>Activities</h2><div className="activity-nodes">{pkg.activities.map(activity => <button type="button" key={activity.id}
             className="activity-node" data-activity-id={activity.id} aria-label={`Open activity ${activity.ref}: ${activity.title}`} onClick={() => activityEntry(activity.id)}>
             <div><span className="goal-reference">{activity.ref}</span><span className="activity-state">{activity.status}</span></div><h3>{activity.title}</h3>
             <span className="goal-link-chips">{activity.goalIds.length ? pkg.goals.filter(goal => activity.goalIds.includes(goal.id)).map(goal => <span key={goal.id}>{goal.ref}</span>)
               : <small>No linked goal · supplementary</small>}</span>
-            {activity.goalIds.length > 1 && <small>One shared record supports these goals</small>}
           </button>)}
           {!pkg.activities.length && <p>Record an activity and connect it to a goal, or keep it supplementary.</p>}</div>
           <button className="secondary" onClick={() => navigate('plan')}>View development plan</button></div>
-        </div><p className="board-footer">Evidence and reflection will stay with each activity, never with its links.</p></section></Overview>
+        </div></section></Overview>
           </div></>}
       {screen === 'assessment' && pkg && <AssessmentScreen pkg={pkg} session={session} operations={operations}
         flushEdits={flushEdits}
@@ -638,7 +636,7 @@ export function App({ operations, prototypeOverview: Overview = OverviewContent,
       {deletingYear && <Dialog title={`Delete year ${deletingYear.year}?`} onClose={() => {
         if (!busy) setDeletingYear(null);
       }}>
-        <p className="goal-dialog-copy">The supplied guide advises retaining this portfolio for at least 10 years. SWCC keeps year packages indefinitely unless you explicitly delete them. Deleting {deletingYear.year} removes only that year’s records and managed evidence files; it cannot be undone. Retain any copy you may need before continuing.</p>
+        <p className="goal-dialog-copy">The supplied guide advises keeping portfolios for at least 10 years. Deleting {deletingYear.year} permanently removes that year’s records and evidence files. Save a copy before deleting if you need to keep them.</p>
         <div className="goal-dialog-actions"><button type="button" className="secondary" disabled={busy}
           onClick={() => setDeletingYear(null)}>Keep year</button>
           <button type="button" className="danger" disabled={busy} onClick={() => void deleteYear()}>Delete {deletingYear.year} year package</button></div>
@@ -658,7 +656,7 @@ export function App({ operations, prototypeOverview: Overview = OverviewContent,
             showFeedback({ title: 'Could not cancel portfolio export', message: result.error.message, kind: 'error' });
           }
         })} />}
-      {state && <footer className="source-note"><strong>Supplied baseline, not regulatory verification.</strong><p>The ethics document is Second Edition, amended September 2018. The assessment tool references Third Edition / 2023. The same fixed source set applies to every year; SWCC does not verify current-year College compliance.</p></footer>}
+      {state && <footer className="source-note"><p>All years use the same bundled sources (ethics: September 2018; assessment tool: 2023 reference). SWCC does not verify current College compliance.</p></footer>}
     </main></div>
   </div>;
 }

@@ -28,6 +28,7 @@ select { border: 1px solid #bac6a7; padding: 8px; border-radius: 6px; color: #30
 .save-status { font-size: 12px; min-width: 60px; }
 main { padding: 40px 42px 70px; max-width: 1500px; }
 .page-heading { margin-bottom: 30px; }
+.page-heading h1 { margin: 0; }
 .page-heading p, .source-note, .empty, .map-checklist p { color: var(--muted); }
 .surface { background: white; border: 1px solid #e0e6d7; border-radius: 16px; padding: 28px; margin-bottom: 24px; }
 .create-year { display: flex; align-items: end; flex-wrap: wrap; gap: 16px; margin-bottom: 25px; }
@@ -47,7 +48,6 @@ textarea { resize: vertical; line-height: 1.6; }
 .relationship-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 25px; }
 .goal-panel { background: var(--leaf); border-radius: 12px; padding: 24px; margin-bottom: 24px; }
 .relationship-board .goal-panel { margin: 0; }
-.board-footer { border-top: 1px solid #e0e6d7; padding-top: 20px; font-size: 12px; color: var(--muted); }
 .map-checklist ul { padding: 0; list-style: none; }
 .map-checklist li { border-bottom: 1px solid #d7deca; padding: 15px 0; }
 .map-checklist small { display: block; color: var(--muted); }
@@ -61,7 +61,6 @@ textarea { resize: vertical; line-height: 1.6; }
 .declaration-card { border-top: 1px solid #d7deca; padding-top: 20px; margin: 20px 0; overflow-wrap: anywhere; }
 .declaration-card h3 { font-size: 15px; margin-top: 0; }
 .declaration-card p { font-size: 12px; }
-.workflow-source { font-size: 11px; }
 .declaration-warning { color: #775016; background: #fff5db; border: 1px solid #b68b43; border-radius: 8px; padding: 14px; }
 .operation-feedback { color: var(--accent); background: var(--leaf); border-radius: 8px; padding: 12px 16px; }
 .text-button { border: 0; color: var(--accent); background: none; padding: 6px 0; text-align: left; }

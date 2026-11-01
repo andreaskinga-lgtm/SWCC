@@ -59,7 +59,7 @@ if (startupFailure) {
         openExternal: url => shell.openExternal(url),
         readDocument: () => readFileSync(app.isPackaged
           ? join(process.resourcesPath, 'sources', 'ethics-2018.pdf')
-          : join(directory, '../../Code-of-Ethics-and-Standards-of-Practice-September-7-2018 (1).pdf')),
+          : join(directory, '../../resources/sources/Code-of-Ethics-and-Standards-of-Practice-September-7-2018.pdf')),
       }, {
         chooseFile: async selection => {
           const options = {

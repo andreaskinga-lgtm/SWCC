@@ -35,19 +35,17 @@ export function BackupScreen({ state, busy, running, progress, backup, cancel, i
 }) {
   const unbacked = state.lastBackupRevision === null || state.dataRevision > state.lastBackupRevision;
   return <>
-    <div className="page-heading"><h1>Keep a copy beyond this device.</h1>
-      <p>A full-app backup protects every year, its records, review progress, and evidence.</p></div>
+    <div className="page-heading"><h1>Backup and restore</h1></div>
     <div className="backup-layout" aria-busy={running || inspecting}>
       <section className="backup-main surface">
         <div className="backup-illustration" aria-hidden="true"><HardDrive size={46} /><span /><FolderOpen size={38} /></div>
-        <h2>Your whole portfolio, together.</h2>
-        <p>Choose a location outside SWCC’s storage, such as an external drive. There is no automatic cloud sync.
-          Keep the backup somewhere safe: it contains your records and original evidence and is not encrypted.</p>
+        <h2>Full backup</h2>
+        <p>Save all years and evidence outside SWCC’s storage, such as on an external drive. Backups are not encrypted.</p>
         <p className="backup-summary">{state.years.length} year {state.years.length === 1 ? 'package' : 'packages'} · All records and managed evidence</p>
         <button type="button" disabled={busy} onClick={backup}><Download size={18} aria-hidden="true" />Create full backup</button>
         {running && <section className="backup-progress" role="status" aria-label="Backup progress">
           <p>{phaseLabels[progress.phase] || 'Preparing full backup.'}</p>
-          <p>Editing and deletion are temporarily paused to keep this copy consistent.</p>
+          <p>Editing and deletion are paused during backup.</p>
           {progress.bytesTotal > 0 && <>
             <progress aria-label="Full backup bytes written" max={progress.bytesTotal} value={progress.bytesCompleted} />
             <p>{progress.filesCompleted} of {progress.filesTotal} files checked · {Math.round(progress.bytesCompleted / 1024)} of {Math.round(progress.bytesTotal / 1024)} KiB read</p>
@@ -56,7 +54,6 @@ export function BackupScreen({ state, busy, running, progress, backup, cancel, i
         </section>}
         <ProgressFailure monitor={backupMonitor} label="backup" />
         <h3>Local storage</h3><p className="storage-path">{state.storageDirectory}</p>
-        <p className="backup-note">SWCC publishes only a complete ZIP. Missing or changed evidence stops the backup; no files are silently omitted.</p>
       </section>
       <aside>
         <section className="backup-state">
@@ -66,13 +63,13 @@ export function BackupScreen({ state, busy, running, progress, backup, cancel, i
               : 'No successful full backup recorded.'}</p>
             <p className="backup-indicator">{unbacked ? 'Changes not backed up' : 'No changes since the last full backup.'}</p>
           </div>
-          <p>Annual portfolio exports are not restorable full-app backups. Remember to create another full backup after making changes.</p>
+          <p>Annual exports cannot be restored. Create a new full backup after editing.</p>
         </section>
         <section className="restore-entry">
           <h2>Restore all years</h2>
-          <p>Inspect a full backup and compare it with the entire current dataset. Restore replaces all years; it does not merge them.</p>
+          <p>Restoring a full backup replaces all years and evidence. It does not merge them.</p>
           <button className="secondary" type="button" disabled={busy} onClick={inspect}>Preview full backup</button>
-          <p>Inspection does not change live records. Only explicit confirmation replaces them, after a verified protective full backup.</p>
+          <p>Previewing does not change your records.</p>
           {restoreProgress.phase === 'cleanup' && <button className="secondary" type="button" disabled={busy} onClick={cancelInspection}>Retry staging cleanup</button>}
           {inspecting && <section className="backup-progress" role="status" aria-label={replacing ? 'Restore progress' : 'Inspection progress'}>
             <p>{restoreLabels[restoreProgress.phase] || 'Preparing backup inspection.'}</p>
@@ -108,9 +105,8 @@ export function RestorePreviewDialog({ preview, busy, replacing, progress, cance
       </section>
       <section><h3>Current dataset to be replaced</h3><Summary summary={preview.current} /></section>
     </div>
-    <p className="warning">Restore replaces the entire dataset, not merge or resolve duplicate years.
-      {!replacing && ' No records have been restored.'} Confirm only if you want the validated backup to replace every current year.
-      SWCC first creates and verifies a protective full backup, then retains your prior data until replacement passes full validation.</p>
+    <p className="warning">This replaces all current years and evidence; it does not merge them.
+      SWCC saves a protective backup first and keeps your current data until the restore is verified.</p>
     {replacing && <section role="status" aria-label="Replacement progress" className="backup-progress">
       <p>{restoreLabels[progress.phase] || 'Preparing recoverable replacement.'}</p>
       <p>Editing, deletion and close are paused. Wait for validation or recovery; do not force quit.</p>

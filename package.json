@@ -54,7 +54,7 @@
     "directories": { "output": "release" },
     "files": ["dist/**/*", "package.json"],
     "extraResources": [
-      { "from": "Code-of-Ethics-and-Standards-of-Practice-September-7-2018 (1).pdf", "to": "sources/ethics-2018.pdf" },
+      { "from": "resources/sources/Code-of-Ethics-and-Standards-of-Practice-September-7-2018.pdf", "to": "sources/ethics-2018.pdf" },
       { "from": "Step One SWCC.pdf", "to": "sources/step-one.pdf" },
       { "from": "OCSWSSW-CCP-Assess-Tool-2026-English.pdf", "to": "sources/assessment-2026.pdf" },
       { "from": "resources/fonts", "to": "fonts" }

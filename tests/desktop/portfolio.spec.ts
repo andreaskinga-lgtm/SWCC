@@ -100,14 +100,15 @@ test('C dashboard keyboard portfolio export consumes latest edits and writes rea
   const original = Buffer.from('Original learning evidence — café.');
   writeFileSync(source, original);
   await destination(path);
-  await page.getByRole('button', { name: 'Record an activity', exact: true }).click();
+  await page.getByRole('navigation').getByRole('button', { name: 'Development plan', exact: true }).click();
+  await page.getByRole('button', { name: 'Add activity', exact: true }).click();
   const activity = page.getByRole('dialog', { name: 'Record an activity' });
   await activity.getByLabel('Activity title').fill('Shared learning');
   await activity.getByRole('button', { name: 'Save activity', exact: true }).click();
   const editor = page.getByRole('article', { name: 'Activity editor A1' });
   for (const title of ['First goal', 'Second goal']) {
     await editor.getByRole('button', { name: 'Create and link a goal', exact: true }).click();
-    const goal = page.getByRole('dialog', { name: 'Create a shared learning goal' });
+    const goal = page.getByRole('dialog', { name: 'Create a learning goal' });
     await goal.getByLabel('Goal title').fill(title);
     await goal.getByRole('button', { name: 'Create goal', exact: true }).click();
     await expect(goal).toHaveCount(0);
