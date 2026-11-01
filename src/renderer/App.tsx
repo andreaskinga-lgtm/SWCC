@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { BookOpen, ClipboardList, Home, Layers, HardDrive, Sprout, Network } from 'lucide-react';
 import type { AppState, DesktopOperations, EvidenceAttachment, OperationError, Result } from '../shared/application.js';
 import { localDate } from '../shared/application.js';
+import { hasSubstantiveAssessmentContent } from '../shared/assessment.js';
 import { DraftSession } from './draft-session.js';
 import { AssessmentScreen, Dialog } from './assessment-screen.js';
 import { PlanScreen } from './plan-screen.js';
@@ -435,7 +436,7 @@ export function App({ operations }: { operations: DesktopOperations }) {
       {screen === 'overview' && pkg && <><div className="page-heading map-heading"><div><h1>Connect learning to practice.</h1><p>Your {pkg.year} goals and the experiences that move them forward.</p></div>
         <button type="button" disabled={busy} onClick={() => activityEntry(null)}>Record an activity</button></div>
         <div className="map-overview"><section className="relationship-board surface"><div className="relationship-columns">
-          <div><h2>Learning goals</h2><div className="goal-nodes">
+          <div className="overview-goal-column"><h2>Learning goals</h2><div className="goal-nodes">
             {pkg.goals.map(goal => <article className="goal-node" key={goal.id}><span className="goal-reference">{goal.ref}</span><h3>{goal.title}</h3>
               {goal.description && <p>{goal.description}</p>}
               <div className="goal-activity-refs">{pkg.activities.filter(activity => activity.goalIds.includes(goal.id)).map(activity =>
@@ -444,7 +445,9 @@ export function App({ operations }: { operations: DesktopOperations }) {
             </article>)}
             {!pkg.goals.length && <p>No goals yet. Add one from self-assessment or development plan.</p>}
             </div>
-            <button className="secondary" onClick={() => navigate('assessment')}>Write your self-assessment</button>
+            <button className="secondary" onClick={() => navigate('assessment')}>
+              {hasSubstantiveAssessmentContent(pkg) ? 'Update your self assessment' : 'Write your self assessment'}
+            </button>
           </div>
           <div><h2>Activities & experiences</h2><div className="activity-nodes">{pkg.activities.map(activity => <button type="button" key={activity.id}
             className="activity-node" aria-label={`Open activity ${activity.ref}: ${activity.title}`} onClick={() => activityEntry(activity.id)}>
