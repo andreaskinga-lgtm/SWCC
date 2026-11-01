@@ -41,6 +41,11 @@ export class DraftSession {
   getSnapshot = () => this.current;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private update(state: DraftState) { this.current = state; this.listeners.forEach(listener => listener()); }
+  private pendingSaveState(): Pick<DraftState, 'status' | 'error'> {
+    return this.failureReported
+      ? { status: 'Not saved', error: this.current.error }
+      : { status: 'Saving', error: null };
+  }
   open(record: YearPackage | null) {
     if (this.version !== this.savedVersion || this.saving) throw new Error('Save pending edits before opening another package.');
     this.version = 0;
@@ -68,9 +73,7 @@ export class DraftSession {
     if (!changed) return;
     this.version++;
     this.draftVersion++;
-    this.update({
-      ...this.current, record: { ...record, ...patch }, status: 'Saving', error: null,
-    });
+    this.update({ ...this.current, record: { ...record, ...patch }, ...this.pendingSaveState() });
     this.scheduleSave();
   }
   editGoal(goalId: string, patch: Partial<Pick<Goal, 'title' | 'description'>>) {
@@ -84,7 +87,7 @@ export class DraftSession {
     this.update({
       ...this.current,
       record: { ...record, goals: record.goals.map(item => item.id === goalId ? goal : item) },
-      status: 'Saving', error: null,
+      ...this.pendingSaveState(),
     });
     this.scheduleSave();
   }
@@ -98,7 +101,7 @@ export class DraftSession {
     this.activityEdits.set(activityId, { activity, version: this.version });
     this.update({
       ...this.current, record: { ...record, activities: record.activities.map(item => item.id === activityId ? activity : item) },
-      status: 'Saving', error: null,
+      ...this.pendingSaveState(),
     });
     this.scheduleSave();
   }
@@ -108,7 +111,7 @@ export class DraftSession {
     if (this.pendingActivityCreation) throw new Error('Retry the activity already waiting to be saved.');
     this.version++;
     this.pendingActivityCreation = { title, description, goalIds };
-    this.update({ ...this.current, pendingActivityCreation: this.pendingActivityCreation, status: 'Saving', error: null });
+    this.update({ ...this.current, pendingActivityCreation: this.pendingActivityCreation, ...this.pendingSaveState() });
     await this.flush();
   }
   async createGoal(title: string, description: string, activityId?: string) {
@@ -117,7 +120,7 @@ export class DraftSession {
     if (this.pendingGoalCreation) throw new Error('A learning goal is already waiting to be saved. Retry that save first.');
     this.version++;
     this.pendingGoalCreation = { title, description, ...(activityId ? { activityId } : {}) };
-    this.update({ ...this.current, pendingGoalCreation: this.pendingGoalCreation, status: 'Saving', error: null });
+    this.update({ ...this.current, pendingGoalCreation: this.pendingGoalCreation, ...this.pendingSaveState() });
     await this.flush();
   }
   private scheduleSave() {
@@ -161,13 +164,15 @@ export class DraftSession {
     catch { result = { ok: false as const, error: { code: 'IPC' as const, message: connectionError } }; }
     if (!result.ok) {
       const reportable = result.error.code !== 'VALIDATION';
-      const report = reportable && (!this.failureReported || this.explicitRetry);
+      const report = this.explicitRetry || (reportable && !this.failureReported);
       if (reportable) this.failureReported = true;
       this.explicitRetry = false;
       this.update({
         ...this.current,
         status: 'Not saved',
-        error: result.error.message,
+        error: !reportable && this.failureReported
+          ? this.current.error ?? result.error.message
+          : result.error.message,
         failureEvent: report ? { sequence: ++this.failureSequence, message: result.error.message } : this.current.failureEvent,
       });
       throw new Error(result.error.message);
@@ -182,7 +187,7 @@ export class DraftSession {
       if (this.savedDraftVersion !== this.draftVersion) {
         const draftVersion = this.draftVersion;
         const record = this.current.record;
-        this.update({ ...this.current, status: 'Saving', error: null });
+        this.update({ ...this.current, ...this.pendingSaveState() });
         const saved = await this.savedResult(() => this.operations.saveDraft({
           packageId: record.id, expectedRevision: record.contentRevision,
           draft: {
@@ -198,7 +203,7 @@ export class DraftSession {
       if (this.goalEdits.size > 0) {
         const [goalId, edit] = this.goalEdits.entries().next().value as [string, GoalEdit];
         const record = this.current.record;
-        this.update({ ...this.current, status: 'Saving', error: null });
+        this.update({ ...this.current, ...this.pendingSaveState() });
         const saved = await this.savedResult(() => this.operations.updateGoal({
           packageId: record.id, goalId, expectedRevision: record.contentRevision,
           title: edit.goal.title, description: edit.goal.description,
@@ -211,9 +216,16 @@ export class DraftSession {
       if (this.activityEdits.size > 0) {
         const [activityId, edit] = this.activityEdits.entries().next().value as [string, ActivityEdit];
         const validationError = activityDateError(edit.activity);
-        if (validationError) throw new Error(validationError);
+        if (validationError) {
+          this.update({
+            ...this.current, status: 'Not saved',
+            error: this.failureReported ? this.current.error : null,
+          });
+          this.explicitRetry = false;
+          throw new Error(validationError);
+        }
         const record = this.current.record;
-        this.update({ ...this.current, status: 'Saving', error: null });
+        this.update({ ...this.current, ...this.pendingSaveState() });
         const { title, description, status, completionDate, evidenceDescription, evidenceLinks, applicationToPractice, goalIds } = edit.activity;
         const saved = await this.savedResult(() => this.operations.updateActivity({
           packageId: record.id, expectedRevision: record.contentRevision, activityId,
@@ -239,7 +251,7 @@ export class DraftSession {
       if (this.pendingGoalCreation) {
         const request = this.pendingGoalCreation;
         const record = this.current.record;
-        this.update({ ...this.current, status: 'Saving', error: null });
+        this.update({ ...this.current, ...this.pendingSaveState() });
         const saved = await this.savedResult(() => this.operations.createGoal({
           packageId: record.id, expectedRevision: record.contentRevision,
           title: request.title, description: request.description,

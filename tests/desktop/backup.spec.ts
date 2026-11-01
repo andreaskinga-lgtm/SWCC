@@ -54,10 +54,16 @@ test('backup progress IPC rejection is visible and retry resumes monitoring with
   await page.getByRole('button', { name: 'I understand' }).click();
   await navigate('Backup and restore');
   await desktop.evaluate(({ dialog, ipcMain }) => {
-    dialog.showSaveDialog = () => new Promise(resolveDialog => {
-      (globalThis as typeof globalThis & { cancelBackupDialog: () => void }).cancelBackupDialog =
-        () => resolveDialog({ canceled: true, filePath: '' });
-    });
+    const fixture = globalThis as typeof globalThis & {
+      backupDialogRequests: number; cancelBackupDialog: () => void;
+    };
+    fixture.backupDialogRequests = 0;
+    dialog.showSaveDialog = () => {
+      fixture.backupDialogRequests++;
+      return new Promise(resolveDialog => {
+        fixture.cancelBackupDialog = () => resolveDialog({ canceled: true, filePath: '' });
+      });
+    };
     ipcMain.removeHandler('swcc:get-backup-progress');
     ipcMain.handle('swcc:get-backup-progress', () => { throw new Error('backup progress connection interrupted'); });
   });
@@ -65,16 +71,22 @@ test('backup progress IPC rejection is visible and retry resumes monitoring with
     await page.getByRole('button', { name: 'Create full backup', exact: true }).click();
     const progressFeedback = await expectActionFeedback(page, 'The desktop connection failed');
     await expect(progressFeedback.getByRole('alert')).toContainText('The desktop connection failed');
+    await dismissActionFeedback(page);
+    const retry = page.getByRole('button', { name: 'Retry backup progress', exact: true });
+    await expect(retry).toBeVisible();
     await desktop.evaluate(({ ipcMain }) => {
       ipcMain.removeHandler('swcc:get-backup-progress');
       ipcMain.handle('swcc:get-backup-progress', () => ({
-        ok: true, value: { phase: 'choosing', filesCompleted: 0, filesTotal: 0, bytesCompleted: 0, bytesTotal: 0 },
+        ok: true, value: { phase: 'snapshot', filesCompleted: 1, filesTotal: 1, bytesCompleted: 128, bytesTotal: 128 },
       }));
     });
-    await progressFeedback.getByRole('button', { name: 'Retry backup progress', exact: true }).click();
-    await expect(progressFeedback).toBeHidden();
-    await expect(page.getByRole('button', { name: 'Retry backup progress', exact: true })).toHaveCount(0);
-    await expect(page.getByRole('status', { name: 'Backup progress' })).toContainText('Choose where');
+    const progress = page.getByRole('status', { name: 'Backup progress' });
+    await expect(progress).toContainText('Choose where');
+    await retry.click();
+    await expect(progress).toContainText('Taking a consistent snapshot of all years.');
+    await expect(retry).toHaveCount(0);
+    expect(await desktop.evaluate(() =>
+      (globalThis as typeof globalThis & { backupDialogRequests: number }).backupDialogRequests)).toBe(1);
   } finally {
     await desktop.evaluate(() => {
       (globalThis as typeof globalThis & { cancelBackupDialog: () => void }).cancelBackupDialog();
