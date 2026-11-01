@@ -146,7 +146,10 @@ test('C dashboard keyboard portfolio export consumes latest edits and writes rea
       text += (await (await pdf.getPage(n)).getTextContent()).items.flatMap(item => 'str' in item ? [item.str] : []).join(' ');
     }
     expect(text.match(/Shared learning/g)).toHaveLength(1);
-    expect(text).toContain('Linked goals: G1, G2');
+    expect(text).not.toMatch(/\b[AGE][12]\b|Linked goals|No linked goal|\(continued\)|Planned/u);
+    expect(text.match(/CON\.txt/g)).toHaveLength(1);
+    expect(text.match(/First goal/g)).toHaveLength(2);
+    expect(text.match(/Second goal/g)).toHaveLength(2);
     expect(text.match(/STRENGTHS-END/g)).toHaveLength(1);
     expect(text.match(/REFLECTION-END/g)).toHaveLength(1);
   } finally { await pdf.destroy(); }
@@ -234,7 +237,7 @@ test('failed draft and real review flushes prevent stale portfolio export and re
   const pdf = await getDocument({ data: new Uint8Array(zip.get('CCP-2024-forms.pdf')!), useSystemFonts: true }).promise;
   try {
     const sat = (await (await pdf.getPage(2)).getTextContent()).items.flatMap(item => 'str' in item ? [item.str] : []).join(' ');
-    expect(sat).toContain('Retained latest strengths — café.');
+    expect(sat.replace(/\s+/gu, ' ')).toContain('Retained latest strengths — café.');
     const checklist = (await (await pdf.getPage(1)).getTextContent()).items.flatMap(item => 'str' in item ? [item.str] : []);
     expect(checklist).toContain('X');
   } finally { await pdf.destroy(); }

@@ -92,14 +92,24 @@ async function inspectLayout(pdf: PDFDocumentProxy, number: number, source: Awai
   const before = source.getContext('2d').getImageData(0, 0, source.width, source.height).data;
   const after = generated.getContext('2d').getImageData(0, 0, generated.width, generated.height).data;
   const allowed = [...rects, ...extra, [78, 62, 400, 78]];
+  const textBounds = (await Promise.all(rects.map(rect => column(pdf, number, rect))))
+    .flat().map(line => [line.transform[4] - 1, line.transform[5] - 4,
+      line.transform[4] + line.width + 1, line.transform[5] + line.height + 2]);
   let unexpected = 0;
+  let fieldDecorations = 0;
   for (let y = 0; y < source.height; y++) for (let x = 0; x < source.width; x++) {
+    const at = (y * source.width + x) * 4;
+    if (Math.abs(before[at] - after[at]) <= 40) continue;
+    const inside = (rect: readonly number[], padding = 0) => x / 1.5 >= rect[0] - padding
+      && x / 1.5 <= rect[2] + padding && 612 - y / 1.5 >= rect[1] - padding
+      && 612 - y / 1.5 <= rect[3] + padding;
+    if (rects.some(rect => inside(rect)) && !textBounds.some(rect => inside(rect))) fieldDecorations++;
     if (allowed.some(rect => x / 1.5 >= rect[0] - 1 && x / 1.5 <= rect[2] + 1
       && 612 - y / 1.5 >= rect[1] - 1 && 612 - y / 1.5 <= rect[3] + 1)) continue;
-    const at = (y * source.width + x) * 4;
-    if (Math.abs(before[at] - after[at]) > 40) unexpected++;
+    unexpected++;
   }
   expect(unexpected, `no changes outside measured fields / continuation label, page ${number}`).toBe(0);
+  expect(fieldDecorations, `only narrative ink inside fields, with no separators or marks in gaps/exhausted fields, page ${number}`).toBe(0);
   return generated;
 }
 
@@ -140,10 +150,10 @@ test('empty drafts require acknowledgement then export a real flattened checklis
   } finally { app.close(); }
 });
 
-test('annual narratives and shared/supplementary activities appear once with stable references, accents and measured checklist marks', async () => {
+test('annual forms retain only authored narratives and filenames, with natural independent field flow and intact checklist marks', async () => {
   const root = storage();
   const destination = resolve(root, 'annual.pdf');
-  const evidenceFile = resolve(root, 'présence.txt');
+  const evidenceFile = resolve(root, 'E88-A77-G66-présence.txt');
   writeFileSync(evidenceFile, 'Original evidence bytes, not an embedded PDF attachment.');
   const app = openApplication(resolve(root, 'storage'), { today: () => '2026-10-31' },
     { openExternal: async () => {}, readDocument: () => new Uint8Array() },
@@ -155,20 +165,29 @@ test('annual narratives and shared/supplementary activities appear once with sta
       draft: { assessmentDate: '2024-01-20', planDate: '2024-02-01', strengths: 'Empathie café — écoute.',
         peerFeedback: '“Très bien.”', learningNeeds: 'Développer la réflexion.', annualStandards: ['meaning-of-client', 'principle-viii'] },
     }));
-    for (const title of ['Supervision', 'Consultation']) pkg = value(await app.operations.createGoal({
+    for (const title of ['G44 Supervision', 'Consultation']) pkg = value(await app.operations.createGoal({
       packageId: pkg.id, expectedRevision: pkg.contentRevision, title, description: `Objectif ${title}.`,
     }));
     pkg = value(await app.operations.createActivity({
-      packageId: pkg.id, expectedRevision: pkg.contentRevision, title: 'Séminaire partagé', description: 'Atelier unique.',
+      packageId: pkg.id, expectedRevision: pkg.contentRevision, title: 'A55 Séminaire partagé', description: 'Atelier unique.',
       goalIds: pkg.goals.map(goal => goal.id), status: 'Completed', completionDate: '2024-03-01',
-      evidenceDescription: 'Notes conservées.', evidenceLinks: ['https://example.org/café'],
-      applicationToPractice: 'Écouter autrement.',
+      evidenceDescription: 'E33 Notes conservées.', evidenceLinks: ['https://example.org/A99/G98/E97/café'],
+      applicationToPractice: 'A22 Écouter autrement.',
     }));
     const imported = value(await app.operations.importEvidence({
       packageId: pkg.id, expectedRevision: pkg.contentRevision, activityId: pkg.activities[0].id,
     }));
     if (imported.cancelled) throw new Error('Evidence fixture cancelled');
     pkg = imported.package;
+    const secondImport = value(await app.operations.importEvidence({
+      packageId: pkg.id, expectedRevision: pkg.contentRevision, activityId: pkg.activities[0].id,
+    }));
+    if (secondImport.cancelled) throw new Error('Evidence fixture cancelled');
+    pkg = secondImport.package;
+    pkg = value(await app.operations.createActivity({
+      packageId: pkg.id, expectedRevision: pkg.contentRevision, title: 'Sans preuve ni réflexion',
+      description: ' \n\n', evidenceDescription: ' \n\n', applicationToPractice: ' \n\n',
+    }));
     pkg = value(await app.operations.createActivity({
       packageId: pkg.id, expectedRevision: pkg.contentRevision, title: 'Lecture supplémentaire',
       evidenceDescription: 'Livre personnel.', applicationToPractice: 'Prendre du recul.',
@@ -190,18 +209,39 @@ test('annual narratives and shared/supplementary activities appear once with sta
     try {
       const sat = await text(pdf, 2);
       const pdp = await text(pdf, 3);
-      for (const narrative of ['Empathie café', '“Très bien.”', 'Développer la réflexion.']) expect(sat.split(narrative)).toHaveLength(2);
-      for (const narrative of ['Objectif Supervision.', 'Objectif Consultation.']) {
-        expect(sat.split(narrative)).toHaveLength(2);
-        expect(pdp.split(narrative)).toHaveLength(2);
+      for (const narrative of ['Empathie café', '“Très bien.”', 'Développer la réflexion.'])
+        expect(compact(sat).split(compact(narrative)), sat).toHaveLength(2);
+      for (const narrative of ['Objectif G44 Supervision.', 'Objectif Consultation.']) {
+        expect(compact(sat).split(compact(narrative))).toHaveLength(2);
+        expect(compact(pdp).split(compact(narrative))).toHaveLength(2);
       }
-      for (const narrative of ['Séminaire partagé', 'Atelier unique.', 'Notes conservées.', 'Écouter autrement.',
-        'Lecture supplémentaire', 'Livre personnel.', 'Prendre du recul.', 'E1 présence.txt']) expect(pdp.split(narrative)).toHaveLength(2);
-      expect(pdp).toContain('G1, G2');
-      expect(pdp).toContain('No linked goal');
-      expect(pdp.match(/\bA1\b/g)).toHaveLength(3);
-      expect(pdp.match(/\bA2\b/g)).toHaveLength(3);
+      for (const narrative of ['A55 Séminaire partagé', 'Atelier unique.', 'E33 Notes conservées.', 'A22 Écouter autrement.',
+        'Sans preuve ni réflexion', 'Lecture supplémentaire', 'Livre personnel.', 'Prendre du recul.',
+        'https://example.org/A99/G98/E97/café']) expect(compact(pdp).split(compact(narrative)), narrative).toHaveLength(2);
+      expect(compact(pdp).split('E88-A77-G66-présence.txt')).toHaveLength(3);
+      for (const generated of [/\b[AGE][123]\b/u, /Linked goals|No linked goal|\(continued\)/u,
+        /Completed|Planned|2024-03-01/u]) {
+        expect(sat).not.toMatch(generated);
+        expect(pdp).not.toMatch(generated);
+      }
+      const activities = await column(pdf, 3, pdpRects[1]);
+      const evidence = await column(pdf, 3, pdpRects[2]);
+      const reflections = await column(pdf, 3, pdpRects[3]);
+      const supplementaryActivity = activities.find(line => line.str.includes('Lecture'))!;
+      const supplementaryEvidence = evidence.find(line => line.str.includes('Livre personnel.'))!;
+      const supplementaryReflection = reflections.find(line => line.str.includes('Prendre du recul.'))!;
+      const missingActivity = activities.find(line => line.str.includes('Sans preuve'))!;
+      const activityGap = missingActivity.transform[5] - supplementaryActivity.transform[5];
+      expect(activityGap).toBeGreaterThan(15);
+      expect(activityGap).toBeLessThan(25);
+      // Unequal fields flow independently; an empty record leaves no evidence/reflection slot.
+      expect(supplementaryEvidence.transform[5]).toBeLessThan(supplementaryActivity.transform[5] - 5);
+      expect(supplementaryReflection.transform[5]).toBeGreaterThan(supplementaryActivity.transform[5] + 5);
+      const reflectionGap = reflections[0].transform[5] - supplementaryReflection.transform[5];
+      expect(reflectionGap).toBeGreaterThan(15);
+      expect(reflectionGap).toBeLessThan(25);
       expect(await pdf.getAttachments()).toBeNull();
+      await inspectLayout(pdf, 3, await sourceRender(11), pdpRects, [[111.273, 88.3613, 208.146, 105.38]]);
       const renderedSat = await render(pdf, 2);
       const satBefore = originalSat.getContext('2d').getImageData(0, 0, originalSat.width, originalSat.height).data;
       const satAfter = renderedSat.getContext('2d').getImageData(0, 0, renderedSat.width, renderedSat.height).data;
@@ -262,7 +302,7 @@ test('long words and URLs wrap completely within the measured source fields at 1
     try {
       for (const [pageNumber, rect, expected] of [
         [2, [79.8549, 126.325, 192.437, 405.163], narrative],
-        [3, [412.365, 124.361, 547.857, 421.526], `A1 ${url}`],
+        [3, [412.365, 124.361, 547.857, 421.526], url],
       ] as const) {
         const content = await (await pdf.getPage(pageNumber)).getTextContent();
         const lines = content.items.filter(item => 'str' in item && item.str
@@ -307,7 +347,7 @@ async function column(pdf: PDFDocumentProxy, number: number, rect: readonly numb
 }
 const compact = (text: string) => text.replace(/\s/gu, '');
 function narrative(lines: { str: string }[]) {
-  return lines.filter(line => !/^[AG]\d+ \(continued\)$/u.test(line.str)).map(line => line.str).join('');
+  return lines.map(line => line.str).join('');
 }
 
 test('SAT continuations carry each full annual narrative and goal once at readable size in the original layout', async () => {
@@ -336,7 +376,7 @@ test('SAT continuations carry each full annual narrative and goal once at readab
       expect(pages.length).toBeGreaterThan(2);
       if (!result.cancelled) expect(result.pageCount).toBe(pdf.numPages);
       const expected = [strengths, feedback, needs,
-        pkg.goals.map(goal => `${goal.ref} ${goal.title}\n${goal.description}`).join('\n\n')];
+        pkg.goals.map(goal => `${goal.title}\n${goal.description}`).join('\n')];
       for (const [index, rect] of satRects.entries()) {
         let actual = '';
         for (const n of pages) {
@@ -376,7 +416,7 @@ test('SAT continuations carry each full annual narrative and goal once at readab
   } finally { app.close(); }
 }, 30_000);
 
-test('PDP continuations keep uneven activity, evidence and reflection columns on the same record without repeating any content', async () => {
+test('PDP fields continue independently without labels, alignment gaps or repeated content, leaving exhausted fields blank', async () => {
   const root = storage();
   const destination = resolve(root, 'pdp-stress.pdf');
   const evidenceFile = resolve(root, 'attestation-présence.txt');
@@ -387,10 +427,11 @@ test('PDP continuations keep uneven activity, evidence and reflection columns on
   const inputs = Array.from({ length: 12 }, (_, index) => ({
     title: `Atelier unique ${index + 1} — café`,
     description: index === 1 ? 'Description ample, étape suivante. '.repeat(100) : `Description brève ${index + 1}.`,
-    evidenceDescription: index === 1 ? 'Preuve détaillée.\n\n'.repeat(28) : `Preuve unique ${index + 1}.`,
+    evidenceDescription: index === 1 ? 'Preuve détaillée.\n\n'.repeat(28) : index === 2 ? '' : `Preuve unique ${index + 1}.`,
     evidenceLinks: index === 1 ? [url, `http://example.org/${'Word'.repeat(65)}`] : [],
     applicationToPractice: index === 0 ? 'Réflexion vaste — “élargir”. '.repeat(150)
-      : index === 2 ? 'Premier paragraphe.\n\nDeuxième paragraphe: naïve, coöperation, œil; ponctuation…\nDernière ligne.'
+      : index === 2 ? ''
+      : index === 3 ? 'Premier paragraphe.\n\nDeuxième paragraphe: naïve, coöperation, œil; ponctuation…\nDernière ligne.'
       : `Réflexion brève ${index + 1}.`,
   }));
   try {
@@ -417,15 +458,14 @@ test('PDP continuations keep uneven activity, evidence and reflection columns on
     try {
       const pages: number[] = [];
       for (let n = 2; n <= pdf.numPages; n++) if ((await text(pdf, n)).includes('Development')) pages.push(n);
-      expect(pages.length).toBeGreaterThan(3);
+      expect(pages.length).toBeGreaterThan(2);
       if (!result.cancelled) expect(result.pageCount).toBe(pdf.numPages);
       const expected = [
-        Array.from({ length: 14 }, (_, i) => `G${i + 1} But distinct ${i + 1}\nRécit du but ${i + 1}.`).join('\n\n'),
-        inputs.map((input, i) => `A${i + 1} ${input.title}\n${input.description}\nCompleted — 2024-03-01\n${
-          i === 0 ? 'Linked goals: G1, G2' : i === 2 ? 'No linked goal' : `Linked goals: G${i + 1}`}`).join('\n\n'),
-        inputs.map((input, i) => [`A${i + 1}`, input.evidenceDescription, ...input.evidenceLinks,
-          ...(i === 0 ? ['E1 attestation-présence.txt'] : [])].join('\n')).join('\n\n'),
-        inputs.map((input, i) => `A${i + 1}\n${input.applicationToPractice}`).join('\n\n'),
+        Array.from({ length: 14 }, (_, i) => `But distinct ${i + 1}\nRécit du but ${i + 1}.`).join('\n'),
+        inputs.map(input => `${input.title}\n${input.description}`).join('\n'),
+        inputs.map((input, i) => [input.evidenceDescription, ...input.evidenceLinks,
+          ...(i === 0 ? ['attestation-présence.txt'] : [])].join('\n')).join('\n'),
+        inputs.map(input => input.applicationToPractice).join('\n'),
       ];
       for (const [index, rect] of pdpRects.entries()) {
         let actual = '';
@@ -442,18 +482,19 @@ test('PDP continuations keep uneven activity, evidence and reflection columns on
         }
         expect(compact(actual), `complete PDP column ${index}`).toBe(compact(expected[index]));
       }
+      const lastPages: number[] = [];
+      for (const rect of pdpRects) {
+        let last = 0;
+        for (const n of pages) if ((await column(pdf, n, rect)).length) last = n;
+        lastPages.push(last);
+      }
+      expect(new Set(lastPages).size).toBeGreaterThan(1);
+      const firstActivities = await column(pdf, pages[0], pdpRects[1]);
+      expect(firstActivities.some(line => line.str.includes('Atelier unique 2'))).toBe(true);
+      const firstReflections = await column(pdf, pages[0], pdpRects[3]);
+      expect(firstReflections.some(line => line.str.includes('Réflexion brève 2'))).toBe(false);
       for (const n of pages) {
-        const columns = await Promise.all(pdpRects.slice(1).map(rect => column(pdf, n, rect)));
-        // A new record must start at the same row in all three narrative columns.
-        for (let i = 1; i <= inputs.length; i++) {
-          const starts = columns.map(lines => lines.find(line => new RegExp(`^A${i}(?: |$)`).test(line.str)
-            && !line.str.includes('(continued)')));
-          if (starts.some(Boolean)) {
-            expect(starts.every(Boolean), `A${i} starts together on page ${n}`).toBe(true);
-            const rows = starts.map((line, index) => pdpRects[index + 1][3] - line!.transform[5]);
-            expect(Math.max(...rows) - Math.min(...rows), `A${i} aligned rows on page ${n}`).toBeLessThan(1);
-          }
-        }
+        expect(await text(pdf, n)).not.toMatch(/\b[AGE]\d+\b|Linked goals|No linked goal|\(continued\)|Completed|2024-03-01/u);
         expect(await (await pdf.getPage(n)).getAnnotations()).toEqual([]);
         expect(await text(pdf, n)).toContain('CCP 2024 — PDP');
       }
@@ -491,6 +532,34 @@ test('unsupported glyphs fail explicitly without silently changing the narrative
     expect(result).toMatchObject({ ok: false, error: { code: 'EXPORT', message: expect.stringMatching(/not supported.*🧠/u) } });
     expect(readFileSync(destination, 'utf8')).toBe('Previous complete export');
     expect(readdirSync(root).some(name => name.endsWith('.partial'))).toBe(false);
+  } finally { app.close(); }
+});
+
+test.each(['missing', 'corrupt'] as const)('forms report %s evidence explicitly rather than printing a repair annotation or replacing the prior PDF', async failure => {
+  const root = storage();
+  const destination = resolve(root, 'existing.pdf');
+  const evidenceFile = resolve(root, 'certificate.txt');
+  writeFileSync(destination, 'Previous complete export');
+  writeFileSync(evidenceFile, 'Original evidence bytes.');
+  const data = resolve(root, 'storage');
+  const app = openApplication(data, {}, undefined, { chooseFile: async () => evidenceFile }, formsSystem(destination));
+  try {
+    let pkg = value(await app.operations.createYear(2024));
+    pkg = value(await app.operations.createActivity({
+      packageId: pkg.id, expectedRevision: pkg.contentRevision, title: 'Evidence integrity',
+    }));
+    const imported = value(await app.operations.importEvidence({
+      packageId: pkg.id, expectedRevision: pkg.contentRevision, activityId: pkg.activities[0].id,
+    }));
+    if (imported.cancelled) throw new Error('Evidence fixture cancelled');
+    const directory = resolve(data, 'dataset/evidence/2024');
+    const managed = resolve(directory, readdirSync(directory)[0]);
+    if (failure === 'missing') rmSync(managed);
+    else writeFileSync(managed, 'Changed evidence bytes.');
+    expect(await app.operations.exportForms({ packageId: pkg.id, confirmDraft: true })).toMatchObject({
+      ok: false, error: { code: 'EVIDENCE', message: expect.stringMatching(/E1.*replace or remove/iu) },
+    });
+    expect(readFileSync(destination, 'utf8')).toBe('Previous complete export');
   } finally { app.close(); }
 });
 
@@ -535,7 +604,8 @@ test('an export captures assessment, review and evidence synchronously before it
       expect(await text(pdf, 2)).toContain('Captured assessment');
       expect(await text(pdf, 2)).not.toContain('Newer edit');
       expect(await text(pdf, 2)).toContain('2024-01-20');
-      expect(await text(pdf, 3)).toContain('E1 original.txt');
+      expect(await text(pdf, 3)).toContain('original.txt');
+      expect(await text(pdf, 3)).not.toMatch(/\b[AE]1\b/u);
       expect(await text(pdf, 1)).toContain('X');
     } finally { await pdf.destroy(); }
   } finally { app.close(); }

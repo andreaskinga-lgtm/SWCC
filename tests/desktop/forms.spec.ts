@@ -116,7 +116,7 @@ test('failed draft flush retains edits and prevents stale export; retry exports 
   const pdf = await getDocument({ data: new Uint8Array(readFileSync(path)), useSystemFonts: true }).promise;
   try {
     const content = (await (await pdf.getPage(2)).getTextContent()).items.flatMap(item => 'str' in item ? [item.str] : []).join(' ');
-    expect(content).toContain('Dernier brouillon — café.');
+    expect(content.replace(/\s+/gu, ' ')).toContain('Dernier brouillon — café.');
   } finally { await pdf.destroy(); }
 });
 
@@ -172,7 +172,7 @@ test('long edited narratives export through the same desktop action with readabl
       const rect = sat ? [79.8549, 126.325, 192.437, 405.163] : [569.457, 123.052, 715.421, 421.526];
       const lines = content.filter(item => item.transform[4] >= rect[0] && item.transform[4] < rect[2]
         && item.transform[5] > rect[1] && item.transform[5] < rect[3]);
-      const narrative = lines.filter(item => !/^A1(?: \(continued\))?$/u.test(item.str)).map(item => item.str).join('');
+      const narrative = lines.map(item => item.str).join('');
       if (sat) actualStrengths += narrative;
       else {
         actualReflection += narrative;
@@ -186,7 +186,9 @@ test('long edited narratives export through the same desktop action with readabl
     expect(compact(actualReflection)).toBe(compact(reflection));
     expect(pdp.split('Atelier partagé —')).toHaveLength(2);
     expect(pdp.split('Une seule preuve')).toHaveLength(2);
-    expect(pdp).toContain('G1, G2');
+    expect(pdp).not.toMatch(/\b[AG]1\b|\bG2\b|Linked goals|No linked goal|\(continued\)|Planned/u);
+    expect(pdp.split('Premier but')).toHaveLength(2);
+    expect(pdp.split('Deuxième but')).toHaveLength(2);
     expect(await pdf.getFieldObjects()).toBeNull();
   } finally { await pdf.destroy(); }
 });

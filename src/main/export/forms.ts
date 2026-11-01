@@ -60,54 +60,23 @@ function fieldLines(text: string, width: number, font: PDFFont, label: string): 
   return lines;
 }
 
-interface TextRecord { text: string; ref?: string }
+interface TextRecord { text: string }
+interface PositionedLine { text: string; row: number }
 interface FieldGeometry { width: number; height: number; padding: number; lineHeight: number; capacity: number }
-function paginate(records: TextRecord[], geometry: FieldGeometry, font: PDFFont, label: string): string[][] {
-  const pages: string[][] = [[]];
+function paginate(records: TextRecord[], geometry: FieldGeometry, font: PDFFont, label: string): PositionedLine[][] {
+  const pages: PositionedLine[][] = [[]];
   for (const record of records) {
+    if (!record.text.trim()) continue;
     const lines = fieldLines(record.text, geometry.width - geometry.padding * 2, font, label);
-    let offset = 0;
     let page = pages[pages.length - 1];
-    if (page.length) {
-      if (geometry.capacity - page.length < Math.min(lines.length + 1, 3)) pages.push(page = []);
-      else page.push('');
-    }
-    while (offset < lines.length) {
-      if (page.length === geometry.capacity) pages.push(page = []);
-      if (!page.length && offset && record.ref) page.push(`${record.ref} (continued)`);
-      const count = Math.min(geometry.capacity - page.length, lines.length - offset);
-      page.push(...lines.slice(offset, offset + count));
-      offset += count;
-    }
-  }
-  return pages;
-}
-
-function paginateActivities(records: { ref: string; texts: string[] }[], geometries: FieldGeometry[], font: PDFFont): string[][][] {
-  const capacity = Math.min(...geometries.map(geometry => geometry.capacity));
-  const pages: string[][][] = [[[], [], []]];
-  for (const record of records) {
-    const lines = record.texts.map((text, index) =>
-      fieldLines(text, geometries[index].width - geometries[index].padding * 2, font, fieldLabels[`Text${40 + index}`]));
-    const offsets = [0, 0, 0];
-    let page = pages[pages.length - 1];
-    if (page[0].length) {
-      if (capacity - page[0].length < Math.min(Math.max(...lines.map(column => column.length)) + 1, 3))
-        pages.push(page = [[], [], []]);
-      else page.forEach(column => column.push(''));
-    }
-    while (lines.some((column, index) => offsets[index] < column.length)) {
-      if (page[0].length === capacity) pages.push(page = [[], [], []]);
-      const continued = offsets.some(offset => offset > 0);
-      const remaining = lines.map((column, index) => column.length - offsets[index]);
-      const count = Math.min(capacity - page[0].length - Number(continued), Math.max(...remaining));
-      // Reserve the same rows until every column of this activity is exhausted.
-      page.forEach((column, index) => {
-        if (continued) column.push(remaining[index] ? `${record.ref} (continued)` : '');
-        const part = lines[index].slice(offsets[index], offsets[index] + count);
-        column.push(...part, ...Array<string>(count - part.length).fill(''));
-        offsets[index] += part.length;
-      });
+    let row = page.length ? page[page.length - 1].row + 1.5 : 0;
+    for (const text of lines) {
+      if (row > geometry.capacity - 1) {
+        pages.push(page = []);
+        row = 0;
+      }
+      page.push({ text, row });
+      row++;
     }
   }
   return pages;
@@ -135,6 +104,8 @@ export async function exportAnnualForms(snapshot: AnnualFormsSnapshot, dataset: 
 }
 
 export async function generateAnnualForms(snapshot: AnnualFormsSnapshot, system: FormsSystem, fail: Fail) {
+  const broken = snapshot.attachments.find(entry => entry.integrity !== 'readable');
+  if (broken) fail('EVIDENCE', `${broken.ref} cannot be included (${broken.integrity}). Replace or remove this evidence entry before retrying. No output was published.`);
   try { return await generateForms(snapshot, system); }
   catch (error) {
     if (error instanceof FormsOverflow) fail('OVERFLOW', error.message);
@@ -167,20 +138,16 @@ async function generateForms(snapshot: AnnualFormsSnapshot, system: FormsSystem)
   });
   const pkg = snapshot.package;
   const goals = pkg.goals.map(goal => ({
-    ref: goal.ref, text: [`${goal.ref} ${goal.title}`, goal.description].filter(Boolean).join('\n'),
+    text: [goal.title, goal.description].filter(text => text.trim()).join('\n'),
   }));
   const activities = pkg.activities.map(activity => ({
-    ref: activity.ref,
     texts: [
-      [`${activity.ref} ${activity.title}`, activity.description,
-        `${activity.status}${activity.completionDate ? ` — ${activity.completionDate}` : ''}`,
-        activity.goalIds.length ? `Linked goals: ${pkg.goals.filter(goal => activity.goalIds.includes(goal.id)).map(goal => goal.ref).join(', ')}` : 'No linked goal',
-      ].filter(Boolean).join('\n'),
-      [activity.ref, activity.evidenceDescription, ...activity.evidenceLinks,
+      [activity.title, activity.description].filter(text => text.trim()).join('\n'),
+      [activity.evidenceDescription, ...activity.evidenceLinks,
         ...snapshot.attachments.filter(entry => entry.activityId === activity.id).map(entry =>
-          `${entry.ref} ${entry.originalName.replace(/\p{Cc}|\p{Cf}/gu, character => `\\u{${character.codePointAt(0)!.toString(16)}}`)}${entry.integrity === 'readable' ? '' : ` [${entry.integrity}; repair required]`}`),
-      ].filter(Boolean).join('\n'),
-      [activity.ref, activity.applicationToPractice].filter(Boolean).join('\n'),
+          entry.originalName.replace(/\p{Cc}|\p{Cf}/gu, character => `\\u{${character.codePointAt(0)!.toString(16)}}`)),
+      ].filter(text => text.trim()).join('\n'),
+      activity.applicationToPractice,
     ],
   }));
   const layouts: { page: number; kind: string; dateField: string; date: string; fields: Record<string, TextRecord[]> }[] = [
@@ -188,7 +155,8 @@ async function generateForms(snapshot: AnnualFormsSnapshot, system: FormsSystem)
       fields: { Text35: [{ text: pkg.strengths }], Text36: [{ text: pkg.peerFeedback }],
         Text37: [{ text: pkg.learningNeeds }], Text38: goals } },
     { page: 10, kind: 'PDP', dateField: 'Date43_af_date', date: pkg.planDate,
-      fields: { Text39: goals, Text40: [], Text41: [], Text42: [] } },
+      fields: { Text39: goals, ...Object.fromEntries(['Text40', 'Text41', 'Text42']
+        .map((name, index) => [name, activities.map(activity => ({ text: activity.texts[index] }))])) } },
   ];
   for (const layout of layouts) {
     const measurement = await PDFDocument.load(template);
@@ -204,10 +172,6 @@ async function generateForms(snapshot: AnnualFormsSnapshot, system: FormsSystem)
     }
     const columns = Object.fromEntries(Object.entries(layout.fields).map(([name, records]) =>
       [name, paginate(records, geometry[name], measuredFont, fieldLabels[name])]));
-    if (layout.page === 10) {
-      const grouped = paginateActivities(activities, [geometry.Text40, geometry.Text41, geometry.Text42], measuredFont);
-      ['Text40', 'Text41', 'Text42'].forEach((name, index) => { columns[name] = grouped.map(page => page[index]); });
-    }
     const count = Math.max(1, ...Object.values(columns).map(pages => pages.length));
     const dateLines = fieldLines(layout.date, geometry[layout.dateField].width - 2, measuredFont, fieldLabels[layout.dateField]);
     if (dateLines.length > geometry[layout.dateField].capacity) throw new FormsOverflow('The date does not fit the source field. No output was published.');
@@ -223,18 +187,18 @@ async function generateForms(snapshot: AnnualFormsSnapshot, system: FormsSystem)
       });
       form.updateFieldAppearances(font);
       const fields = { ...Object.fromEntries(Object.entries(columns).map(([name, pages]) => [name, pages[index] ?? []])),
-        [layout.dateField]: index ? [] : dateLines };
+        [layout.dateField]: index ? [] : dateLines.map((text, row) => ({ text, row })) };
       for (const [name, lines] of Object.entries(fields)) {
         const field = form.getTextField(name);
         field.setText('');
         field.setFontSize(10);
         field.updateAppearances(font, () => {
           const { height, padding, lineHeight } = geometry[name];
-          return drawLinesOfText(lines.map(line => font.encodeText(line)), {
+          return lines.flatMap(line => drawLinesOfText([font.encodeText(line.text)], {
             color: rgb(0, 0, 0), font: font.name, size: 10, lineHeight,
-            x: padding, y: height - padding - font.heightAtSize(10, { descender: false }),
+            x: padding, y: height - padding - font.heightAtSize(10, { descender: false }) - line.row * lineHeight,
             rotate: degrees(0), xSkew: degrees(0), ySkew: degrees(0),
-          });
+          }));
         });
       }
       form.flatten({ updateFieldAppearances: false });

@@ -58,31 +58,33 @@ async function contents(path: string): Promise<Map<string, Buffer>> {
 test('annual portfolio warns for drafts and archives complete forms and original shared and supplementary evidence once', async () => {
   const root = storage();
   const destination = resolve(storage(), 'CCP-2024-portfolio.zip');
+  const formsDestination = resolve(storage(), 'direct-forms.pdf');
   const source = resolve(root, 'café.txt');
   const original = Buffer.from('Original evidence — café.\n');
   writeFileSync(source, original);
   let suggested = '';
   const app = openApplication(root, { now: () => new Date('2026-10-31T12:00:00Z') }, undefined,
-    { chooseFile: async () => source }, templates, undefined, undefined, {
+    { chooseFile: async () => source }, { ...templates, chooseDestination: async () => formsDestination }, undefined, undefined, {
       chooseDestination: async name => { suggested = name; return destination; },
     });
 
   apps.push(app);
   const operations = app.operations;
   let pkg = value(await operations.createYear(2024));
-  for (const title of ['First goal', 'Second goal']) pkg = value(await operations.createGoal({
+  for (const title of ['G55 First goal', 'Second goal']) pkg = value(await operations.createGoal({
     packageId: pkg.id, expectedRevision: pkg.contentRevision, title,
   }));
   const strengths = `${'Écoute attentive. '.repeat(170)}STRENGTHS-END`;
-  const reflection = `${'Apply the shared learning. '.repeat(120)}REFLECTION-END`;
+  const reflection = `A77 authored reflection.\n\n${'Apply the shared learning. '.repeat(120)}REFLECTION-END`;
   pkg = value(await operations.saveDraft({
     packageId: pkg.id, expectedRevision: pkg.contentRevision,
     draft: { assessmentDate: pkg.assessmentDate, planDate: pkg.planDate, strengths,
       peerFeedback: '', learningNeeds: '', annualStandards: [] },
   }));
   pkg = value(await operations.createActivity({
-    packageId: pkg.id, expectedRevision: pkg.contentRevision, title: 'Shared workshop',
+    packageId: pkg.id, expectedRevision: pkg.contentRevision, title: 'A55 Shared workshop',
     goalIds: pkg.goals.map(goal => goal.id), applicationToPractice: reflection,
+    evidenceDescription: 'E55 authored evidence.', evidenceLinks: ['https://example.org/G99/A98/E97'],
   }));
   const shared = pkg.activities[0];
   const imported = value(await operations.importEvidence({
@@ -101,6 +103,7 @@ test('annual portfolio warns for drafts and archives complete forms and original
   expect(await operations.exportPortfolio({ packageId: pkg.id }))
     .toMatchObject({ ok: false, error: { code: 'CONFIRMATION_REQUIRED', missing: expect.arrayContaining(['Step 1 is not manually completed.']) } });
   const before = value(await operations.getState());
+  value(await operations.exportForms({ packageId: pkg.id, confirmDraft: true }));
   const result = value(await operations.exportPortfolio({ packageId: pkg.id, confirmDraft: true }));
   expect(result).toMatchObject({ cancelled: false, fileName: 'CCP-2024-portfolio.zip' });
   expect(suggested).toBe('CCP-2024-portfolio.zip');
@@ -132,14 +135,19 @@ test('annual portfolio warns for drafts and archives complete forms and original
   expect(index).toContain('evidence/E2/café.txt');
   expect(index).not.toContain('Apply the shared learning');
   const pdf = await getDocument({ data: new Uint8Array(zip.get('CCP-2024-forms.pdf')!), useSystemFonts: true }).promise;
+  const direct = await getDocument({ data: new Uint8Array(readFileSync(formsDestination)), useSystemFonts: true }).promise;
   try {
     expect(pdf.numPages).toBeGreaterThan(5);
+    expect(pdf.numPages).toBe(direct.numPages);
     let text = '';
     let actualStrengths = '';
     let actualReflection = '';
     for (let page = 1; page <= pdf.numPages; page++) {
       const rendered = await pdf.getPage(page);
       const content = (await rendered.getTextContent()).items.flatMap(item => 'str' in item ? [item] : []);
+      const directContent = (await (await direct.getPage(page)).getTextContent()).items.flatMap(item => 'str' in item ? [item] : []);
+      const presentation = (lines: typeof content) => lines.map(({ str, transform, width, height }) => ({ str, transform, width, height }));
+      expect(presentation(content)).toEqual(presentation(directContent));
       text += content.map(item => item.str).join(' ');
       const sat = content.some(item => item.str.includes('Self-Assessment'));
       const pdp = content.some(item => item.str.includes('Professional Development'));
@@ -148,7 +156,7 @@ test('annual portfolio warns for drafts and archives complete forms and original
         const narrative = content.filter(item => item.transform[4] >= rect[0] && item.transform[4] < rect[2]
           && item.transform[5] > rect[1] && item.transform[5] < rect[3]);
         for (const line of narrative) expect(Math.hypot(line.transform[0], line.transform[1])).toBeGreaterThanOrEqual(10);
-        const projected = narrative.filter(item => !/^A[12](?: \(continued\))?$/u.test(item.str)).map(item => item.str).join('');
+        const projected = narrative.map(item => item.str).join('');
         if (sat) actualStrengths += projected;
         else actualReflection += projected;
       }
@@ -158,11 +166,14 @@ test('annual portfolio warns for drafts and archives complete forms and original
     expect(actualReflection.replace(/\s/gu, '')).toBe(reflection.replace(/\s/gu, ''));
     expect(text.match(/Shared workshop/g)).toHaveLength(1);
     expect(text.match(/Supplementary reading/g)).toHaveLength(1);
-    expect(text).toContain('Linked goals: G1, G2');
-    expect(text).toContain('No linked goal');
+    expect(text).not.toMatch(/\b[AGE][12]\b|Linked goals|No linked goal|\(continued\)|Planned/u);
+    expect(text.replace(/\s/gu, '')).toContain('https://example.org/G99/A98/E97');
+    expect(text).toContain('E55 authored evidence.');
+    expect(text.match(/G55 First goal/g)).toHaveLength(2);
+    expect(text.match(/A55 Shared workshop/g)).toHaveLength(1);
     expect(text.match(/STRENGTHS-END/g)).toHaveLength(1);
     expect(text.match(/REFLECTION-END/g)).toHaveLength(1);
-  } finally { await pdf.destroy(); }
+  } finally { await pdf.destroy(); await direct.destroy(); }
   expect(value(await operations.getState())).toMatchObject({
     dataRevision: before.dataRevision, lastBackupAt: null, lastBackupRevision: null,
   });
