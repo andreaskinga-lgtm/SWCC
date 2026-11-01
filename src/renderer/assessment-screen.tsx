@@ -6,6 +6,7 @@ import { ANNUAL_STANDARDS, dateWarning } from '../shared/application.js';
 import { evaluateAssessmentReadiness } from '../shared/assessment.js';
 import { currentCompletion } from '../shared/workflow.js';
 import { DraftSession } from './draft-session.js';
+import { isRecordRevealAnimationEnd } from './record-reveal.js';
 import './assessment.css';
 
 export function DateField({ pkg, session, label, field }: {
@@ -44,7 +45,7 @@ function GoalEditor({ goal, session, onDelete, revealed, onRevealEnd }: {
 }) {
   return <article className={`goal-editor${revealed ? ' record-reveal' : ''}`} aria-label={`Learning goal ${goal.ref}`}
     onAnimationEnd={event => {
-      if (event.target === event.currentTarget && event.animationName === 'swcc-record-reveal') onRevealEnd();
+      if (isRecordRevealAnimationEnd(event)) onRevealEnd();
     }}>
     <div className="goal-editor-top"><span className="goal-reference">{goal.ref}</span>
       <button type="button" className="icon-button" aria-label={`Delete goal ${goal.ref}`} onClick={() => onDelete(goal)}><Trash2 size={16} /></button>

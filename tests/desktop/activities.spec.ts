@@ -88,6 +88,38 @@ async function motionStartCounts() {
   return page.evaluate(() => (window as Window & { __swccTransitionStats?: { native: number; fallback: number } })
     .__swccTransitionStats ?? { native: 0, fallback: 0 });
 }
+async function holdFallbackTransitions() {
+  await page.evaluate(() => {
+    type TestStats = { started: number; animation: Animation | null };
+    type TransitionDocument = { startViewTransition?: unknown };
+    const target = window as Window & { __swccHeldTransitions?: TestStats };
+    const stats: TestStats = { started: 0, animation: null };
+    target.__swccHeldTransitions = stats;
+    Object.defineProperty(Document.prototype as unknown as TransitionDocument, 'startViewTransition', {
+      configurable: true,
+      value: undefined,
+    });
+    const elementPrototype = Element.prototype;
+    const originalAnimate = elementPrototype.animate;
+    Object.defineProperty(elementPrototype, 'animate', {
+      configurable: true,
+      value: function (this: Element, frames: Keyframe[], options: KeyframeAnimationOptions) {
+        if (!this.matches('.page-transition-scope')) return originalAnimate.call(this, frames, options);
+        stats.started++;
+        const animation = originalAnimate.call(this, frames, { ...options, duration: 10_000 });
+        stats.animation = animation;
+        return animation;
+      },
+    });
+  });
+}
+async function heldTransitionCounts() {
+  return page.evaluate(() => {
+    const stats = (window as Window & { __swccHeldTransitions?: { started: number; animation: Animation | null } })
+      .__swccHeldTransitions;
+    return { started: stats?.started ?? 0, playState: stats?.animation?.playState ?? 'none' };
+  });
+}
 async function addActivity(title: string) {
   await page.getByRole('button', { name: 'Add activity', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Record an activity' });
@@ -749,6 +781,40 @@ test('micro-feedback follows real saves, focused writing, and records added to t
   await expect(createGoal).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => (window as Window & { __swccMotionEvents?: string[] })
     .__swccMotionEvents ?? [])).toContain('swcc-record-reveal:G1 Goal reveal');
+});
+
+test('live archive motion-off preference stops in-flight movement and keeps later navigation static', async () => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await holdFallbackTransitions();
+  try {
+    await navigate('Development plan');
+    await expect(page.getByRole('heading', { name: 'Development plan', exact: true })).toBeVisible();
+    await expect.poll(heldTransitionCounts).toEqual({ started: 1, playState: 'running' });
+
+    await page.evaluate(() => {
+      const url = new URL(location.href);
+      url.searchParams.set('prototype', 'friendlier');
+      url.searchParams.set('motion', 'off');
+      history.replaceState(null, '', url);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    await expect.poll(heldTransitionCounts).toEqual({ started: 1, playState: 'idle' });
+
+    await navigate('Self-assessment');
+    await expect(page.getByRole('heading', { name: 'Self-assessment', exact: true })).toBeVisible();
+    await expect(page.getByRole('navigation').getByRole('button', { name: 'Self-assessment', exact: true })).toBeEnabled();
+    expect(await heldTransitionCounts()).toEqual({ started: 1, playState: 'idle' });
+  } finally {
+    await page.evaluate(() => {
+      const stats = (window as Window & { __swccHeldTransitions?: { animation: Animation | null } }).__swccHeldTransitions;
+      stats?.animation?.cancel();
+      const url = new URL(location.href);
+      url.searchParams.delete('prototype');
+      url.searchParams.delete('motion');
+      history.replaceState(null, '', url);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }).catch(() => {});
+  }
 });
 
 test('latest rapid activity and page intents cancel stale native callbacks without blocking future motion', async () => {

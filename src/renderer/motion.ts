@@ -21,6 +21,23 @@ interface ActiveVisual {
   native: NativeViewTransition | null;
 }
 
+const fallbackMotionByScope: Record<MotionScope, {
+  selector: string;
+  keyframes: Keyframe[];
+  duration: number;
+}> = {
+  page: {
+    selector: '.page-transition-scope',
+    keyframes: [{ opacity: 0.35, transform: 'translateX(12px)' }, { opacity: 1, transform: 'translateX(0)' }],
+    duration: 220,
+  },
+  activity: {
+    selector: '.activity-editor',
+    keyframes: [{ opacity: 0.15, transform: 'translateX(24px)' }, { opacity: 1, transform: 'translateX(0)' }],
+    duration: 260,
+  },
+};
+
 function motionIsDisabled() {
   if (typeof window === 'undefined') return false;
   const search = new URLSearchParams(window.location.search);
@@ -73,27 +90,13 @@ export function useMotionCoordinator(onFailure: (failure: unknown) => void) {
   const activeVisual = useRef<ActiveVisual | null>(null);
   const mounted = useRef(true);
 
-  const finishVisual = useCallback((visual: ActiveVisual) => {
-    if (activeVisual.current !== visual) return;
+  const cleanupVisual = useCallback((visual: ActiveVisual, skipNative: boolean) => {
     activeVisual.current = null;
     if (visual.frame !== null) cancelAnimationFrame(visual.frame);
     visual.frame = null;
     if (visual.animation) visual.animation.cancel();
     visual.animation = null;
-    if (document.documentElement.dataset.swccTransition === visual.scope) {
-      delete document.documentElement.dataset.swccTransition;
-    }
-  }, []);
-
-  const cancelVisual = useCallback(() => {
-    const visual = activeVisual.current;
-    if (!visual) return;
-    activeVisual.current = null;
-    if (visual.frame !== null) cancelAnimationFrame(visual.frame);
-    visual.frame = null;
-    visual.animation?.cancel();
-    visual.animation = null;
-    if (visual.native) {
+    if (skipNative && visual.native) {
       try {
         visual.native.skipTransition();
       } catch (failure) {
@@ -104,6 +107,17 @@ export function useMotionCoordinator(onFailure: (failure: unknown) => void) {
       delete document.documentElement.dataset.swccTransition;
     }
   }, []);
+
+  const finishVisual = useCallback((visual: ActiveVisual) => {
+    if (activeVisual.current !== visual) return;
+    cleanupVisual(visual, false);
+  }, [cleanupVisual]);
+
+  const cancelVisual = useCallback(() => {
+    const visual = activeVisual.current;
+    if (!visual) return;
+    cleanupVisual(visual, true);
+  }, [cleanupVisual]);
 
   useLayoutEffect(() => {
     if (disabled) cancelVisual();
@@ -156,18 +170,14 @@ export function useMotionCoordinator(onFailure: (failure: unknown) => void) {
           finishVisual(visual);
           return;
         }
-        const element = document.querySelector<HTMLElement>(
-          scope === 'page' ? '.page-transition-scope' : '.activity-editor',
-        );
+        const { selector, keyframes, duration } = fallbackMotionByScope[scope];
+        const element = document.querySelector<HTMLElement>(selector);
         if (!element || typeof element.animate !== 'function') {
           finishVisual(visual);
           return;
         }
-        const frames: Keyframe[] = scope === 'page'
-          ? [{ opacity: 0.35, transform: 'translateX(12px)' }, { opacity: 1, transform: 'translateX(0)' }]
-          : [{ opacity: 0.15, transform: 'translateX(24px)' }, { opacity: 1, transform: 'translateX(0)' }];
-        const animation = element.animate(frames, {
-          duration: scope === 'page' ? 220 : 260,
+        const animation = element.animate(keyframes, {
+          duration,
           easing: 'cubic-bezier(.2,.8,.2,1)',
           fill: 'both',
         });

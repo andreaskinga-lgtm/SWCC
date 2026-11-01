@@ -9,6 +9,7 @@ import type { DraftSession } from './draft-session.js';
 import { DateField, Dialog, GoalCreateDialog, GoalDeleteDialog } from './assessment-screen.js';
 import { EvidencePreviewDialog } from './EvidencePreview.js';
 import { useActionFeedback } from './action-feedback.js';
+import { isRecordRevealAnimationEnd } from './record-reveal.js';
 import './plan.css';
 
 export function PlanReadinessPanel({ pkg, readableEvidenceActivityIds = new Set<string>(), complete, busy }: {
@@ -443,7 +444,6 @@ export function PlanScreen({ pkg, session, operations, selectedId, select, onSel
     setRevealingGoalId(null);
   }, [motionDisabled]);
   const activity = pkg.activities.find(item => item.id === selectedId) ?? pkg.activities[0];
-  function selectActivity(id: string) { onSelectActivity(id); }
   function closeCreate() { setCreating(false); clearRecordRequest(); }
   function created(id: string) {
     if (!motionDisabled) setRevealingActivityId(id);
@@ -458,11 +458,11 @@ export function PlanScreen({ pkg, session, operations, selectedId, select, onSel
       <div className="plan-goal-list">{pkg.goals.map(goal => <article key={goal.id}
         className={`plan-goal${revealingGoalId === goal.id ? ' record-reveal' : ''}`} aria-label={`${goal.ref} ${goal.title}`}
         onAnimationEnd={event => {
-          if (event.target === event.currentTarget && event.animationName === 'swcc-record-reveal') setRevealingGoalId(null);
+          if (isRecordRevealAnimationEnd(event)) setRevealingGoalId(null);
         }}>
         <span className="goal-reference">{goal.ref}</span><div><h3>{goal.title}</h3>{goal.description && <p>{goal.description}</p>}
           <div className="goal-activity-refs">{pkg.activities.filter(item => item.goalIds.includes(goal.id)).map(item => <button type="button" key={item.id}
-            className={activity?.id === item.id ? 'chosen' : 'secondary'} aria-label={`Edit ${item.ref} from ${goal.ref}`} onClick={() => void selectActivity(item.id)}>{item.ref}</button>)}</div></div>
+            className={activity?.id === item.id ? 'chosen' : 'secondary'} aria-label={`Edit ${item.ref} from ${goal.ref}`} onClick={() => onSelectActivity(item.id)}>{item.ref}</button>)}</div></div>
         <button type="button" className="text-button" aria-label={`Delete goal ${goal.ref}`} onClick={() => setDeletingGoal(goal)}>Remove</button>
       </article>)}</div>
       {!pkg.goals.length && <p className="empty">No learning goals yet.</p>}
@@ -472,8 +472,8 @@ export function PlanScreen({ pkg, session, operations, selectedId, select, onSel
       {pkg.activities.map(item => <button type="button" key={item.id} aria-label={`Select activity ${item.ref}`} aria-pressed={activity?.id === item.id}
         className={`${activity?.id === item.id ? 'selected' : ''}${revealingActivityId === item.id ? ' record-reveal' : ''}`}
         onAnimationEnd={event => {
-          if (event.target === event.currentTarget && event.animationName === 'swcc-record-reveal') setRevealingActivityId(null);
-        }} onClick={() => void selectActivity(item.id)}>
+          if (isRecordRevealAnimationEnd(event)) setRevealingActivityId(null);
+        }} onClick={() => onSelectActivity(item.id)}>
         <span className="goal-reference">{item.ref}</span><strong>{item.title}</strong><small>{item.status}</small>
         <small>{item.goalIds.length ? pkg.goals.filter(goal => item.goalIds.includes(goal.id)).map(goal => goal.ref).join(', ') : 'No linked goal · supplementary'}</small>
       </button>)}</div>
