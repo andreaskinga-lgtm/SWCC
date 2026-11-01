@@ -15,6 +15,9 @@ export interface ArchiveSource {
 export class ArchiveSourceFailure extends Error {
   constructor(readonly path: string, message: string) { super(message); }
 }
+export function archiveManifestBytes(manifest: object): Buffer {
+  return Buffer.from(JSON.stringify(manifest, null, 2));
+}
 
 // Read and hash the exact bytes sent to the archive, rather than a previous read.
 export async function writeArchive(
@@ -67,7 +70,7 @@ export async function writeArchive(
       });
     }
     zip.addReadStreamLazy('manifest.json', callback => {
-      try { callback(null, Readable.from([Buffer.from(JSON.stringify(manifest(files), null, 2))])); }
+      try { callback(null, Readable.from([archiveManifestBytes(manifest(files))])); }
       catch (error) { output.destroy(error instanceof Error ? error : new Error(String(error))); }
     });
     zip.end();

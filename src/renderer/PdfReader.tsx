@@ -19,6 +19,8 @@ export function PdfReader({ operations, position, onPosition, onVisit }: {
   const [pageInput, setPageInput] = useState(String(page));
   const [width, setWidth] = useState(0);
   const [retry, setRetry] = useState(0);
+  const [activationError, setActivationError] = useState('');
+  const [activationRetry, setActivationRetry] = useState(0);
   const viewport = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const current = useRef({ position, onPosition, onVisit });
@@ -111,9 +113,20 @@ export function PdfReader({ operations, position, onPosition, onVisit }: {
       current.current.onPosition(page, Math.min(1, root.scrollTop / element.getBoundingClientRect().height), zoom);
       checkVisit();
     };
-    const activeChanged = (value: boolean) => { activityEvents++; active = value; checkVisit(); };
+    const activeChanged = (value: boolean) => {
+      activityEvents++;
+      active = value;
+      setActivationError('');
+      checkVisit();
+    };
     const unsubscribe = operations.onReaderActiveChanged(activeChanged);
-    void operations.getReaderActive().then(result => { if (!disposed && !activityEvents && result.ok) activeChanged(result.value); });
+    void operations.getReaderActive().then(result => {
+      if (disposed || activityEvents) return;
+      if (!result.ok) throw new Error(result.error.message);
+      activeChanged(result.value);
+    }).catch(failure => {
+      if (!disposed && !activityEvents) setActivationError(`Review tracking could not confirm the active reader: ${failure instanceof Error ? failure.message : String(failure)}. Keep this page visible and retry tracking.`);
+    });
     const intersection = new IntersectionObserver(checkVisit, { root, threshold: [0, 0.25, 0.5, 0.75, 1] });
     intersection.observe(element);
     root.addEventListener('scroll', scroll);
@@ -131,7 +144,7 @@ export function PdfReader({ operations, position, onPosition, onVisit }: {
       window.removeEventListener('focus', checkVisit);
       document.removeEventListener('visibilitychange', checkVisit);
     };
-  }, [rendered, page, zoom, operations]);
+  }, [rendered, page, zoom, operations, activationRetry]);
   const jump = (next: number) => {
     if (Number.isInteger(next) && next >= 1 && next <= 48) {
       if (next !== page) current.current.onPosition(next, 0, zoom);
@@ -159,6 +172,8 @@ export function PdfReader({ operations, position, onPosition, onVisit }: {
       {error && <div className="reader-message" role="alert"><p>{error}</p><button onClick={() => setRetry(retry + 1)}>Retry PDF</button></div>}
       <canvas ref={canvas} role="img" aria-label={`Supplied Code of Ethics, physical page ${page}`} hidden={!rendered || Boolean(error)} />
     </div>
+    {activationError && <div className="reader-message" role="alert"><p>{activationError}</p>
+      <button onClick={() => setActivationRetry(value => value + 1)}>Retry review tracking</button></div>}
     <p className="reader-note">Physical pages include the cover as page 1. Only qualifying displays in the active window are tracked, not fetching or skipped pages. This is navigation tracking, not proof of comprehension.</p>
   </section>;
 }

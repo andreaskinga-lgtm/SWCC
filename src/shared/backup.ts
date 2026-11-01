@@ -1,3 +1,7 @@
+export const MAX_BACKUP_MANIFEST_BYTES = 4 * 1024 * 1024;
+export const MAX_BACKUP_DATABASE_BYTES = 512 * 1024 * 1024;
+export const MAX_BACKUP_FILES = 50_000;
+
 export interface ArchiveFile {
   path: string;
   byteCount: number;

@@ -1,15 +1,17 @@
 import Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
-import { lstat, mkdir, open, realpath, rename, rm, stat } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
+import { lstat, mkdir, open, rename, rm, stat } from 'node:fs/promises';
+import { basename, dirname, join } from 'node:path';
 import type { Writable } from 'node:stream';
 import { SOURCE_SET_ID } from '../../shared/application.js';
 import type { OperationError } from '../../shared/application.js';
-import type { BackupProgress, FullBackupManifest, FullBackupOutcome } from '../../shared/backup.js';
-import { ArchiveSourceFailure, writeArchive } from '../archive.js';
+import type { ArchiveFile, BackupProgress, FullBackupManifest, FullBackupOutcome } from '../../shared/backup.js';
+import { MAX_BACKUP_DATABASE_BYTES, MAX_BACKUP_FILES, MAX_BACKUP_MANIFEST_BYTES } from '../../shared/backup.js';
+import { archiveManifestBytes, ArchiveSourceFailure, writeArchive } from '../archive.js';
 import { SCHEMA_VERSION } from './migrations.js';
 import type { storageLayout } from './storage.js';
 import { MAX_EVIDENCE_BYTES } from './evidence.js';
+import { exportDestination } from '../export/destination.js';
 
 export interface BackupSystem {
   chooseDestination: (suggestedName: string) => Promise<string | null>;
@@ -32,18 +34,7 @@ export async function createFullBackup(
   if (!system) throw new Error('The full-backup save dialog is unavailable.');
   const selected = await system.chooseDestination(`SWCC-${createdAt.replace(/[:.]/g, '-')}.swcc-backup.zip`);
   if (!selected || signal.aborted) return { cancelled: true };
-  if (!isAbsolute(selected)) fail('VALIDATION', 'Choose an absolute backup location outside SWCC storage.');
-  const storageRoot = await realpath(dirname(paths.dataset));
-  const destinationDirectory = await realpath(dirname(selected));
-  const destination = join(destinationDirectory, basename(selected));
-  const relativeDirectory = relative(storageRoot, destinationDirectory);
-  if (!protective && (!relativeDirectory || (!relativeDirectory.startsWith(`..${sep}`) && relativeDirectory !== '..' && !isAbsolute(relativeDirectory))))
-    fail('VALIDATION', 'Choose a backup location outside SWCC storage, such as an external drive. A backup must not overwrite managed records or evidence.');
-  try {
-    if ((await lstat(destination)).isSymbolicLink()) fail('VALIDATION', 'Choose a regular backup file, not a symbolic link.');
-  } catch (error) {
-    if (!(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')) throw error;
-  }
+  const destination = await exportDestination(selected, paths.dataset, 'backup', fail, protective);
   const staging = join(paths.runtime, `backup-${randomUUID()}`);
   const temporary = join(dirname(destination), `.swcc-backup-${randomUUID()}.partial`);
   try {
@@ -98,13 +89,23 @@ export async function createFullBackup(
         ...file, path: `evidence/${file.path}`, sourcePath: join(paths.evidence, file.path),
       })),
     ];
+    function manifest(files: ArchiveFile[]): FullBackupManifest {
+      const value: FullBackupManifest = {
+        kind: 'full-backup', archiveVersion: 1, schemaVersion: SCHEMA_VERSION, appId: 'org.swcc.desktop',
+        sourceSetId: SOURCE_SET_ID, createdAt, dataRevision: meta.revision, files,
+      };
+      if (files.length > MAX_BACKUP_FILES || sources[0].byteCount > MAX_BACKUP_DATABASE_BYTES
+        || archiveManifestBytes(value).byteLength > MAX_BACKUP_MANIFEST_BYTES)
+        fail('STORAGE', 'This full backup exceeds the supported restore inspection limit (4 MiB manifest, 512 MiB database, or 50,000 files). No backup was published. Your records and evidence remain; use a compatible SWCC build before backing up this dataset.');
+      return value;
+    }
+    manifest(sources.map(source => ({
+      path: source.path, byteCount: source.byteCount, sha256: '0'.repeat(64),
+    })));
     progress.filesTotal = sources.length;
     progress.bytesTotal = sources.reduce((sum, source) => sum + source.byteCount, 0);
     phase('archiving');
-    await writeArchive(temporary, sources, files => ({
-      kind: 'full-backup', archiveVersion: 1, schemaVersion: SCHEMA_VERSION, appId: 'org.swcc.desktop',
-      sourceSetId: SOURCE_SET_ID, createdAt, dataRevision: meta.revision, files,
-    } satisfies FullBackupManifest), (bytes, completed) => {
+    await writeArchive(temporary, sources, manifest, (bytes, completed) => {
       progress = { ...progress, bytesCompleted: progress.bytesCompleted + bytes,
         filesCompleted: progress.filesCompleted + Number(completed) };
       report(progress);

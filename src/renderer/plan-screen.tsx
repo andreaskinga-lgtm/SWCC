@@ -29,8 +29,9 @@ export function PlanReadinessPanel({ pkg, readableEvidenceActivityIds = new Set<
   </section>;
 }
 
-function ActivityCreateDialog({ pkg, session, onClose, onCreated }: {
+function ActivityCreateDialog({ pkg, session, onClose, onCreated, flushEdits }: {
   pkg: YearPackage; session: DraftSession; onClose: () => void; onCreated: (id: string) => void;
+  flushEdits: () => Promise<void>;
 }) {
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const [title, setTitle] = useState('');
@@ -52,8 +53,11 @@ function ActivityCreateDialog({ pkg, session, onClose, onCreated }: {
   async function save() {
     setError('');
     if (!title.trim()) { setError('Enter an activity title before saving.'); return; }
-    setSubmitted(true);
-    try { await session.createActivity(title, description, goalIds); }
+    try {
+      await flushEdits();
+      setSubmitted(true);
+      await session.createActivity(title, description, goalIds);
+    }
     catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
   }
   return <Dialog title="Record an activity" onClose={close}>
@@ -74,10 +78,11 @@ function ActivityCreateDialog({ pkg, session, onClose, onCreated }: {
   </Dialog>;
 }
 
-function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence, evidenceError, evidenceLoaded, refreshEvidence, onDeleted, reportError }: {
+function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence, evidenceError, evidenceLoaded, refreshEvidence, onDeleted, reportError, flushEdits }: {
   activity: Activity; pkg: YearPackage; session: DraftSession; operations: ApplicationOperations; addGoal: () => void;
   evidence: EvidenceAttachment[]; evidenceError: string; evidenceLoaded: boolean; refreshEvidence: () => Promise<EvidenceAttachment[]>;
   onDeleted: (activityId: string | null) => void; reportError: (message: string) => void;
+  flushEdits: () => Promise<void>;
 }) {
   const [linksText, setLinksText] = useState(activity.evidenceLinks.join('\n'));
   const [openError, setOpenError] = useState('');
@@ -96,7 +101,7 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
   async function openLink(url: string) {
     setOpenError('');
     try {
-      await session.flush();
+      await flushEdits();
       const result = await operations.openEvidenceLink({ packageId: pkg.id, activityId: activity.id, url });
       if (!result.ok) throw new Error(result.error.message);
     } catch (failure) { setOpenError(failure instanceof Error ? failure.message : String(failure)); }
@@ -105,17 +110,26 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
     setFileActionError('');
     setFileBusy(true);
     try {
-      await session.flush();
-      const current = session.getSnapshot().record;
-      if (!current) throw new Error('Open a year before importing evidence.');
-      const request = { packageId: pkg.id, activityId: activity.id, expectedRevision: current.contentRevision };
-      const result = evidenceId
-        ? await operations.replaceEvidence({ ...request, evidenceId })
-        : await operations.importEvidence(request);
-      if (!result.ok) throw new Error(result.error.message);
-      if (result.value.cancelled) return;
-      session.open(result.value.package);
-      await refreshEvidence();
+      await flushEdits();
+      await session.withSavedRecord(async current => {
+        if (current.id !== pkg.id) throw new Error('The selected year changed. Select the activity again before importing evidence.');
+        const request = { packageId: current.id, activityId: activity.id, expectedRevision: current.contentRevision };
+        const result = evidenceId
+          ? await operations.replaceEvidence({ ...request, evidenceId })
+          : await operations.importEvidence(request);
+        if (!result.ok) {
+          if (result.error.committed) {
+            const refreshed = await operations.openYear(current.id);
+            if (!refreshed.ok) throw new Error(`${result.error.message} Local records could not be refreshed: ${refreshed.error.message}`);
+            session.acceptSaved(refreshed.value);
+            await refreshEvidence();
+          }
+          throw new Error(result.error.message);
+        }
+        if (result.value.cancelled) return;
+        session.acceptSaved(result.value.package);
+        await refreshEvidence();
+      });
     } catch (failure) {
       setFileActionError(failure instanceof Error ? failure.message : String(failure));
     } finally { setFileBusy(false); }
@@ -125,7 +139,7 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
     setRemoveError('');
     setFileBusy(true);
     try {
-      await session.flush();
+      await flushEdits();
       const current = session.getSnapshot().record;
       if (!current) throw new Error('Open a year before removing evidence.');
       const result = await operations.removeEvidence({
@@ -134,14 +148,14 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
       if (!result.ok && result.error.committed) {
         const refreshed = await operations.openYear(pkg.id);
         if (!refreshed.ok) throw new Error(`${result.error.message} Local records could not be refreshed: ${refreshed.error.message}`);
-        session.open(refreshed.value);
+        session.acceptSaved(refreshed.value);
         setRemoving(null);
         await refreshEvidence();
         reportError(result.error.message);
         return;
       }
       if (!result.ok) throw new Error(result.error.message);
-      session.open(result.value);
+      session.acceptSaved(result.value);
       setRemoving(null);
       await refreshEvidence();
     } catch (failure) {
@@ -153,7 +167,7 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
     setDeleteError('');
     setDeleteBusy(true);
     try {
-      await session.flush();
+      await flushEdits();
       const current = session.getSnapshot().record;
       if (!current) throw new Error('Open a year before deleting an activity.');
       const result = await operations.deleteActivity({
@@ -163,7 +177,7 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
         if (result.error.committed) {
           const refreshed = await operations.openYear(pkg.id);
           if (refreshed.ok) {
-            session.open(refreshed.value);
+            session.acceptSaved(refreshed.value);
             onDeleted(refreshed.value.activities[0]?.id ?? null);
             await refreshEvidence().catch(() => {});
           }
@@ -173,7 +187,7 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
         }
         throw new Error(result.error.message);
       }
-      session.open(result.value);
+      session.acceptSaved(result.value);
       onDeleted(result.value.activities[0]?.id ?? null);
       setDeletingActivity(false);
       await refreshEvidence();
@@ -185,7 +199,7 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
     setFileActionError('');
     setFileBusy(true);
     try {
-      await session.flush();
+      await flushEdits();
       const result = await operations.previewEvidence({ packageId: pkg.id, activityId: activity.id, evidenceId: entry.id });
       if (!result.ok) throw new Error(result.error.message);
       setPreview(result.value);
@@ -197,7 +211,7 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
     setEvidenceOpenError(null);
     setFileBusy(true);
     try {
-      await session.flush();
+      await flushEdits();
       const result = await operations.openEvidence({ packageId: pkg.id, activityId: activity.id, evidenceId: entry.id });
       if (!result.ok) throw new Error(result.error.message);
     } catch (failure) {
@@ -209,7 +223,7 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
   }
   async function recheckEvidence() {
     setFileActionError('');
-    try { await refreshEvidence(); }
+    try { await flushEdits(); await refreshEvidence(); }
     catch (failure) { setFileActionError(failure instanceof Error ? failure.message : String(failure)); }
   }
   return <article className="activity-editor" aria-label={`Activity editor ${activity.ref}`}>
@@ -307,20 +321,21 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
   </article>;
 }
 
-export function PlanScreen({ pkg, session, operations, selectedId, select, recordRequested, clearRecordRequest, evidence, evidenceError, evidenceLoaded, refreshEvidence, reportError, complete, busy }: {
+export function PlanScreen({ pkg, session, operations, selectedId, select, recordRequested, clearRecordRequest, evidence, evidenceError, evidenceLoaded, refreshEvidence, reportError, complete, busy, flushEdits }: {
   pkg: YearPackage; session: DraftSession; operations: ApplicationOperations; selectedId: string | null;
   select: (id: string | null) => void; recordRequested: boolean; clearRecordRequest: () => void;
   evidence: EvidenceAttachment[]; evidenceError: string; evidenceLoaded: boolean; refreshEvidence: () => Promise<EvidenceAttachment[]>;
   complete: () => void; busy: boolean;
   reportError: (message: string) => void;
+  flushEdits: () => Promise<void>;
 }) {
   const [creating, setCreating] = useState(recordRequested);
   const [creatingGoal, setCreatingGoal] = useState<{ activityId?: string } | null>(null);
   const [deletingGoal, setDeletingGoal] = useState<Goal | null>(null);
   const activity = pkg.activities.find(item => item.id === selectedId) ?? pkg.activities[0];
   async function selectActivity(id: string) {
-    try { await session.flush(); select(id); }
-    catch { /* The retained editor and global retry panel expose the failed edit. */ }
+    try { await flushEdits(); select(id); }
+    catch (failure) { reportError(failure instanceof Error ? failure.message : String(failure)); }
   }
   function closeCreate() { setCreating(false); clearRecordRequest(); }
   function created(id: string) { select(id); closeCreate(); }
@@ -350,11 +365,11 @@ export function PlanScreen({ pkg, session, operations, selectedId, select, recor
         complete={complete} busy={busy} /></aside>
       {activity ? <ActivityEditor key={activity.id} activity={activity} pkg={pkg} session={session} operations={operations}
         addGoal={() => setCreatingGoal({ activityId: activity.id })} evidence={evidence} evidenceError={evidenceError}
-        evidenceLoaded={evidenceLoaded} refreshEvidence={refreshEvidence} onDeleted={select} reportError={reportError} />
+        evidenceLoaded={evidenceLoaded} refreshEvidence={refreshEvidence} onDeleted={select} reportError={reportError} flushEdits={flushEdits} />
         : <section className="surface empty-editor"><h2>Make room for learning.</h2><p>Record an activity, then connect goals or keep it supplementary.</p></section>}
     </div>
-    {creating && <ActivityCreateDialog pkg={pkg} session={session} onClose={closeCreate} onCreated={created} />}
-    {creatingGoal && <GoalCreateDialog source="plan" session={session} activityId={creatingGoal.activityId} onClose={() => setCreatingGoal(null)} />}
-    {deletingGoal && <GoalDeleteDialog goal={deletingGoal} session={session} operations={operations} onClose={() => setDeletingGoal(null)} />}
+    {creating && <ActivityCreateDialog pkg={pkg} session={session} flushEdits={flushEdits} onClose={closeCreate} onCreated={created} />}
+    {creatingGoal && <GoalCreateDialog source="plan" session={session} flushEdits={flushEdits} activityId={creatingGoal.activityId} onClose={() => setCreatingGoal(null)} />}
+    {deletingGoal && <GoalDeleteDialog goal={deletingGoal} session={session} operations={operations} flushEdits={flushEdits} onClose={() => setDeletingGoal(null)} />}
   </>;
 }

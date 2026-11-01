@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'vitest';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import yauzl from 'yauzl';
@@ -24,6 +24,49 @@ afterEach(() => {
   apps.splice(0).forEach(app => app.close());
   roots.splice(0).forEach(root => rmSync(root, { recursive: true, force: true }));
 });
+
+test('a large real evidence inventory cannot publish a backup that the restore manifest reader rejects', async () => {
+  const root = storage();
+  const destination = resolve(storage(), 'SWCC-large.swcc-backup.zip');
+  const source = resolve(root, 'small.txt');
+  writeFileSync(source, 'evidence');
+  writeFileSync(destination, 'Previous complete backup');
+  const app = openApplication(root, {}, undefined, { chooseFile: async () => source }, undefined, {
+    chooseDestination: async () => destination,
+  });
+  apps.push(app);
+  let pkg = value(await app.operations.createYear(2024));
+  pkg = value(await app.operations.createActivity({
+    packageId: pkg.id, expectedRevision: pkg.contentRevision, title: 'Many small evidence files',
+  }));
+  const imported = value(await app.operations.importEvidence({
+    packageId: pkg.id, activityId: pkg.activities[0].id, expectedRevision: pkg.contentRevision,
+  }));
+  if (imported.cancelled) throw new Error('Unexpected cancellation.');
+  const directory = resolve(root, 'dataset/evidence/2024');
+  const template = resolve(directory, readdirSync(directory)[0]);
+  const fixture = new Database(resolve(root, 'dataset/database.sqlite'));
+  try {
+    fixture.transaction(() => {
+      const insert = fixture.prepare(`INSERT INTO evidence_attachments
+        SELECT ?, package_id, activity_id, ?, original_filename, ?, type, byte_count, sha256, imported_at
+        FROM evidence_attachments WHERE id = ?`);
+      for (let reference = 2; reference <= 22_000; reference++) {
+        const id = randomUUID();
+        const path = `2024/E${reference}-${id}.txt`;
+        copyFileSync(template, resolve(root, 'dataset/evidence', path));
+        insert.run(id, reference, path, imported.attachment.id);
+      }
+      fixture.prepare("UPDATE reference_counters SET next_number = 22001 WHERE package_id = ? AND kind = 'E'").run(pkg.id);
+    })();
+  } finally { fixture.close(); }
+  expect(await app.operations.createFullBackup()).toMatchObject({
+    ok: false, error: { message: expect.stringContaining('inspection limit') },
+  });
+  expect(readFileSync(destination, 'utf8')).toBe('Previous complete backup');
+  expect(value(await app.operations.getState())).toMatchObject({ lastBackupAt: null, lastBackupRevision: null });
+  expect(value(await app.operations.getEvidence(pkg.id))).toHaveLength(22_000);
+}, 120_000);
 
 test('backup waits for admitted evidence imports and rejects concurrent edits and deletion until publication', async () => {
   const root = storage();

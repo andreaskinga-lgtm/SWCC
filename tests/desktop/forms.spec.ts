@@ -14,7 +14,7 @@ test.beforeEach(async () => {
   root = resolve('.work', `desktop-forms-${randomUUID()}`);
   mkdirSync(root, { recursive: true });
   desktop = await electron.launch({ executablePath: process.env.SWCC_PACKAGED_EXECUTABLE,
-    args: [...(process.env.SWCC_PACKAGED_EXECUTABLE ? [] : ['.']), `--user-data-dir=${root}`],
+    args: [...(process.env.SWCC_PACKAGED_EXECUTABLE ? [] : ['.']), `--user-data-dir=${resolve(root, 'storage')}`],
     env: { ...process.env, ELECTRON_RUN_AS_NODE: '' } });
   page = await desktop.firstWindow();
   await page.context().setOffline(true);
@@ -93,7 +93,7 @@ test('failed draft flush retains edits and prevents stale export; retry exports 
   await page.getByRole('navigation').getByRole('button', { name: 'Self-assessment', exact: true }).click();
   function failSaving(enabled: boolean) {
     const executable = createRequire(import.meta.url)('electron') as string;
-    const result = spawnSync(executable, ['tests/desktop/storage-fixture.mjs', resolve(root, 'dataset/database.sqlite'), String(enabled)], {
+    const result = spawnSync(executable, ['tests/desktop/storage-fixture.mjs', resolve(root, 'storage/dataset/database.sqlite'), String(enabled)], {
       env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8',
     });
     if (result.status !== 0) throw new Error(result.stderr);

@@ -68,6 +68,117 @@ test('a PDF import is managed independently from its source and previews offline
   await expect(preview).toHaveCount(0);
 });
 
+for (const action of ['import', 'replacement']) test(`${action} adopts its saved revision beneath retained typing and protects in-flight navigation`, async () => {
+  const source = resolve(root, 'original.txt');
+  const replacement = resolve(root, 'new.txt');
+  writeFileSync(source, 'original evidence');
+  writeFileSync(replacement, 'new evidence');
+  const editor = page.getByRole('article', { name: 'Activity editor A1' });
+  if (action === 'replacement') {
+    await chooseFile(source);
+    await editor.getByRole('button', { name: 'Import evidence file', exact: true }).click();
+    await expect(page.getByRole('article', { name: 'Evidence E1' })).toContainText('original.txt');
+  }
+  await desktop.evaluate(({ dialog }, path) => {
+    dialog.showOpenDialog = () => new Promise(resolveDialog => {
+      (globalThis as typeof globalThis & { releaseEvidence: () => void }).releaseEvidence =
+        () => resolveDialog({ canceled: false, filePaths: [path] });
+    });
+  }, replacement);
+  await editor.getByRole('button', { name: action === 'replacement' ? 'Replace E1' : 'Import evidence file', exact: true }).click();
+  await expect(editor.getByRole('button', { name: 'Import evidence file', exact: true })).toBeDisabled();
+  await editor.getByLabel('Evidence notes').fill('Typed while evidence is being selected');
+  await page.getByLabel('Plan date').fill('2024-05-06');
+  await page.waitForTimeout(600);
+  await page.getByRole('navigation').getByRole('button', { name: 'All years', exact: true }).click();
+  await expect(editor.getByLabel('Evidence notes')).toHaveValue('Typed while evidence is being selected');
+  await expect(page.getByRole('heading', { name: 'Your year packages' })).toHaveCount(0);
+  await desktop.evaluate(() => {
+    (globalThis as typeof globalThis & { releaseEvidence: () => void }).releaseEvidence();
+  });
+  await expect(page.getByRole('heading', { name: 'Your year packages' })).toBeVisible();
+  await page.getByRole('button', { name: 'Open 2024', exact: true }).click();
+  await page.getByRole('navigation').getByRole('button', { name: 'Development plan', exact: true }).click();
+  await expect(editor.getByLabel('Evidence notes')).toHaveValue('Typed while evidence is being selected');
+  await expect(page.getByLabel('Plan date')).toHaveValue('2024-05-06');
+  await expect(page.getByRole('article', { name: 'Evidence E1' })).toContainText('new.txt');
+  await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Saved');
+  await desktop.close();
+  await launch();
+  await page.getByRole('navigation').getByRole('button', { name: 'Development plan', exact: true }).click();
+  await expect(page.getByRole('article', { name: 'Activity editor A1' }).getByLabel('Evidence notes')).toHaveValue('Typed while evidence is being selected');
+});
+
+test('a committed import retains invalid edits visibly and correction saves against its new revision', async () => {
+  const source = resolve(root, 'notes.txt');
+  writeFileSync(source, 'original evidence');
+  await desktop.evaluate(({ dialog }, path) => {
+    dialog.showOpenDialog = () => new Promise(resolveDialog => {
+      (globalThis as typeof globalThis & { releaseEvidence: () => void }).releaseEvidence =
+        () => resolveDialog({ canceled: false, filePaths: [path] });
+    });
+  }, source);
+  const editor = page.getByRole('article', { name: 'Activity editor A1' });
+  await editor.getByRole('button', { name: 'Import evidence file', exact: true }).click();
+  await editor.getByLabel('Activity title', { exact: true }).fill('');
+  await editor.getByLabel('Evidence notes').fill('Retain these notes beside the invalid title');
+  await page.waitForTimeout(600);
+  await desktop.evaluate(() => {
+    (globalThis as typeof globalThis & { releaseEvidence: () => void }).releaseEvidence();
+  });
+  await expect(page.getByRole('article', { name: 'Evidence E1' })).toContainText('Readable');
+  await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Not saved');
+  await expect(editor.getByLabel('Activity title', { exact: true })).toHaveValue('');
+  await expect(editor.getByLabel('Evidence notes')).toHaveValue('Retain these notes beside the invalid title');
+  await editor.getByLabel('Activity title', { exact: true }).fill('Corrected activity title');
+  await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Saved');
+  const saved = await page.evaluate(() => window.swcc.getState());
+  expect(saved).toMatchObject({ ok: true, value: { selectedPackage: {
+    activities: [{ title: 'Corrected activity title', evidenceDescription: 'Retain these notes beside the invalid title' }],
+  } } });
+});
+
+test('committed replacement cleanup failure refreshes the renderer revision and old-byte cleanup retries on restart', async () => {
+  const source = resolve(root, 'certificate.txt');
+  writeFileSync(source, 'old evidence');
+  await chooseFile(source);
+  const editor = page.getByRole('article', { name: 'Activity editor A1' });
+  await editor.getByRole('button', { name: 'Import evidence file', exact: true }).click();
+  const evidence = page.getByRole('article', { name: 'Evidence E1' });
+  await expect(evidence).toContainText('Readable');
+  writeFileSync(source, 'new certificate bytes');
+  await desktop.evaluate(() => {
+    const fs = process.getBuiltinModule('node:fs') as typeof import('node:fs');
+    const module = process.getBuiltinModule('node:module') as typeof import('node:module');
+    const remove = fs.rmSync;
+    fs.rmSync = (path, options) => {
+      if (String(path).includes('.deletion-')) throw new Error('old evidence folder is locked');
+      remove(path, options);
+    };
+    module.syncBuiltinESMExports();
+    (globalThis as typeof globalThis & { repairEvidenceCleanup: () => void }).repairEvidenceCleanup =
+      () => { fs.rmSync = remove; module.syncBuiltinESMExports(); };
+  });
+  try {
+    await evidence.getByRole('button', { name: 'Replace E1', exact: true }).click();
+    await expect(editor.getByRole('alert')).toContainText('new file remains usable');
+    await expect(evidence).toContainText('21 bytes');
+    await expect(evidence).toContainText('Readable');
+    await editor.getByLabel('Evidence notes').fill('Saved after a committed cleanup failure');
+    await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Saved');
+    expect(readdirSync(resolve(root, 'dataset/evidence')).some(name => name.startsWith('.deletion-'))).toBe(true);
+  } finally {
+    await desktop.evaluate(() => {
+      (globalThis as typeof globalThis & { repairEvidenceCleanup: () => void }).repairEvidenceCleanup();
+    });
+  }
+  await desktop.close();
+  await launch();
+  await page.getByRole('navigation').getByRole('button', { name: 'Development plan', exact: true }).click();
+  await expect(page.getByRole('article', { name: 'Activity editor A1' }).getByLabel('Evidence notes')).toHaveValue('Saved after a committed cleanup failure');
+  expect(readdirSync(resolve(root, 'dataset/evidence')).filter(name => name.startsWith('.deletion-'))).toEqual([]);
+});
+
 test('an image preview uses imported bytes and other-document open errors remain visible', async () => {
   const image = resolve(root, 'letter.png');
   const document = resolve(root, 'report.docx');

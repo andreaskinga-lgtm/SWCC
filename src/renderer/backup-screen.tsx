@@ -3,6 +3,7 @@ import type { AppState } from '../shared/application.js';
 import type { BackupProgress } from '../shared/backup.js';
 import type { DatasetSummary, RestorePreview, RestoreProgress } from '../shared/restore.js';
 import { Dialog } from './assessment-screen.js';
+import { ProgressFailure, type ProgressMonitor } from './operation-progress.js';
 import './backup.css';
 
 const phaseLabels: Record<BackupProgress['phase'], string> = {
@@ -26,10 +27,11 @@ const restoreLabels: Record<RestoreProgress['phase'], string> = {
   recovering: 'Recovering your prior usable dataset. Replacement has not succeeded.',
 };
 
-export function BackupScreen({ state, busy, running, progress, backup, cancel, inspect, inspecting, replacing, restoreProgress, cancelInspection }: {
+export function BackupScreen({ state, busy, running, progress, backup, cancel, inspect, inspecting, replacing, restoreProgress, cancelInspection, backupMonitor, restoreMonitor }: {
   state: AppState; busy: boolean; running: boolean; progress: BackupProgress;
   backup: () => void; cancel: () => void;
   inspect: () => void; inspecting: boolean; replacing: boolean; restoreProgress: RestoreProgress; cancelInspection: () => void;
+  backupMonitor: ProgressMonitor; restoreMonitor: ProgressMonitor;
 }) {
   const unbacked = state.lastBackupRevision === null || state.dataRevision > state.lastBackupRevision;
   return <>
@@ -52,6 +54,7 @@ export function BackupScreen({ state, busy, running, progress, backup, cancel, i
           </>}
           <button className="secondary" type="button" disabled={progress.phase === 'publishing'} onClick={cancel}>Cancel backup</button>
         </section>}
+        <ProgressFailure monitor={backupMonitor} label="backup" />
         <h3>Local storage</h3><p className="storage-path">{state.storageDirectory}</p>
         <p className="backup-note">SWCC publishes only a complete ZIP. Missing or changed evidence stops the backup; no files are silently omitted.</p>
       </section>
@@ -79,6 +82,7 @@ export function BackupScreen({ state, busy, running, progress, backup, cancel, i
             </>}
             {!replacing && <button className="secondary" type="button" onClick={cancelInspection}>Cancel inspection</button>}
           </section>}
+          <ProgressFailure monitor={restoreMonitor} label="restore" />
         </section>
       </aside>
     </div>
@@ -91,8 +95,9 @@ function Summary({ summary }: { summary: DatasetSummary }) {
     <p>{summary.goals} goals · {summary.activities} activities · {summary.evidenceFiles} evidence files</p>
   </>;
 }
-export function RestorePreviewDialog({ preview, busy, replacing, progress, error, cancel, replace }: {
+export function RestorePreviewDialog({ preview, busy, replacing, progress, error, cancel, replace, monitor }: {
   preview: RestorePreview; busy: boolean; replacing: boolean; progress: RestoreProgress; error: string | null; cancel: () => void; replace: () => void;
+  monitor: ProgressMonitor;
 }) {
   return <Dialog title="Preview full-app restore" className="goal-dialog restore-dialog" onClose={() => { if (!busy) cancel(); }}>
     <p className="storage-path">{preview.fileName}</p>
@@ -110,6 +115,7 @@ export function RestorePreviewDialog({ preview, busy, replacing, progress, error
       <p>{restoreLabels[progress.phase] || 'Preparing recoverable replacement.'}</p>
       <p>Editing, deletion and close are paused. Wait for validation or recovery; do not force quit.</p>
     </section>}
+    <ProgressFailure monitor={monitor} label="restore" />
     {error && <p className="goal-validation" role="alert">{error}</p>}
     <div className="goal-dialog-actions">
       <button className="secondary" type="button" disabled={busy} onClick={cancel}>Cancel, keep current data</button>

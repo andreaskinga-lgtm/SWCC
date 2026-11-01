@@ -8,6 +8,11 @@ import { pipeline } from 'node:stream/promises';
 import yauzl from 'yauzl';
 import type { Entry, ZipFile } from 'yauzl';
 import type { FullBackupManifest } from '../../shared/backup.js';
+import {
+  MAX_BACKUP_MANIFEST_BYTES as MAX_MANIFEST_BYTES,
+  MAX_BACKUP_DATABASE_BYTES as MAX_DATABASE_BYTES,
+  MAX_BACKUP_FILES as MAX_FILES,
+} from '../../shared/backup.js';
 import type { DatasetSummary, RestorePreview, RestoreProgress } from '../../shared/restore.js';
 import { ANNUAL_STANDARDS, SOURCE_SET_ID, validDate } from '../../shared/application.js';
 import { activityDateError, evaluatePlanReadiness, validEvidenceLink } from '../../shared/plan.js';
@@ -30,9 +35,6 @@ export class RestoreCleanupFailure extends Error {
     super(`Inspection staging could not be removed: ${error instanceof Error ? error.message : String(error)}. Live records are unchanged. Check folder permissions and retry staging cleanup.`);
   }
 }
-const MAX_MANIFEST_BYTES = 4 * 1024 * 1024;
-const MAX_DATABASE_BYTES = 512 * 1024 * 1024;
-const MAX_FILES = 50_000;
 function validInstant(value: unknown): value is string {
   return typeof value === 'string' && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(value)
     && !value.startsWith('0000') && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;

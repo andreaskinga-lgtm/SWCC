@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { lstat, mkdir, open, realpath, rename, rm, writeFile } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
+import { lstat, mkdir, open, rename, rm, writeFile } from 'node:fs/promises';
+import { basename, dirname, join } from 'node:path';
 import type { Writable } from 'node:stream';
 import type { EvidenceAttachment, OperationError } from '../../shared/application.js';
 import type { PortfolioExportOutcome, PortfolioManifest, PortfolioProgress } from '../../shared/portfolio.js';
@@ -9,6 +9,7 @@ import { MAX_EVIDENCE_BYTES, SUPPORTED_EVIDENCE_EXTENSIONS } from '../data/evide
 import type { storageLayout } from '../data/storage.js';
 import { generateAnnualForms } from './forms.js';
 import type { AnnualFormsSnapshot, FormsSystem } from './forms.js';
+import { exportDestination } from './destination.js';
 
 export interface PortfolioSystem {
   chooseDestination: (suggestedName: string) => Promise<string | null>;
@@ -50,18 +51,8 @@ export async function exportAnnualPortfolio(
   phase('choosing');
   const selected = await system.chooseDestination(`CCP-${snapshot.package.year}-portfolio.zip`);
   if (!selected || signal.aborted) return { cancelled: true };
-  if (!isAbsolute(selected)) fail('VALIDATION', 'Choose an absolute portfolio destination outside SWCC storage.');
-  const storageRoot = await realpath(dirname(paths.dataset));
-  const directory = await realpath(dirname(selected));
-  const destination = join(directory, basename(selected));
-  const location = relative(storageRoot, directory);
-  if (!location || (!location.startsWith(`..${sep}`) && location !== '..' && !isAbsolute(location)))
-    fail('VALIDATION', 'Choose a portfolio destination outside SWCC storage, so an export cannot overwrite records or evidence.');
-  try {
-    if ((await lstat(destination)).isSymbolicLink()) fail('VALIDATION', 'Choose a regular portfolio file, not a symbolic link.');
-  } catch (error) {
-    if (!(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')) throw error;
-  }
+  const destination = await exportDestination(selected, paths.dataset, 'portfolio', fail);
+  const directory = dirname(destination);
   const staging = join(paths.runtime, `portfolio-${randomUUID()}`);
   const partial = join(directory, `.swcc-portfolio-${randomUUID()}.partial`);
   try {

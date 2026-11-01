@@ -406,7 +406,7 @@ export function openApplication(
         return { package: record, review, attachments };
       })();
       if (!formsSystem) fail('EXPORT', 'The forms destination dialog is unavailable. No output was published.');
-      return exportAnnualForms(snapshot, formsSystem, fail);
+      return exportAnnualForms(snapshot, paths.dataset, formsSystem, fail);
     }),
     getWorkflow: id => operation(() => {
       identifier(id);

@@ -220,6 +220,51 @@ test('a metadata commit failure removes the published copy and leaves E1 availab
   expect(imported.attachment.ref).toBe('E1');
 });
 
+test('replacement cleanup failure preserves the committed E reference and retries durable old-byte cleanup on restart', async () => {
+  const root = storage();
+  const source = resolve(root, 'certificate.pdf');
+  writeFileSync(source, '%PDF-1.4\nold certificate');
+  const app = openApplication(root, {}, undefined, {
+    chooseFile: async () => source,
+    removeDeletionStage: () => { throw new Error('old evidence folder is locked'); },
+  });
+  apps.push(app);
+  let pkg = value(await app.operations.createYear(2024));
+  pkg = value(await app.operations.createActivity({
+    packageId: pkg.id, expectedRevision: pkg.contentRevision, title: 'Replace a certificate',
+  }));
+  const activityId = pkg.activities[0].id;
+  const imported = value(await app.operations.importEvidence({
+    packageId: pkg.id, activityId, expectedRevision: pkg.contentRevision,
+  }));
+  if (imported.cancelled) throw new Error('Unexpected cancellation.');
+  const replacementBytes = '%PDF-1.4\nnew certificate';
+  writeFileSync(source, replacementBytes);
+  const result = await app.operations.replaceEvidence({
+    packageId: pkg.id, activityId, evidenceId: imported.attachment.id,
+    expectedRevision: imported.package.contentRevision,
+  });
+  expect(result).toMatchObject({
+    ok: false, error: { code: 'STORAGE', committed: true, recoveryPath: expect.stringContaining('.deletion-') },
+  });
+  const committed = value(await app.operations.openYear(pkg.id));
+  expect(committed.contentRevision).toBe(imported.package.contentRevision + 1);
+  expect(value(await app.operations.getEvidence(pkg.id))).toMatchObject([
+    { id: imported.attachment.id, ref: 'E1', integrity: 'readable', byteCount: replacementBytes.length },
+  ]);
+  expect(Buffer.from(value(await app.operations.previewEvidence({
+    packageId: pkg.id, activityId, evidenceId: imported.attachment.id,
+  })).data).toString()).toBe(replacementBytes);
+  expect(readdirSync(resolve(root, 'dataset/evidence')).some(name => name.startsWith('.deletion-'))).toBe(true);
+  apps.pop()!.close();
+  const reopened = openApplication(root);
+  apps.push(reopened);
+  expect(value(await reopened.operations.openYear(pkg.id))).toEqual(committed);
+  expect(value(await reopened.operations.getEvidence(pkg.id))).toMatchObject([{ integrity: 'readable' }]);
+  expect(readdirSync(resolve(root, 'dataset/evidence')).filter(name => name.startsWith('.deletion-'))).toEqual([]);
+  expect(readdirSync(resolve(root, 'dataset/evidence/2024'))).toHaveLength(1);
+});
+
 test('identically named files receive distinct E references and retain independent managed bytes', async () => {
   const root = storage();
   const firstSource = resolve(root, 'first', 'certificate.txt');

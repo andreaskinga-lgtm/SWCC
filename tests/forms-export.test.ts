@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'vitest';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
@@ -29,6 +29,42 @@ function formsSystem(destination: string) {
     readFont: () => readFileSync('resources/fonts/NotoSans-Regular.ttf'),
   };
 }
+test('forms destinations cannot overwrite managed evidence, including symbolic-linked storage locations', async () => {
+  const root = storage();
+  const data = resolve(root, 'storage');
+  const source = resolve(root, 'certificate.pdf');
+  const original = readFileSync('Step One SWCC.pdf');
+  writeFileSync(source, original);
+  let destination = resolve(root, 'annual.pdf');
+  const app = openApplication(data, {}, undefined, { chooseFile: async () => source }, {
+    ...formsSystem(destination), chooseDestination: async () => destination,
+  });
+  try {
+    let pkg = value(await app.operations.createYear(2024));
+    pkg = value(await app.operations.createActivity({
+      packageId: pkg.id, expectedRevision: pkg.contentRevision, title: 'Keep original evidence',
+    }));
+    const imported = value(await app.operations.importEvidence({
+      packageId: pkg.id, activityId: pkg.activities[0].id, expectedRevision: pkg.contentRevision,
+    }));
+    if (imported.cancelled) throw new Error('Unexpected cancellation.');
+    const evidenceDirectory = resolve(data, 'dataset/evidence/2024');
+    const managed = resolve(evidenceDirectory, readdirSync(evidenceDirectory)[0]);
+    const linkedDirectory = resolve(root, 'linked-storage');
+    const linkedFile = resolve(root, 'linked-evidence.pdf');
+    symlinkSync(evidenceDirectory, linkedDirectory);
+    symlinkSync(managed, linkedFile);
+    for (const target of [managed, resolve(linkedDirectory, 'forms.pdf'), linkedFile]) {
+      destination = target;
+      expect(await app.operations.exportForms({ packageId: pkg.id, confirmDraft: true })).toMatchObject({
+        ok: false, error: { code: 'VALIDATION' },
+      });
+      expect(readFileSync(managed)).toEqual(original);
+      expect(value(await app.operations.getEvidence(pkg.id))).toMatchObject([{ integrity: 'readable' }]);
+    }
+    expect(existsSync(resolve(evidenceDirectory, 'forms.pdf'))).toBe(false);
+  } finally { app.close(); }
+});
 async function text(pdf: PDFDocumentProxy, number: number) {
   return (await (await pdf.getPage(number)).getTextContent()).items.flatMap(item => 'str' in item ? [item.str] : []).join(' ');
 }
@@ -70,7 +106,7 @@ async function inspectLayout(pdf: PDFDocumentProxy, number: number, source: Awai
 test('empty drafts require acknowledgement then export a real flattened checklist, SAT and PDP with independent dates', async () => {
   const root = storage();
   const destination = resolve(root, 'draft.pdf');
-  const app = openApplication(root, { today: () => '2026-10-31' }, undefined, undefined, formsSystem(destination));
+  const app = openApplication(resolve(root, 'storage'), { today: () => '2026-10-31' }, undefined, undefined, formsSystem(destination));
   try {
     let pkg = value(await app.operations.createYear(2024));
     pkg = value(await app.operations.saveDraft({
@@ -109,7 +145,7 @@ test('annual narratives and shared/supplementary activities appear once with sta
   const destination = resolve(root, 'annual.pdf');
   const evidenceFile = resolve(root, 'présence.txt');
   writeFileSync(evidenceFile, 'Original evidence bytes, not an embedded PDF attachment.');
-  const app = openApplication(root, { today: () => '2026-10-31' },
+  const app = openApplication(resolve(root, 'storage'), { today: () => '2026-10-31' },
     { openExternal: async () => {}, readDocument: () => new Uint8Array() },
     { chooseFile: async () => evidenceFile, openPath: async () => '' }, formsSystem(destination));
   try {
@@ -209,7 +245,7 @@ test('annual narratives and shared/supplementary activities appear once with sta
 test('long words and URLs wrap completely within the measured source fields at 10 pt', async () => {
   const root = storage();
   const destination = resolve(root, 'wrapped.pdf');
-  const app = openApplication(root, {}, undefined, undefined, formsSystem(destination));
+  const app = openApplication(resolve(root, 'storage'), {}, undefined, undefined, formsSystem(destination));
   try {
     let pkg = value(await app.operations.createYear(2024));
     const narrative = `Début ${'AbCdEf'.repeat(18)} fin.`;
@@ -277,7 +313,7 @@ function narrative(lines: { str: string }[]) {
 test('SAT continuations carry each full annual narrative and goal once at readable size in the original layout', async () => {
   const root = storage();
   const destination = resolve(root, 'sat-stress.pdf');
-  const app = openApplication(root, {}, undefined, undefined, formsSystem(destination));
+  const app = openApplication(resolve(root, 'storage'), {}, undefined, undefined, formsSystem(destination));
   const strengths = Array.from({ length: 28 }, (_, n) => `Force${n}: café, écoute — “précision”.`).join('\n\n');
   const feedback = `Une seule voix.\n\ncafe\u0301; e\u0301coute; office, affinité.\n${'À bientôt; progrès! '.repeat(110)}FIN-AVIS`;
   const needs = `Besoin initial.\n\nhttps://example.org/${'AbCdÉf'.repeat(95)}\n${'MotIninterrompu'.repeat(32)}\nFIN-BESOINS`;
@@ -345,7 +381,7 @@ test('PDP continuations keep uneven activity, evidence and reflection columns on
   const destination = resolve(root, 'pdp-stress.pdf');
   const evidenceFile = resolve(root, 'attestation-présence.txt');
   writeFileSync(evidenceFile, 'Exact managed evidence bytes.');
-  const app = openApplication(root, { today: () => '2026-10-31' }, undefined,
+  const app = openApplication(resolve(root, 'storage'), { today: () => '2026-10-31' }, undefined,
     { chooseFile: async () => evidenceFile, openPath: async () => '' }, formsSystem(destination));
   const url = `https://example.org/${'UrlÉnormeSansSéparateur'.repeat(60)}`;
   const inputs = Array.from({ length: 12 }, (_, index) => ({
@@ -443,7 +479,7 @@ test('unsupported glyphs fail explicitly without silently changing the narrative
   const root = storage();
   const destination = resolve(root, 'existing.pdf');
   writeFileSync(destination, 'Previous complete export');
-  const app = openApplication(root, {}, undefined, undefined, formsSystem(destination));
+  const app = openApplication(resolve(root, 'storage'), {}, undefined, undefined, formsSystem(destination));
   try {
     let pkg = value(await app.operations.createYear(2024));
     pkg = value(await app.operations.saveDraft({
@@ -465,7 +501,7 @@ test('an export captures assessment, review and evidence synchronously before it
   const chooser = new Promise<string>(resolve => { release = resolve; });
   const evidenceFile = resolve(root, 'original.txt');
   writeFileSync(evidenceFile, 'snapshot evidence');
-  const app = openApplication(root, {}, undefined,
+  const app = openApplication(resolve(root, 'storage'), {}, undefined,
     { chooseFile: async () => evidenceFile, openPath: async () => '' },
     { ...formsSystem(destination), chooseDestination: () => chooser });
   try {
@@ -512,7 +548,7 @@ test('destination cancellation, missing templates and failed publication never r
   let selected: string | null = null;
   let brokenTemplate = false;
   let failedDialog = false;
-  const app = openApplication(root, {}, undefined, undefined, {
+  const app = openApplication(resolve(root, 'storage'), {}, undefined, undefined, {
     ...formsSystem(destination),
     chooseDestination: async () => {
       if (failedDialog) throw new Error('Destination dialog unavailable');

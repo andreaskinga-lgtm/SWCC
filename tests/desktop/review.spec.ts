@@ -70,6 +70,26 @@ async function goTo(number: number, active = true) {
   await page.getByLabel('Physical PDF page', { exact: true }).press('Enter');
   await expect(page.getByRole('img', { name: `Supplied Code of Ethics, physical page ${number}`, exact: true })).toBeVisible();
 }
+for (const rejected of [false, true]) test(`reader activation ${rejected ? 'rejection' : 'failed Result'} is visible and retry resumes actual viewport tracking`, async () => {
+  await desktop.evaluate(({ ipcMain }, rejectQuery) => {
+    ipcMain.removeHandler('swcc:reader-active');
+    ipcMain.handle('swcc:reader-active', () => {
+      if (rejectQuery) throw new Error('activation connection interrupted');
+      return { ok: false, error: { code: 'IPC', message: 'activation connection interrupted' } };
+    });
+  }, rejected);
+  await goTo(4, false);
+  await expect(page.getByRole('alert')).toContainText(rejected ? 'The desktop connection failed' : 'activation connection interrupted');
+  expect((await review()).visitedPages).not.toContain(4);
+  await desktop.evaluate(({ ipcMain, BrowserWindow }) => {
+    ipcMain.removeHandler('swcc:reader-active');
+    ipcMain.handle('swcc:reader-active', () => ({ ok: true, value: BrowserWindow.getAllWindows()[0].isFocused() }));
+  });
+  await page.getByRole('button', { name: 'Retry review tracking', exact: true }).click();
+  await expect.poll(async () => (await review()).visitedPages).toContain(4);
+  await expect(page.getByRole('button', { name: 'Retry review tracking', exact: true })).toHaveCount(0);
+});
+
 test('local real PDF display checks only visited pages; jumps, years and restart retain honest progress', async () => {
   const remoteRequests: string[] = [];
   page.on('request', request => { if (/^https?:/.test(request.url())) remoteRequests.push(request.url()); });
