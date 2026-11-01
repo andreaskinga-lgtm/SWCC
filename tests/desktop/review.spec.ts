@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { dismissActionFeedback, expectActionFeedback } from './feedback-helpers.js';
 
 let desktop: ElectronApplication;
 let page: Page;
@@ -231,7 +232,8 @@ test('browser failure stays unchecked; explicit main-process launch and reset pe
     shell.openExternal = async () => { throw new Error('Default browser association missing'); };
   });
   await page.getByRole('button', { name: 'Open resources', exact: true }).click();
-  await expect(page.getByRole('alert')).toContainText('Default browser association missing');
+  await expectActionFeedback(page, 'Default browser association missing');
+  await dismissActionFeedback(page);
   expect((await review()).resourcesLaunchedAt).toBeNull();
   await desktop.evaluate(({ shell }) => {
     shell.openExternal = async (url: string) => {

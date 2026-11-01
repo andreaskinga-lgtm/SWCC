@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Result } from '../shared/application.js';
+import { useActionFeedback } from './action-feedback.js';
 
 export interface ProgressMonitor {
   error: string | null;
@@ -39,9 +40,22 @@ export function useProgressMonitor<T>(
 }
 
 export function ProgressFailure({ monitor, label }: { monitor: ProgressMonitor; label: string }) {
-  return monitor.error && <section className="goal-validation" role="alert">
-    <p>Progress is unavailable: {monitor.error}</p>
-    <p>The operation may still be running. Retry monitoring without starting another operation, or wait for its final result.</p>
-    <button type="button" className="secondary" onClick={monitor.retry}>Retry {label} progress</button>
-  </section>;
+  const { showFeedback } = useActionFeedback();
+  const reported = useRef<string | null>(null);
+  useEffect(() => {
+    if (!monitor.error) {
+      reported.current = null;
+      return;
+    }
+    if (reported.current === monitor.error) return;
+    reported.current = monitor.error;
+    const operation = label[0].toUpperCase() + label.slice(1);
+    showFeedback({
+      title: `${operation} progress unavailable`,
+      message: `Progress is unavailable: ${monitor.error} The operation may still be running. Retry monitoring without starting another operation, or wait for its final result.`,
+      kind: 'error',
+      action: { label: `Retry ${label} progress`, onClick: monitor.retry },
+    });
+  }, [label, monitor.error, monitor.retry, showFeedback]);
+  return null;
 }

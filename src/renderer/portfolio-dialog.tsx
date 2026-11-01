@@ -15,9 +15,9 @@ const phaseLabels: Record<PortfolioProgress['phase'], string> = {
   publishing: 'Publishing the complete portfolio ZIP.',
 };
 
-export function PortfolioExportDialog({ pkg, workflow, busy, running, progress, error, exportPortfolio, cancel, close, monitor }: {
+export function PortfolioExportDialog({ pkg, workflow, busy, running, progress, exportPortfolio, cancel, close, monitor }: {
   pkg: YearPackage; workflow: AnnualWorkflow; busy: boolean; running: boolean; progress: PortfolioProgress;
-  error: string | null; exportPortfolio: (draft: boolean) => void; cancel: () => void; close: () => void;
+  exportPortfolio: (draft: boolean) => void; cancel: () => void; close: () => void;
   monitor: ProgressMonitor;
 }) {
   const missing = formsExportWarnings(pkg, workflow);
@@ -31,7 +31,6 @@ export function PortfolioExportDialog({ pkg, workflow, busy, running, progress, 
       <ul>{missing.map(item => <li key={item}>{item}</li>)}</ul>
     </section>}
     <ProgressFailure monitor={monitor} label="portfolio" />
-    {error && <p className="goal-validation" role="alert">{error}</p>}
     {running && <section className="backup-progress" role="status" aria-label="Portfolio export progress">
       <p>{phaseLabels[progress.phase]}</p>
       <p>Editing and deletion are temporarily paused to keep records and evidence consistent. Only a completely written archive is published.</p>

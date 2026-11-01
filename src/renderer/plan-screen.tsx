@@ -8,6 +8,7 @@ import { currentCompletion } from '../shared/workflow.js';
 import type { DraftSession } from './draft-session.js';
 import { DateField, Dialog, GoalCreateDialog, GoalDeleteDialog } from './assessment-screen.js';
 import { EvidencePreviewDialog } from './EvidencePreview.js';
+import { useActionFeedback } from './action-feedback.js';
 import './plan.css';
 
 export function PlanReadinessPanel({ pkg, readableEvidenceActivityIds = new Set<string>(), complete, busy }: {
@@ -84,10 +85,8 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
   onDeleted: (activityId: string | null) => void; reportError: (message: string) => void;
   flushEdits: () => Promise<void>;
 }) {
+  const { showFeedback } = useActionFeedback();
   const [linksText, setLinksText] = useState(activity.evidenceLinks.join('\n'));
-  const [openError, setOpenError] = useState('');
-  const [evidenceOpenError, setEvidenceOpenError] = useState<{ id: string; message: string } | null>(null);
-  const [fileActionError, setFileActionError] = useState('');
   const [fileBusy, setFileBusy] = useState(false);
   const [preview, setPreview] = useState<EvidencePreview | null>(null);
   const [removing, setRemoving] = useState<EvidenceAttachment | null>(null);
@@ -119,16 +118,28 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
       setFallbackCalendarOpen(true);
     }
   }, [activity.id, activity.completionDate, activity.status]);
+  function reportActionFailure(title: string, failure: unknown, action?: { label: string; onClick: () => void }) {
+    const snapshot = session.getSnapshot();
+    if (snapshot.error || snapshot.record?.activities.some(item => activityDateError(item))) return;
+    showFeedback({
+      title,
+      message: failure instanceof Error ? failure.message : String(failure),
+      kind: 'error',
+      ...(action ? { action } : {}),
+    });
+  }
   async function openLink(url: string) {
-    setOpenError('');
     try {
       await flushEdits();
       const result = await operations.openEvidenceLink({ packageId: pkg.id, activityId: activity.id, url });
       if (!result.ok) throw new Error(result.error.message);
-    } catch (failure) { setOpenError(failure instanceof Error ? failure.message : String(failure)); }
+    } catch (failure) {
+      reportActionFailure('Could not open evidence link', failure, {
+        label: 'Try opening link again', onClick: () => void openLink(url),
+      });
+    }
   }
   async function chooseEvidence(evidenceId?: string) {
-    setFileActionError('');
     setFileBusy(true);
     try {
       await flushEdits();
@@ -152,7 +163,10 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
         await refreshEvidence();
       });
     } catch (failure) {
-      setFileActionError(failure instanceof Error ? failure.message : String(failure));
+      reportActionFailure(evidenceId ? 'Could not replace evidence file' : 'Could not import evidence file', failure, {
+        label: evidenceId ? 'Choose another file' : 'Choose an evidence file',
+        onClick: () => void chooseEvidence(evidenceId),
+      });
     } finally { setFileBusy(false); }
   }
   async function removeEvidence() {
@@ -217,7 +231,6 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
     } finally { setDeleteBusy(false); }
   }
   async function showPreview(entry: EvidenceAttachment) {
-    setFileActionError('');
     setFileBusy(true);
     try {
       await flushEdits();
@@ -225,27 +238,30 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
       if (!result.ok) throw new Error(result.error.message);
       setPreview(result.value);
     } catch (failure) {
-      setFileActionError(failure instanceof Error ? failure.message : String(failure));
+      reportActionFailure(`Could not preview ${entry.ref}`, failure, {
+        label: `Retry preview ${entry.ref}`, onClick: () => void showPreview(entry),
+      });
     } finally { setFileBusy(false); }
   }
   async function openDocument(entry: EvidenceAttachment) {
-    setEvidenceOpenError(null);
     setFileBusy(true);
     try {
       await flushEdits();
       const result = await operations.openEvidence({ packageId: pkg.id, activityId: activity.id, evidenceId: entry.id });
       if (!result.ok) throw new Error(result.error.message);
     } catch (failure) {
-      setEvidenceOpenError({
-        id: entry.id,
-        message: failure instanceof Error ? failure.message : String(failure),
+      reportActionFailure(`Could not open ${entry.ref}`, failure, {
+        label: `Try opening ${entry.ref} again`, onClick: () => void openDocument(entry),
       });
     } finally { setFileBusy(false); }
   }
   async function recheckEvidence() {
-    setFileActionError('');
     try { await flushEdits(); await refreshEvidence(); }
-    catch (failure) { setFileActionError(failure instanceof Error ? failure.message : String(failure)); }
+    catch (failure) {
+      reportActionFailure('Could not check evidence integrity', failure, {
+        label: 'Check file integrity again', onClick: () => void recheckEvidence(),
+      });
+    }
   }
   return <article className="activity-editor" aria-label={`Activity editor ${activity.ref}`}>
     <div className="activity-editor-header"><span className="goal-reference">{activity.ref}</span><small>One record · all linked goals</small>
@@ -310,7 +326,6 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
         : <small className="goal-validation">Enter a valid HTTP or HTTPS link.</small>}
     </li>)}</ul>
     <small className="quiet">Opening a link needs internet to view its website. A successful launch does not verify loading or reading.</small>
-    {openError && <p role="alert" className="goal-validation">{openError}</p>}
     <section className="managed-evidence" aria-labelledby={`managed-evidence-title-${activity.id}`}>
       <div className="managed-evidence-heading"><div><h3 id={`managed-evidence-title-${activity.id}`}>Attached evidence files</h3>
         <p>Optional files are copied into SWCC storage. Supported types are PDF, images, and common office/text documents; maximum 50 MiB each.</p></div>
@@ -318,7 +333,6 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
       </div>
       <button type="button" className="text-button evidence-recheck" disabled={fileBusy} onClick={() => void recheckEvidence()}>Check file integrity</button>
       {evidenceError && <div role="alert" className="goal-validation">Evidence integrity could not be checked: {evidenceError}</div>}
-      {fileActionError && <p role="alert" className="goal-validation">{fileActionError}</p>}
       {!evidenceLoaded && !evidenceError && <p role="status" className="quiet">Checking attached evidence…</p>}
       {evidenceLoaded && !attached.length && <p className="quiet">No file evidence is attached to this activity yet.</p>}
       {attached.map(entry => {
@@ -334,7 +348,6 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
             {previewable ? <button type="button" disabled={fileBusy} onClick={() => void showPreview(entry)}>Preview {entry.ref}</button>
               : <button type="button" disabled={fileBusy} onClick={() => void openDocument(entry)}>Open {entry.ref} in installed app</button>}
           </div>}
-          {evidenceOpenError?.id === entry.id && <p role="alert" className="evidence-integrity-error">{evidenceOpenError.message}</p>}
           <div className="managed-evidence-actions">
             <button type="button" className="secondary" disabled={fileBusy} onClick={() => void chooseEvidence(entry.id)}>Replace {entry.ref}</button>
             <button type="button" className="text-button" disabled={fileBusy} onClick={() => { setRemoving(entry); setRemoveError(''); }}>Remove {entry.ref}</button>

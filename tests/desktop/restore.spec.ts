@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
+import { dismissActionFeedback, expectActionFeedback } from './feedback-helpers.js';
 
 let desktop: ElectronApplication;
 let page: Page;
@@ -41,6 +42,10 @@ async function chooseArchive(path: string | null) {
     dialog.showOpenDialog = async () => ({ canceled: !path, filePaths: path ? [path] : [] });
   }, path);
 }
+async function expectDismissedFeedback(message: string) {
+  await expectActionFeedback(page, message);
+  await dismissActionFeedback(page);
+}
 function storageFailure(failing: boolean | string) {
   const executable = createRequire(import.meta.url)('electron') as string;
   const result = spawnSync(executable, ['tests/desktop/storage-fixture.mjs', resolve(root, 'dataset/database.sqlite'), String(failing)], {
@@ -56,7 +61,7 @@ function storageFailure(failing: boolean | string) {
       dialog.showSaveDialog = async () => ({ canceled: false, filePath: path });
     }, archive);
     await page.getByRole('button', { name: 'Create full backup', exact: true }).click();
-    await expect(page.locator('.operation-feedback')).toContainText('Full backup saved');
+    await expectDismissedFeedback('Full backup saved');
     await navigate('All years');
     await page.getByLabel('New package year').fill('2026');
     await page.getByLabel('New package year').press('Enter');
@@ -119,10 +124,11 @@ function storageFailure(failing: boolean | string) {
       expect(await page.evaluate(() => window.swcc.createYear(2027))).toMatchObject({ ok: false, error: { code: 'BUSY' } });
       expect(await page.evaluate(() => window.swcc.cancelRestorePreview())).toMatchObject({ ok: false, error: { code: 'BUSY' } });
       await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
-      await expect(page.locator('.error-panel')).toContainText('Dataset replacement is still running');
+      await expectActionFeedback(page, 'Dataset replacement is still running');
       expect(desktop.windows().length).toBe(1);
+      await dismissActionFeedback(page);
     } finally { await releaseProtectiveWrite(); }
-    await expect(page.locator('.operation-feedback')).toContainText('All years restored');
+    await expectDismissedFeedback('All years restored');
     await expect(page.getByRole('dialog')).toHaveCount(0);
     expect(desktop.windows().length).toBe(1);
     await expect(page.locator('.error-panel')).toHaveCount(0);
@@ -134,20 +140,25 @@ function storageFailure(failing: boolean | string) {
     await protectiveWrite('fail');
     try {
       await page.getByRole('dialog').getByRole('button', { name: 'Replace all years', exact: true }).click();
-      await expect(page.getByRole('alert')).toContainText('Injected protective output failure');
-      await expect(page.getByRole('alert')).toContainText('current dataset remains usable');
-      await expect(page.locator('.operation-feedback')).toHaveCount(0);
+      const failure = await expectActionFeedback(page, 'Injected protective output failure');
+      await expect(failure.getByRole('alert')).toContainText('current dataset remains usable');
+      await dismissActionFeedback(page);
+      await expect(page.locator('.action-feedback-dialog')).toBeHidden();
+      await expect(page.getByRole('dialog', { name: 'Preview full-app restore' })).toHaveCount(0);
       expect(await page.evaluate(() => window.swcc.getState())).toEqual(before);
     } finally { await releaseProtectiveWrite(); }
     await chooseArchive(resolve(output, 'transaction.swcc-backup.zip'));
     await page.getByRole('button', { name: 'Preview full backup', exact: true }).click();
-    await page.getByRole('dialog').getByRole('button', { name: 'Replace all years', exact: true }).click();
-    await expect(page.locator('.operation-feedback')).toContainText('All years restored');
+    const preview = page.getByRole('dialog', { name: 'Preview full-app restore' });
+    await expect(preview).toBeVisible();
+    await preview.getByRole('button', { name: 'Replace all years', exact: true }).click();
+    await expectDismissedFeedback('All years restored');
   });
 
   test('actual desktop startup reads an interrupted replacement journal first and explains recovered prior years', async () => {
     const archive = await replacementPreview();
     await page.getByRole('dialog').getByRole('button', { name: 'Cancel, keep current data' }).click();
+    await expectDismissedFeedback('Backup inspection cancelled');
     await desktop.close();
     const executable = createRequire(import.meta.url)('electron') as string;
     const killed = spawnSync(executable, ['tests/restore-process.mjs', root, archive, 'replace', 'replacement-moved'], {
@@ -157,7 +168,8 @@ function storageFailure(failing: boolean | string) {
     desktop = await electron.launch({ args: ['.', `--user-data-dir=${root}`], env: { ...process.env, ELECTRON_RUN_AS_NODE: '' } });
     page = await desktop.firstWindow();
     await page.context().setOffline(true);
-    await expect(page.locator('.operation-feedback')).toContainText('prior usable dataset has been recovered');
+    await expectActionFeedback(page, 'prior usable dataset has been recovered');
+    await dismissActionFeedback(page);
     await navigate('All years');
     await expect(page.getByRole('button', { name: 'Open 2026' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Open 2024' })).toBeVisible();
@@ -179,7 +191,7 @@ function storageFailure(failing: boolean | string) {
     await navigate('Backup and restore');
     await chooseArchive(null);
     await page.getByRole('button', { name: 'Preview full backup', exact: true }).click();
-    await expect(page.locator('.operation-feedback')).toContainText('Inspection cancelled');
+    await expectDismissedFeedback('Backup inspection cancelled');
   });
 test('the real C renderer previews a genuine backup, shows replacement counts and cancels without restoring', async () => {
   const archive = resolve(output, 'actual.swcc-backup.zip');
@@ -211,7 +223,7 @@ test('the real C renderer previews a genuine backup, shows replacement counts an
     dialog.showSaveDialog = async () => ({ canceled: false, filePath: path });
   }, archive);
   await page.getByRole('button', { name: 'Create full backup', exact: true }).click();
-  await expect(page.locator('.operation-feedback')).toContainText('Full backup saved');
+  await expectDismissedFeedback('Full backup saved');
   await navigate('All years');
   await page.getByLabel('New package year').fill('2025');
   await page.getByLabel('New package year').press('Enter');
@@ -233,7 +245,7 @@ test('the real C renderer previews a genuine backup, shows replacement counts an
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await dialog.getByRole('button', { name: 'Cancel, keep current data' }).click();
   await expect(dialog).toHaveCount(0);
-  await expect(page.locator('.operation-feedback')).toContainText('Inspection cancelled');
+  await expectDismissedFeedback('Backup inspection cancelled');
   expect(readdirSync(resolve(root, 'restore-staging'))).toEqual([]);
   expect(await page.evaluate(() => window.swcc.getState())).toEqual(before);
   await navigate('All years');
@@ -251,7 +263,7 @@ test('explicit keyboard confirmation replaces the real dataset and refreshes the
     dialog.showSaveDialog = async () => ({ canceled: false, filePath: path });
   }, archive);
   await page.getByRole('button', { name: 'Create full backup', exact: true }).click();
-  await expect(page.locator('.operation-feedback')).toContainText('Full backup saved');
+  await expectDismissedFeedback('Full backup saved');
   await navigate('All years');
   await page.getByLabel('New package year').fill('2026');
   await page.getByLabel('New package year').press('Enter');
@@ -263,7 +275,7 @@ test('explicit keyboard confirmation replaces the real dataset and refreshes the
   const confirm = dialog.getByRole('button', { name: 'Replace all years', exact: true });
   await confirm.focus();
   await page.keyboard.press('Enter');
-  await expect(page.locator('.operation-feedback')).toContainText('All years restored');
+  await expectDismissedFeedback('All years restored');
   await expect(dialog).toHaveCount(0);
   await expect(page.getByRole('status', { name: 'Backup status' })).toContainText('No successful full backup');
   expect(readdirSync(resolve(root, 'restore-recovery')).length).toBe(1);
@@ -292,7 +304,7 @@ test('a real fresh installation confirms and restores a populated backup using a
   const dialog = page.getByRole('dialog');
   await expect(dialog.locator('.restore-compare section').nth(1)).toContainText('Years: None');
   await dialog.getByRole('button', { name: 'Replace all years', exact: true }).click();
-  await expect(page.locator('.operation-feedback')).toContainText('All years restored');
+  await expectDismissedFeedback('All years restored');
   await navigate('All years');
   await expect(page.getByRole('button', { name: 'Open 2024' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Open 2026' })).toHaveCount(0);
@@ -305,7 +317,7 @@ test('restoring the same selected ID refreshes both writing and remembered reade
   await navigate('Backup and restore');
   await desktop.evaluate(({ dialog }, path) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: path }); }, archive);
   await page.getByRole('button', { name: 'Create full backup', exact: true }).click();
-  await expect(page.locator('.operation-feedback')).toContainText('Full backup saved');
+  await expectDismissedFeedback('Full backup saved');
   await navigate('Self-assessment');
   await page.getByLabel('Strengths').fill('Current same-ID strengths to replace');
   await navigate('Review');
@@ -316,7 +328,7 @@ test('restoring the same selected ID refreshes both writing and remembered reade
   await chooseArchive(archive);
   await page.getByRole('button', { name: 'Preview full backup', exact: true }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Replace all years', exact: true }).click();
-  await expect(page.locator('.operation-feedback')).toContainText('All years restored');
+  await expectDismissedFeedback('All years restored');
   await navigate('Self-assessment');
   await expect(page.getByLabel('Strengths')).toHaveValue('Archived same-ID strengths');
   await navigate('Review');
@@ -338,7 +350,7 @@ test('failed real draft flush blocks inspection navigation and keeps the pending
   const before = await page.evaluate(() => window.swcc.getState());
   await chooseArchive(null);
   await page.getByRole('button', { name: 'Preview full backup', exact: true }).click();
-  await expect(page.locator('.operation-feedback')).toContainText('Inspection cancelled');
+  await expectDismissedFeedback('Backup inspection cancelled');
   expect(await page.evaluate(() => window.swcc.getState())).toEqual(before);
 });
 
@@ -349,10 +361,12 @@ test('inspection errors remain actionable without a restoration-shaped success o
   const before = await page.evaluate(() => window.swcc.getState());
   await chooseArchive(invalid);
   await page.getByRole('button', { name: 'Preview full backup', exact: true }).click();
-  await expect(page.getByRole('alert')).toContainText('Backup inspection failed');
+  const inspectionFailure = await expectActionFeedback(page, 'Backup inspection failed');
+  await expect(inspectionFailure.getByRole('alert')).toContainText('Backup inspection failed');
+  await dismissActionFeedback(page);
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.getByRole('status', { name: 'Backup status' })).toContainText('No successful full backup');
-  await expect(page.locator('.operation-feedback')).toHaveCount(0);
+  await expect(page.locator('.action-feedback-dialog')).toBeHidden();
   expect(await page.evaluate(() => window.swcc.getState())).toEqual(before);
   await expect(page.getByRole('button', { name: 'Preview full backup', exact: true })).toBeEnabled();
 });
@@ -371,12 +385,13 @@ test('real inspection progress protects edits and close while choosing an archiv
   await expect(page.getByRole('navigation').getByRole('button', { name: 'All years', exact: true })).toBeDisabled();
   expect(await page.evaluate(() => window.swcc.createYear(2025))).toMatchObject({ ok: false, error: { code: 'BUSY' } });
   await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
-  await expect(page.getByRole('alert')).toContainText('inspection is still running');
+  await expectActionFeedback(page, 'inspection is still running');
+  await dismissActionFeedback(page);
   expect(desktop.windows().length).toBe(1);
   await desktop.evaluate(() => {
     (globalThis as typeof globalThis & { cancelInspectionDialog: () => void }).cancelInspectionDialog();
   });
-  await expect(page.locator('.operation-feedback')).toContainText('Inspection cancelled');
+  await expectDismissedFeedback('Backup inspection cancelled');
   await expect(page.getByRole('status', { name: 'Inspection progress' })).toHaveCount(0);
   await expect(page.getByRole('alert')).toHaveCount(0);
   expect(await page.evaluate(() => window.swcc.getState())).toEqual(before);

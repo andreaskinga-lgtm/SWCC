@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { BookOpen, ClipboardList, Home, Layers, HardDrive, Sprout, Network } from 'lucide-react';
-import type { AppState, DesktopOperations, EvidenceAttachment, OperationError, Result } from '../shared/application.js';
+import type { AppState, DesktopOperations, EvidenceAttachment, Result } from '../shared/application.js';
 import { localDate } from '../shared/application.js';
 import { hasSubstantiveAssessmentContent } from '../shared/assessment.js';
+import { activityDateError } from '../shared/plan.js';
 import { DraftSession } from './draft-session.js';
 import { AssessmentScreen, Dialog } from './assessment-screen.js';
 import { PlanScreen } from './plan-screen.js';
@@ -18,6 +19,7 @@ import { PortfolioExportDialog } from './portfolio-dialog.js';
 import type { RestorePreview, RestoreProgress } from '../shared/restore.js';
 import { RestorePreviewDialog } from './backup-screen.js';
 import { useProgressMonitor } from './operation-progress.js';
+import { useActionFeedback } from './action-feedback.js';
 
 type Screen = 'years' | 'overview' | 'assessment' | 'plan' | 'review' | 'backup';
 function unwrap<T>(result: Result<T>): T {
@@ -34,6 +36,7 @@ const destinations = [
 ] as const;
 
 export function App({ operations }: { operations: DesktopOperations }) {
+  const { showFeedback } = useActionFeedback();
   const [session] = useState(() => new DraftSession(operations));
   const [reviewSession] = useState(() => new ReviewSession(operations));
   const flushEdits = useCallback(async () => {
@@ -45,7 +48,6 @@ export function App({ operations }: { operations: DesktopOperations }) {
   const [screen, setScreen] = useState<Screen>('years');
   const [year, setYear] = useState(localDate().slice(0, 4));
   const [error, setError] = useState<string | null>(null);
-  const [duplicate, setDuplicate] = useState<OperationError | null>(null);
   const [busy, setBusy] = useState(false);
   const [backupRunning, setBackupRunning] = useState(false);
   const [backupProgress, setBackupProgress] = useState<BackupProgress>({
@@ -60,7 +62,6 @@ export function App({ operations }: { operations: DesktopOperations }) {
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
   const [recordRequested, setRecordRequested] = useState(false);
   const [deletingYear, setDeletingYear] = useState<{ id: string; year: number } | null>(null);
-  const [yearDeleteError, setYearDeleteError] = useState<string | null>(null);
   const [declaring, setDeclaring] = useState(false);
   const [showFormsExport, setShowFormsExport] = useState(false);
   const [showPortfolioExport, setShowPortfolioExport] = useState(false);
@@ -68,11 +69,12 @@ export function App({ operations }: { operations: DesktopOperations }) {
   const [portfolioProgress, setPortfolioProgress] = useState<PortfolioProgress>({
     phase: 'idle', filesCompleted: 0, filesTotal: 0, bytesCompleted: 0, bytesTotal: 0,
   });
-  const [exportError, setExportError] = useState<string | null>(null);
-  const [feedback, setFeedback] = useState('');
   const [evidenceByPackage, setEvidenceByPackage] = useState<Record<string, EvidenceAttachment[]>>({});
   const [evidenceErrors, setEvidenceErrors] = useState<Record<string, string>>({});
   const pkg = draft.record;
+  function hasInvalidActivityDate() {
+    return Boolean(session.getSnapshot().record?.activities.some(activity => activityDateError(activity)));
+  }
   const packageEvidence = pkg ? evidenceByPackage[pkg.id] ?? [] : [];
   const readableEvidenceActivityIds = new Set(packageEvidence
     .filter(entry => entry.integrity === 'readable').map(entry => entry.activityId));
@@ -88,18 +90,33 @@ export function App({ operations }: { operations: DesktopOperations }) {
   }, [pkg?.id, reviewSession]);
   useEffect(() => {
     void operations.getState().then(result => {
-      if (!result.ok) { setError(result.error.message); return; }
+      if (!result.ok) {
+        setError(result.error.message);
+        showFeedback({ title: 'Local records are unavailable', message: result.error.message, kind: 'error' });
+        return;
+      }
       setState(result.value);
-      if (result.value.recoveryNotice) setFeedback(result.value.recoveryNotice);
+      if (result.value.recoveryNotice) showFeedback({
+        title: 'Local records were recovered',
+        message: result.value.recoveryNotice,
+        kind: 'info',
+      });
       session.open(result.value.selectedPackage);
       if (result.value.selectedPackage) setScreen('overview');
-    }).catch(() => setError('Cannot connect to local records. Preserve your storage folder and restart SWCC.'));
+    }).catch(() => {
+      const message = 'Cannot connect to local records. Preserve your storage folder and restart SWCC.';
+      setError(message);
+      showFeedback({ title: 'Local records are unavailable', message, kind: 'error' });
+    });
     return operations.onCloseRequested(() => {
       void flushEdits().then(() => operations.completeClose()).then(result => {
-        if (!result.ok) { setError(result.error.message); setExportError(result.error.message); }
+        if (!result.ok) {
+          setError(result.error.message);
+          showFeedback({ title: 'SWCC could not close safely', message: result.error.message, kind: 'error' });
+        }
       }).catch(() => { /* The session displays the retained edit and retry action. */ });
     });
-  }, [operations, session, reviewSession, flushEdits]);
+  }, [operations, session, reviewSession, flushEdits, showFeedback]);
   useEffect(() => {
     if (!pkg) return;
     let active = true;
@@ -132,9 +149,16 @@ export function App({ operations }: { operations: DesktopOperations }) {
     if (busy) return;
     setBusy(true);
     setError(null);
-    setFeedback('');
     try { await flushEdits(); await work(); }
-    catch (failure) { if (!session.getSnapshot().error && !reviewSession.getSnapshot().error) setError(failure instanceof Error ? failure.message : String(failure)); }
+    catch (failure) {
+      if (!session.getSnapshot().error && !reviewSession.getSnapshot().error && !hasInvalidActivityDate()) {
+        const message = failure instanceof Error ? failure.message : String(failure);
+        setError(message);
+        showFeedback({ title: 'Action could not be completed', message, kind: 'error' });
+      } else if (!session.getSnapshot().error && !reviewSession.getSnapshot().error) {
+        setError(failure instanceof Error ? failure.message : String(failure));
+      }
+    }
     finally { setBusy(false); }
   }
   function backup() {
@@ -145,8 +169,15 @@ export function App({ operations }: { operations: DesktopOperations }) {
         const result = unwrap(await operations.createFullBackup());
         setError(null);
         setState(unwrap(await operations.getState()));
-        setFeedback(result.cancelled ? 'Backup cancelled. The last successful backup is unchanged.'
-          : `Full backup saved: ${result.fileName}. Keep this copy beyond this device.`);
+        showFeedback(result.cancelled ? {
+          title: 'Backup cancelled',
+          message: 'The last successful backup is unchanged.',
+          kind: 'info',
+        } : {
+          title: 'Full backup saved',
+          message: `${result.fileName} is ready. Keep this copy beyond this device.`,
+          kind: 'success',
+        });
       } finally { setBackupRunning(false); }
     });
   }
@@ -157,7 +188,11 @@ export function App({ operations }: { operations: DesktopOperations }) {
       try {
         const outcome = unwrap(await operations.inspectFullBackup());
         setError(null);
-        if (outcome.cancelled) setFeedback('Inspection cancelled. Live records and backup status are unchanged.');
+        if (outcome.cancelled) showFeedback({
+          title: 'Backup inspection cancelled',
+          message: 'Live records and backup status are unchanged.',
+          kind: 'info',
+        });
         else setRestorePreview(outcome.preview);
       } finally {
         const progress = await operations.getRestoreProgress();
@@ -186,7 +221,11 @@ export function App({ operations }: { operations: DesktopOperations }) {
         await reviewSession.open(outcome.state.selectedPackage?.id ?? null);
         if (outcome.state.selectedPackage) await refreshEvidence(outcome.state.selectedPackage.id);
         setError(null);
-        setFeedback(`All years restored and fully validated. Protective backup of your previous data: ${outcome.protectiveBackup}. Create a new full backup beyond this device.${outcome.cleanupWarning ?? ''}`);
+        showFeedback({
+          title: 'All years restored',
+          message: `The restored dataset passed validation. Protective backup of your previous data: ${outcome.protectiveBackup}. Create a new full backup beyond this device.${outcome.cleanupWarning ?? ''}`,
+          kind: 'success',
+        });
       } finally {
         setRestoreRunning(false);
         setRestoreReplacing(false);
@@ -199,7 +238,10 @@ export function App({ operations }: { operations: DesktopOperations }) {
     if (busy && !restoreRunning) return;
     if (restoreRunning) {
       const result = await operations.cancelRestorePreview();
-      if (!result.ok) setError(result.error.message);
+      if (!result.ok) {
+        setError(result.error.message);
+        showFeedback({ title: 'Could not cancel backup inspection', message: result.error.message, kind: 'error' });
+      }
       return;
     }
     setBusy(true);
@@ -208,15 +250,22 @@ export function App({ operations }: { operations: DesktopOperations }) {
       setError(null);
       setRestorePreview(null);
       setRestoreProgress({ phase: 'idle', filesCompleted: 0, filesTotal: 0, bytesCompleted: 0, bytesTotal: 0 });
-      setFeedback('Inspection cancelled. Live records and backup status are unchanged.');
-    } catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
+      showFeedback({
+        title: 'Backup inspection cancelled',
+        message: 'Live records and backup status are unchanged.',
+        kind: 'info',
+      });
+    } catch (failure) {
+      const message = failure instanceof Error ? failure.message : String(failure);
+      setError(message);
+      showFeedback({ title: 'Could not cancel backup inspection', message, kind: 'error' });
+    }
     finally { setBusy(false); }
   }
   function navigate(next: Screen) {
     void run(async () => {
       if (!pkg && !['years', 'backup'].includes(next)) { setScreen('years'); return; }
       if (next === 'years' || next === 'backup') setState(unwrap(await operations.getState()));
-      setDuplicate(null);
       setScreen(next);
     });
   }
@@ -226,24 +275,33 @@ export function App({ operations }: { operations: DesktopOperations }) {
       setSelectedActivityId(null);
       setRecordRequested(false);
       setState(unwrap(await operations.getState()));
-      setDuplicate(null);
       setScreen('overview');
     });
   }
   async function create() {
     await run(async () => {
       const result = await operations.createYear(Number(year));
-      if (!result.ok) { setDuplicate(result.error.code === 'DUPLICATE_YEAR' ? result.error : null); setError(result.error.message); return; }
+      if (!result.ok) {
+        setError(result.error.message);
+        const existingPackageId = result.error.code === 'DUPLICATE_YEAR' ? result.error.existingPackageId : undefined;
+        showFeedback({
+          title: existingPackageId ? 'Year package already exists' : 'Could not create year package',
+          message: result.error.message,
+          kind: 'error',
+          ...(existingPackageId ? {
+            action: { label: 'Open existing package', onClick: () => open(existingPackageId) },
+          } : {}),
+        });
+        return;
+      }
       session.open(result.value);
       setState(unwrap(await operations.getState()));
-      setDuplicate(null);
       setScreen('overview');
     });
   }
   async function deleteYear() {
     if (!deletingYear || busy) return;
     setBusy(true);
-    setYearDeleteError(null);
     try {
       await flushEdits();
       const current = unwrap(await operations.getState());
@@ -264,6 +322,7 @@ export function App({ operations }: { operations: DesktopOperations }) {
             setScreen(refreshed.value.selectedPackage ? 'overview' : 'years');
             setDeletingYear(null);
             setError(result.error.message);
+            showFeedback({ title: 'Year deletion needs attention', message: result.error.message, kind: 'error' });
             return;
           }
         }
@@ -277,7 +336,9 @@ export function App({ operations }: { operations: DesktopOperations }) {
       setDeletingYear(null);
       setScreen(result.value.selectedPackage ? 'overview' : 'years');
     } catch (failure) {
-      setYearDeleteError(failure instanceof Error ? failure.message : String(failure));
+      const message = failure instanceof Error ? failure.message : String(failure);
+      setError(message);
+      showFeedback({ title: 'Could not delete year package', message, kind: 'error' });
     } finally { setBusy(false); }
   }
   function activityEntry(id: string | null) {
@@ -292,13 +353,32 @@ export function App({ operations }: { operations: DesktopOperations }) {
       const current = session.getSnapshot().record;
       if (!current) return;
       const latest = unwrap(await operations.getWorkflow(current.id));
-      const completed = unwrap(await operations.completeStep({
+      const result = await operations.completeStep({
         packageId: current.id, step, expectedRevision: latest.steps[step].relevantRevision,
-      }));
+      });
+      const stepNumber = ANNUAL_STEPS.indexOf(step) + 1;
+      if (!result.ok) {
+        if (result.error.code === 'NOT_READY') {
+          showFeedback({
+            title: `Step ${stepNumber} is not ready`,
+            message: 'This step is not ready for manual completion.',
+            kind: 'error',
+            reasons: result.error.missing ?? [],
+            reasonsLabel: `Step ${stepNumber} readiness reasons`,
+          });
+          return;
+        }
+        throw new Error(result.error.message);
+      }
+      const completed = result.value;
       session.acceptSaved(completed);
       await refreshEvidence(current.id);
       setState(unwrap(await operations.getState()));
-      setFeedback(`Step ${ANNUAL_STEPS.indexOf(step) + 1} manually confirmed. Application completion is not College compliance.`);
+      showFeedback({
+        title: `Step ${stepNumber} completed`,
+        message: 'This step was manually confirmed. Application completion is not College compliance.',
+        kind: 'success',
+      });
     });
   }
   function openDeclaration() {
@@ -322,7 +402,11 @@ export function App({ operations }: { operations: DesktopOperations }) {
       })));
       setState(unwrap(await operations.getState()));
       setDeclaring(false);
-      setFeedback('External submission date recorded. SWCC has not submitted or verified a declaration.');
+      showFeedback({
+        title: 'External submission date recorded',
+        message: 'SWCC has not submitted or verified a declaration.',
+        kind: 'success',
+      });
     } finally { setBusy(false); }
   }
   function openExport(kind: 'forms' | 'portfolio') {
@@ -332,7 +416,6 @@ export function App({ operations }: { operations: DesktopOperations }) {
       session.acceptSaved(unwrap(await operations.openYear(current.id)));
       await reviewSession.open(current.id);
       await refreshEvidence(current.id);
-      setExportError(null);
       setShowFormsExport(kind === 'forms');
       setShowPortfolioExport(kind === 'portfolio');
     });
@@ -340,8 +423,6 @@ export function App({ operations }: { operations: DesktopOperations }) {
   async function exportForms(confirmDraft: boolean) {
     if (busy) return;
     setBusy(true);
-    setExportError(null);
-    setFeedback('');
     try {
       await flushEdits();
       const current = session.getSnapshot().record;
@@ -350,20 +431,27 @@ export function App({ operations }: { operations: DesktopOperations }) {
         packageId: current.id, ...(confirmDraft ? { confirmDraft: true as const } : {}),
       }));
       if (outcome.cancelled) {
-        setFeedback('Forms PDF export cancelled. No output was published.');
+        showFeedback({
+          title: 'Forms PDF export cancelled',
+          message: 'No output was published.',
+          kind: 'info',
+        });
       } else {
         setShowFormsExport(false);
-        setFeedback(`Forms PDF written: ${outcome.fileName} (${outcome.pageCount} pages). This is not a full-app backup.`);
+        showFeedback({
+          title: 'Forms PDF exported',
+          message: `${outcome.fileName} is ready (${outcome.pageCount} pages). This is not a full-app backup.`,
+          kind: 'success',
+        });
       }
     } catch (failure) {
-      setExportError(failure instanceof Error ? failure.message : String(failure));
+      const message = failure instanceof Error ? failure.message : String(failure);
+      showFeedback({ title: 'Forms PDF export failed', message, kind: 'error' });
     } finally { setBusy(false); }
   }
   async function exportPortfolio(confirmDraft: boolean) {
     if (busy) return;
     setBusy(true);
-    setExportError(null);
-    setFeedback('');
     try {
       await flushEdits();
       const current = session.getSnapshot().record;
@@ -374,15 +462,23 @@ export function App({ operations }: { operations: DesktopOperations }) {
         packageId: current.id, ...(confirmDraft ? { confirmDraft: true as const } : {}),
       }));
       setError(null);
-      setExportError(null);
       if (outcome.cancelled) {
-        setFeedback('Portfolio export cancelled. No output was published.');
+        showFeedback({
+          title: 'Portfolio export cancelled',
+          message: 'No output was published.',
+          kind: 'info',
+        });
       } else {
         setShowPortfolioExport(false);
-        setFeedback(`Complete Portfolio ZIP written: ${outcome.fileName} (${outcome.pageCount} forms pages; ${outcome.attachmentCount} original evidence files). This is not a full-app backup.`);
+        showFeedback({
+          title: 'Complete Portfolio ZIP exported',
+          message: `${outcome.fileName} is ready (${outcome.pageCount} forms pages; ${outcome.attachmentCount} original evidence files). This is not a full-app backup.`,
+          kind: 'success',
+        });
       }
     } catch (failure) {
-      setExportError(failure instanceof Error ? failure.message : String(failure));
+      const message = failure instanceof Error ? failure.message : String(failure);
+      showFeedback({ title: 'Portfolio export failed', message, kind: 'error' });
     } finally { setPortfolioRunning(false); setBusy(false); }
   }
   return <div className="map-layout">
@@ -401,25 +497,24 @@ export function App({ operations }: { operations: DesktopOperations }) {
       </select></label>
       <span className={`save-status ${draft.status === 'Not saved' || review.status === 'Not saved' ? 'warning' : ''}`} role="status" aria-label="Save status">{state ? [draft.status, review.status].includes('Not saved') ? 'Not saved' : [draft.status, review.status].includes('Saving') ? 'Saving' : 'Saved' : error ? 'Unavailable' : 'Opening records'}</span>
     </header>
-    <main id="main-content">
+    <main id="main-content" tabIndex={-1}>
       {state && !state.acknowledgedAt && <section className="storage-note" aria-labelledby="local-storage-title">
         <h2 id="local-storage-title">Your records stay on this device.</h2>
         <p>SWCC stores records and evidence under your OS user account. No account or cloud sync. Protect your portfolio with explicit backups; an annual export is not a full backup.</p>
         <p className="storage-path">{state.storageDirectory}</p>
         <button type="button" onClick={() => void run(async () => setState(unwrap(await operations.acknowledgeStorage())))} disabled={busy}>I understand</button>
       </section>}
-      {(error || draft.error) && <section className="error-panel" role="alert">
-        <p>{draft.error || error}</p>
-        {draft.error && <><p>Your unsaved edits remain visible. Navigation and close are blocked until saving succeeds. Copy your text elsewhere if recovery is needed.</p>
-          <button onClick={() => void run(async () => {})} disabled={busy}>Retry save</button></>}
-        {duplicate?.existingPackageId && <button onClick={() => open(duplicate.existingPackageId!)} disabled={busy}>Open existing package</button>}
+      {draft.error && <section className="error-panel" role="alert">
+        <p>{draft.error}</p>
+        <p>Your unsaved edits remain visible. Navigation and close are blocked until saving succeeds. Copy your text elsewhere if recovery is needed.</p>
+        <button onClick={() => void run(async () => {})} disabled={busy}>Retry save</button>
       </section>}
-      {review.error && screen !== 'review' && <section className="error-panel" role="alert"><p>{review.error}</p>
+      {error && hasInvalidActivityDate() && <section className="error-panel" role="alert"><p>{error}</p></section>}
+      {review.error && review.status === 'Not saved' && screen !== 'review' && <section className="error-panel" role="alert"><p>{review.error}</p>
         {review.status === 'Not saved' && <button disabled={busy} onClick={() => void run(async () => {
           if (pkg && !reviewSession.getSnapshot().record) await reviewSession.open(pkg.id);
         })}>Retry review save</button>}
       </section>}
-      {feedback && <p className="operation-feedback" role="status">{feedback}</p>}
       {!state && !error && <p role="status">Opening local records…</p>}
       {screen === 'years' && <><div className="page-heading"><h1>Your year packages</h1><p>One portfolio per calendar year. Earlier years stay open for editing.</p></div>
         <section className="surface">
@@ -431,7 +526,7 @@ export function App({ operations }: { operations: DesktopOperations }) {
           <ul className="year-list">{state?.years.map(row => <li key={row.id}><div><strong>{row.year}</strong><span>{row.status} · application completion</span></div>
             <div className="year-actions"><button disabled={busy} onClick={() => open(row.id)}>Open {row.year}</button>
               <button type="button" className="text-button year-delete" disabled={busy}
-                aria-label={`Delete year ${row.year}`} onClick={() => { setYearDeleteError(null); setDeletingYear(row); }}>Delete</button></div></li>)}</ul>
+                aria-label={`Delete year ${row.year}`} onClick={() => setDeletingYear(row)}>Delete</button></div></li>)}</ul>
         </section></>}
       {screen === 'overview' && pkg && <><div className="page-heading map-heading"><div><h1>Connect learning to practice.</h1><p>Your {pkg.year} goals and the experiences that move them forward.</p></div>
         <button type="button" disabled={busy} onClick={() => activityEntry(null)}>Record an activity</button></div>
@@ -469,36 +564,50 @@ export function App({ operations }: { operations: DesktopOperations }) {
         flushEdits={flushEdits}
         selectedId={selectedActivityId} select={setSelectedActivityId} recordRequested={recordRequested} clearRecordRequest={() => setRecordRequested(false)}
         evidence={packageEvidence} evidenceError={evidenceErrors[pkg.id] ?? ''}
-        evidenceLoaded={Object.hasOwn(evidenceByPackage, pkg.id)} refreshEvidence={() => refreshEvidence(pkg.id)} reportError={setError}
+        evidenceLoaded={Object.hasOwn(evidenceByPackage, pkg.id)} refreshEvidence={() => refreshEvidence(pkg.id)} reportError={message => {
+          if (!session.getSnapshot().error) {
+            setError(message);
+            if (!hasInvalidActivityDate()) showFeedback({ title: 'Activity record needs attention', message, kind: 'error' });
+          }
+        }}
         complete={() => complete('plan')} busy={busy} />}
       {screen === 'review' && pkg && workflow && <Review packageId={pkg.id} year={pkg.year} operations={operations} session={reviewSession}
         feedback={workflow.steps.review} complete={() => complete('review')} busy={busy} />}
       {screen === 'backup' && state && <BackupScreen state={state} busy={busy} running={backupRunning} progress={backupProgress}
         backupMonitor={backupMonitor} restoreMonitor={restoreMonitor}
-        backup={backup} cancel={() => void operations.cancelFullBackup().then(result => { if (!result.ok) setError(result.error.message); })}
+        backup={backup} cancel={() => void operations.cancelFullBackup().then(result => {
+          if (!result.ok) {
+            setError(result.error.message);
+            showFeedback({ title: 'Could not cancel full backup', message: result.error.message, kind: 'error' });
+          }
+        })}
         inspect={inspectBackup} inspecting={restoreRunning} replacing={restoreReplacing} restoreProgress={restoreProgress} cancelInspection={() => void cancelInspection()} />}
-      {restorePreview && <RestorePreviewDialog preview={restorePreview} busy={busy} replacing={restoreReplacing} progress={restoreProgress} error={error}
+      {restorePreview && <RestorePreviewDialog preview={restorePreview} busy={busy} replacing={restoreReplacing} progress={restoreProgress}
         monitor={restoreMonitor}
         replace={replaceBackup} cancel={() => void cancelInspection()} />}
       {deletingYear && <Dialog title={`Delete year ${deletingYear.year}?`} onClose={() => {
-        if (!busy) { setDeletingYear(null); setYearDeleteError(null); }
+        if (!busy) setDeletingYear(null);
       }}>
         <p className="goal-dialog-copy">The supplied guide advises retaining this portfolio for at least 10 years. SWCC keeps year packages indefinitely unless you explicitly delete them. Deleting {deletingYear.year} removes only that year’s records and managed evidence files; it cannot be undone. Retain any copy you may need before continuing.</p>
-        {yearDeleteError && <p role="alert" className="goal-validation">{yearDeleteError}</p>}
         <div className="goal-dialog-actions"><button type="button" className="secondary" disabled={busy}
-          onClick={() => { setDeletingYear(null); setYearDeleteError(null); }}>Keep year</button>
+          onClick={() => setDeletingYear(null)}>Keep year</button>
           <button type="button" className="danger" disabled={busy} onClick={() => void deleteYear()}>Delete {deletingYear.year} year package</button></div>
       </Dialog>}
       {declaring && pkg && workflow && <DeclarationDialog pkg={pkg} busy={busy}
         incomplete={ANNUAL_STEPS.some(step => workflow.steps[step].status !== 'Completed')}
         save={saveDeclaration} close={() => setDeclaring(false)} />}
-      {showFormsExport && pkg && workflow && <FormsExportDialog pkg={pkg} workflow={workflow} busy={busy} error={exportError}
+      {showFormsExport && pkg && workflow && <FormsExportDialog pkg={pkg} workflow={workflow} busy={busy}
         exportForms={draft => void exportForms(draft)} close={() => setShowFormsExport(false)} />}
       {showPortfolioExport && pkg && workflow && <PortfolioExportDialog pkg={pkg} workflow={workflow} busy={busy}
         monitor={portfolioMonitor}
-        running={portfolioRunning} progress={portfolioProgress} error={exportError}
+        running={portfolioRunning} progress={portfolioProgress}
         exportPortfolio={draft => void exportPortfolio(draft)} close={() => setShowPortfolioExport(false)}
-        cancel={() => void operations.cancelPortfolioExport().then(result => { if (!result.ok) setExportError(result.error.message); })} />}
+        cancel={() => void operations.cancelPortfolioExport().then(result => {
+          if (!result.ok) {
+            setError(result.error.message);
+            showFeedback({ title: 'Could not cancel portfolio export', message: result.error.message, kind: 'error' });
+          }
+        })} />}
       {state && <footer className="source-note"><strong>Supplied baseline, not regulatory verification.</strong><p>The ethics document is Second Edition, amended September 2018. The assessment tool references Third Edition / 2023. The same fixed source set applies to every year; SWCC does not verify current-year College compliance.</p></footer>}
     </main></div>
   </div>;

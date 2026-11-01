@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { dismissActionFeedback, expectActionFeedback } from './feedback-helpers.js';
 
 let desktop: ElectronApplication;
 let page: Page;
@@ -44,8 +45,9 @@ test('C dashboard export warns for blank drafts, keyboard confirms, and writes r
   expect(existsSync(path)).toBe(false);
   await warning.getByRole('button', { name: 'Export draft PDF', exact: true }).focus();
   await page.keyboard.press('Enter');
-  await expect(page.getByRole('status').filter({ hasText: 'Forms PDF written' })).toContainText('CCP-2024-forms.pdf');
-  await expect(warning).not.toBeVisible();
+  await expectActionFeedback(page, 'CCP-2024-forms.pdf');
+  await dismissActionFeedback(page);
+  await expect(warning).toBeHidden();
   const pdf = await getDocument({ data: new Uint8Array(readFileSync(path)), useSystemFonts: true }).promise;
   try {
     expect(pdf.numPages).toBe(3);
@@ -62,12 +64,14 @@ test('destination cancellation and storage errors remain distinct from success; 
   await page.getByRole('button', { name: 'Export Forms PDF', exact: true }).click();
   const warning = page.getByRole('dialog', { name: 'Export annual forms' });
   await warning.getByRole('button', { name: 'Export draft PDF', exact: true }).click();
-  await expect(page.getByRole('status').filter({ hasText: 'export cancelled' })).toBeVisible();
+  await expectActionFeedback(page, 'No output was published');
+  await dismissActionFeedback(page);
   expect(existsSync(path)).toBe(false);
   await destination(resolve(root, 'absent', 'failed.pdf'));
   await warning.getByRole('button', { name: 'Export draft PDF', exact: true }).click();
-  await expect(warning.getByRole('alert')).toContainText('could not be completely written');
-  await expect(page.getByRole('status').filter({ hasText: 'Forms PDF written' })).toHaveCount(0);
+  const failure = await expectActionFeedback(page, 'could not be completely written');
+  await expect(failure.getByRole('alert')).toContainText('could not be completely written');
+  await dismissActionFeedback(page);
   await desktop.evaluate(({ dialog }, filePath) => {
     dialog.showSaveDialog = () => new Promise(resolve => {
       (globalThis as typeof globalThis & { releaseFormsDestination: () => void }).releaseFormsDestination =
@@ -83,7 +87,8 @@ test('destination cancellation and storage errors remain distinct from success; 
   await desktop.evaluate(() => {
     (globalThis as typeof globalThis & { releaseFormsDestination: () => void }).releaseFormsDestination();
   });
-  await expect(page.getByRole('status').filter({ hasText: 'Forms PDF written' })).toBeVisible();
+  await expectActionFeedback(page, 'complete.pdf');
+  await dismissActionFeedback(page);
   expect(readFileSync(path).subarray(0, 5).toString()).toBe('%PDF-');
 });
 
@@ -112,7 +117,8 @@ test('failed draft flush retains edits and prevents stale export; retry exports 
   const warning = page.getByRole('dialog', { name: 'Export annual forms' });
   await expect(warning).not.toContainText('Add your strengths.');
   await warning.getByRole('button', { name: 'Export draft PDF', exact: true }).click();
-  await expect(page.getByRole('status').filter({ hasText: 'Forms PDF written' })).toBeVisible();
+  await expectActionFeedback(page, 'latest.pdf');
+  await dismissActionFeedback(page);
   const pdf = await getDocument({ data: new Uint8Array(readFileSync(path)), useSystemFonts: true }).promise;
   try {
     const content = (await (await pdf.getPage(2)).getTextContent()).items.flatMap(item => 'str' in item ? [item.str] : []).join(' ');
@@ -148,8 +154,9 @@ test('long edited narratives export through the same desktop action with readabl
   const warning = page.getByRole('dialog', { name: 'Export annual forms' });
   await expect(warning).toContainText('readable continuation pages');
   await warning.getByRole('button', { name: 'Export draft PDF', exact: true }).click();
-  await expect(warning.getByRole('alert')).toContainText('not supported');
-  await expect(page.getByRole('status').filter({ hasText: 'Forms PDF written' })).toHaveCount(0);
+  const failure = await expectActionFeedback(page, 'not supported');
+  await expect(failure.getByRole('alert')).toContainText('not supported');
+  await dismissActionFeedback(page);
   expect(existsSync(path)).toBe(false);
   await warning.getByRole('button', { name: 'Close dialog', exact: true }).click();
   await page.getByRole('navigation').getByRole('button', { name: 'Self-assessment', exact: true }).click();
@@ -159,7 +166,8 @@ test('long edited narratives export through the same desktop action with readabl
   await page.getByRole('navigation').getByRole('button', { name: 'Year overview', exact: true }).click();
   await page.getByRole('button', { name: 'Export Forms PDF', exact: true }).click();
   await warning.getByRole('button', { name: 'Export draft PDF', exact: true }).click();
-  await expect(page.getByRole('status').filter({ hasText: 'Forms PDF written' })).toBeVisible();
+  await expectActionFeedback(page, 'continuations.pdf');
+  await dismissActionFeedback(page);
   const pdf = await getDocument({ data: new Uint8Array(readFileSync(path)), useSystemFonts: true }).promise;
   try {
     expect(pdf.numPages).toBeGreaterThan(5);

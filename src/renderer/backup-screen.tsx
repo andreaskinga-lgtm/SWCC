@@ -95,8 +95,8 @@ function Summary({ summary }: { summary: DatasetSummary }) {
     <p>{summary.goals} goals · {summary.activities} activities · {summary.evidenceFiles} evidence files</p>
   </>;
 }
-export function RestorePreviewDialog({ preview, busy, replacing, progress, error, cancel, replace, monitor }: {
-  preview: RestorePreview; busy: boolean; replacing: boolean; progress: RestoreProgress; error: string | null; cancel: () => void; replace: () => void;
+export function RestorePreviewDialog({ preview, busy, replacing, progress, cancel, replace, monitor }: {
+  preview: RestorePreview; busy: boolean; replacing: boolean; progress: RestoreProgress; cancel: () => void; replace: () => void;
   monitor: ProgressMonitor;
 }) {
   return <Dialog title="Preview full-app restore" className="goal-dialog restore-dialog" onClose={() => { if (!busy) cancel(); }}>
@@ -116,7 +116,6 @@ export function RestorePreviewDialog({ preview, busy, replacing, progress, error
       <p>Editing, deletion and close are paused. Wait for validation or recovery; do not force quit.</p>
     </section>}
     <ProgressFailure monitor={monitor} label="restore" />
-    {error && <p className="goal-validation" role="alert">{error}</p>}
     <div className="goal-dialog-actions">
       <button className="secondary" type="button" disabled={busy} onClick={cancel}>Cancel, keep current data</button>
       <button type="button" disabled={busy} onClick={replace}>Replace all years</button>
