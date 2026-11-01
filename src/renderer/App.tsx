@@ -29,6 +29,7 @@ export interface PrototypeOverviewProps {
   navigate: (screen: 'assessment' | 'plan') => void;
   openActivity: (id: string | null) => void;
 }
+export type PrototypeTransition = (kind: 'page' | 'activity', commit: () => void, animate?: boolean) => void;
 function OverviewContent({ children }: PrototypeOverviewProps) {
   return <>{children}</>;
 }
@@ -45,9 +46,10 @@ const destinations = [
   { screen: 'backup', name: 'Backup and restore', icon: HardDrive },
 ] as const;
 
-export function App({ operations, prototypeOverview: Overview = OverviewContent }: {
+export function App({ operations, prototypeOverview: Overview = OverviewContent, prototypeTransition }: {
   operations: DesktopOperations;
   prototypeOverview?: ComponentType<PrototypeOverviewProps>;
+  prototypeTransition?: PrototypeTransition;
 }) {
   const { showFeedback } = useActionFeedback();
   const [session] = useState(() => new DraftSession(operations));
@@ -305,11 +307,15 @@ export function App({ operations, prototypeOverview: Overview = OverviewContent 
     }
     finally { setBusy(false); }
   }
+  function switchScreen(next: Screen) {
+    if (prototypeTransition) prototypeTransition('page', () => setScreen(next), next !== screen);
+    else setScreen(next);
+  }
   function navigate(next: Screen) {
     void run(async () => {
       if (!pkg && !['years', 'backup'].includes(next)) { setScreen('years'); return; }
       if (next === 'years' || next === 'backup') setState(unwrap(await operations.getState()));
-      setScreen(next);
+      switchScreen(next);
     });
   }
   function open(id: string) {
@@ -318,7 +324,7 @@ export function App({ operations, prototypeOverview: Overview = OverviewContent 
       setSelectedActivityId(null);
       setRecordRequested(false);
       setState(unwrap(await operations.getState()));
-      setScreen('overview');
+      switchScreen('overview');
     });
   }
   async function create() {
@@ -339,7 +345,7 @@ export function App({ operations, prototypeOverview: Overview = OverviewContent 
       }
       session.open(result.value);
       setState(unwrap(await operations.getState()));
-      setScreen('overview');
+      switchScreen('overview');
     });
   }
   async function deleteYear() {
@@ -388,7 +394,7 @@ export function App({ operations, prototypeOverview: Overview = OverviewContent 
     void run(async () => {
       setSelectedActivityId(id);
       setRecordRequested(!id);
-      setScreen('plan');
+      switchScreen('plan');
     });
   }
   function complete(step: AnnualStep) {
@@ -580,7 +586,7 @@ export function App({ operations, prototypeOverview: Overview = OverviewContent 
             {pkg.goals.map(goal => <article className="goal-node" key={goal.id}><span className="goal-reference">{goal.ref}</span><h3>{goal.title}</h3>
               {goal.description && <p>{goal.description}</p>}
               <div className="goal-activity-refs">{pkg.activities.filter(activity => activity.goalIds.includes(goal.id)).map(activity =>
-                <button type="button" key={activity.id} aria-label={`Open ${activity.ref} from ${goal.ref}`} onClick={() => activityEntry(activity.id)}>{activity.ref}</button>)}</div>
+                <button type="button" key={activity.id} data-activity-id={activity.id} aria-label={`Open ${activity.ref} from ${goal.ref}`} onClick={() => activityEntry(activity.id)}>{activity.ref}</button>)}</div>
               {!pkg.activities.some(activity => activity.goalIds.includes(goal.id)) && <small>No supporting activity yet</small>}
             </article>)}
             {!pkg.goals.length && <p>No goals yet. Add one from self-assessment or development plan.</p>}
@@ -590,7 +596,7 @@ export function App({ operations, prototypeOverview: Overview = OverviewContent 
             </button>
           </div>
           <div className="overview-column"><h2>Activities & experiences</h2><div className="activity-nodes">{pkg.activities.map(activity => <button type="button" key={activity.id}
-            className="activity-node" aria-label={`Open activity ${activity.ref}: ${activity.title}`} onClick={() => activityEntry(activity.id)}>
+            className="activity-node" data-activity-id={activity.id} aria-label={`Open activity ${activity.ref}: ${activity.title}`} onClick={() => activityEntry(activity.id)}>
             <div><span className="goal-reference">{activity.ref}</span><span className="activity-state">{activity.status}</span></div><h3>{activity.title}</h3>
             <span className="goal-link-chips">{activity.goalIds.length ? pkg.goals.filter(goal => activity.goalIds.includes(goal.id)).map(goal => <span key={goal.id}>{goal.ref}</span>)
               : <small>No linked goal · supplementary</small>}</span>
@@ -605,6 +611,7 @@ export function App({ operations, prototypeOverview: Overview = OverviewContent 
         complete={() => complete('assessment')} busy={busy} />}
       {screen === 'plan' && pkg && <PlanScreen key={pkg.id} pkg={pkg} session={session} operations={operations}
         flushEdits={flushEdits}
+        prototypeSelectActivity={prototypeTransition ? (commit, animate) => prototypeTransition('activity', commit, animate) : undefined}
         selectedId={selectedActivityId} select={setSelectedActivityId} recordRequested={recordRequested} clearRecordRequest={() => setRecordRequested(false)}
         evidence={packageEvidence} evidenceError={evidenceErrors[pkg.id] ?? ''}
         evidenceLoaded={Object.hasOwn(evidenceByPackage, pkg.id)} refreshEvidence={() => refreshEvidence(pkg.id)} reportError={message => {

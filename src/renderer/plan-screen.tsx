@@ -428,20 +428,25 @@ function CompletionCalendar({ id, value, month, onMonthChange, onSelect, onClose
   </div>;
 }
 
-export function PlanScreen({ pkg, session, operations, selectedId, select, recordRequested, clearRecordRequest, evidence, evidenceError, evidenceLoaded, refreshEvidence, reportError, complete, busy, flushEdits }: {
+export function PlanScreen({ pkg, session, operations, selectedId, select, recordRequested, clearRecordRequest, evidence, evidenceError, evidenceLoaded, refreshEvidence, reportError, complete, busy, flushEdits, prototypeSelectActivity }: {
   pkg: YearPackage; session: DraftSession; operations: ApplicationOperations; selectedId: string | null;
   select: (id: string | null) => void; recordRequested: boolean; clearRecordRequest: () => void;
   evidence: EvidenceAttachment[]; evidenceError: string; evidenceLoaded: boolean; refreshEvidence: () => Promise<EvidenceAttachment[]>;
   complete: () => void; busy: boolean;
   reportError: (message: string) => void;
   flushEdits: () => Promise<void>;
+  prototypeSelectActivity?: (commit: () => void, animate: boolean) => void;
 }) {
   const [creating, setCreating] = useState(recordRequested);
   const [creatingGoal, setCreatingGoal] = useState<{ activityId?: string } | null>(null);
   const [deletingGoal, setDeletingGoal] = useState<Goal | null>(null);
   const activity = pkg.activities.find(item => item.id === selectedId) ?? pkg.activities[0];
   async function selectActivity(id: string) {
-    try { await flushEdits(); select(id); }
+    try {
+      await flushEdits();
+      if (prototypeSelectActivity) prototypeSelectActivity(() => select(id), id !== activity?.id);
+      else select(id);
+    }
     catch (failure) { reportError(failure instanceof Error ? failure.message : String(failure)); }
   }
   function closeCreate() { setCreating(false); clearRecordRequest(); }

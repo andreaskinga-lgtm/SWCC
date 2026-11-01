@@ -3,12 +3,13 @@
 // Tokens: olive #526332, ink #303b25, quiet #647151, leaf #dfe8ca, canvas #f2f4eb, paper #ffffff.
 // Keep Trebuchet MS / Segoe UI, existing type scale, left alignment, rail, header, and annual workflow.
 // A [workflow | goals | activities]; B [workflow | goal -> unfolding activities]; C [workflow | goal picker | linked activities].
-// Brief review: rejected new palettes, mascots, card-hover lifts, and page-wide entrances. Warmth belongs in feedback.
-import { createContext, useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+// Brief review: keep the identity; animate connections and user-requested switches, not initial card-grid entrances.
+import { createContext, useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { RefObject } from 'react';
+import { flushSync } from 'react-dom';
 import { ChevronDown, Plus } from 'lucide-react';
 import { App } from './App.js';
-import type { PrototypeOverviewProps } from './App.js';
+import type { PrototypeOverviewProps, PrototypeTransition } from './App.js';
 import type { Activity, YearPackage } from '../shared/application.js';
 import { ActionFeedbackProvider } from './action-feedback.js';
 import { createPrototypeOperations } from './friendlier-prototype-operations.js';
@@ -16,7 +17,7 @@ import { FRIENDLIER_VARIANTS, PrototypeSwitcher, prototypeVariant, usePrototypeS
 import type { PrototypeVariant } from './prototype-switcher.js';
 import './friendlier-prototype.css';
 
-type InteractionState = { expandedGoals?: string[]; selectedGoal?: string | null };
+type InteractionState = { expandedGoals?: string[]; selectedGoal?: string | null; highlightedActivity?: string | null };
 const PrototypeContext = createContext<{
   variant: PrototypeVariant; compare: boolean; setInteraction: (state: InteractionState) => void;
 }>({ variant: 'A', compare: false, setInteraction: () => {} });
@@ -34,7 +35,26 @@ function ActivityLink({ activity, pkg, openActivity }: {
 }
 
 export function VariantA({ children }: PrototypeOverviewProps) {
-  return <>{children}</>;
+  const ref = useRef<HTMLDivElement>(null);
+  const [hovered, setHovered] = useState<string | null>(null);
+  const [focused, setFocused] = useState<string | null>(null);
+  const highlighted = hovered ?? focused;
+  const { setInteraction } = useContext(PrototypeContext);
+  function linkedActivity(target: EventTarget | null) {
+    return target instanceof Element
+      ? target.closest<HTMLElement>('.goal-activity-refs button[data-activity-id]')?.dataset.activityId ?? null : null;
+  }
+  useEffect(() => {
+    const cards = ref.current?.querySelectorAll<HTMLElement>('.activity-node[data-activity-id]');
+    cards?.forEach(card => { card.toggleAttribute('data-prototype-linked', card.dataset.activityId === highlighted); });
+    setInteraction({ highlightedActivity: highlighted });
+    return () => cards?.forEach(card => card.removeAttribute('data-prototype-linked'));
+  }, [highlighted, setInteraction]);
+  return <div ref={ref} className="prototype-overview-a"
+    onPointerOver={event => setHovered(linkedActivity(event.target))}
+    onPointerOut={event => setHovered(linkedActivity(event.relatedTarget))}
+    onFocus={event => setFocused(linkedActivity(event.target))}
+    onBlur={event => setFocused(linkedActivity(event.relatedTarget))}>{children}</div>;
 }
 
 export function VariantB({ pkg, navigate, openActivity }: PrototypeOverviewProps) {
@@ -131,8 +151,85 @@ export function VariantC({ pkg, navigate, openActivity }: PrototypeOverviewProps
 
 function FriendlierOverview(props: PrototypeOverviewProps) {
   const { variant, compare } = useContext(PrototypeContext);
-  if (compare || variant === 'A') return <VariantA {...props} />;
+  if (compare) return <>{props.children}</>;
+  if (variant === 'A') return <VariantA {...props} />;
   return variant === 'B' ? <VariantB key={props.pkg.id} {...props} /> : <VariantC key={props.pkg.id} {...props} />;
+}
+
+function useSlidingRail(root: RefObject<HTMLDivElement | null>, active: boolean, motion: boolean) {
+  useEffect(() => {
+    const nav = root.current?.querySelector<HTMLElement>('.map-rail nav');
+    if (!nav || !active) return;
+    const marker = document.createElement('span');
+    marker.className = 'prototype-rail-selection';
+    marker.setAttribute('aria-hidden', 'true');
+    nav.prepend(marker);
+    nav.dataset.prototypeSliding = 'true';
+    const buttons = [...nav.querySelectorAll<HTMLButtonElement>('button')];
+    const preference = matchMedia('(prefers-reduced-motion: reduce)');
+    function position(moving: boolean) {
+      const selected = buttons.findIndex(button => button.hasAttribute('aria-current'));
+      if (selected < 0 || selected > 3) {
+        marker.hidden = true;
+        return;
+      }
+      marker.dataset.moving = String(moving && motion && !preference.matches && !marker.hidden);
+      const button = buttons[selected];
+      marker.style.width = `${button.offsetWidth}px`;
+      marker.style.height = `${button.offsetHeight}px`;
+      marker.style.transform = `translate(${button.offsetLeft}px, ${button.offsetTop}px)`;
+      marker.hidden = false;
+    }
+    position(false);
+    const changes = new MutationObserver(() => position(true));
+    changes.observe(nav, { subtree: true, attributes: true, attributeFilter: ['aria-current'] });
+    const resize = new ResizeObserver(() => position(false));
+    resize.observe(nav);
+    buttons.forEach(button => resize.observe(button));
+    const snap = () => position(false);
+    preference.addEventListener('change', snap);
+    return () => {
+      changes.disconnect(); resize.disconnect(); preference.removeEventListener('change', snap);
+      marker.remove(); delete nav.dataset.prototypeSliding;
+    };
+  }, [root, active, motion]);
+}
+
+function usePrototypeTransitions(root: RefObject<HTMLDivElement | null>, enabled: boolean): PrototypeTransition {
+  const current = useRef<ViewTransition | null>(null);
+  const generation = useRef(0);
+  useEffect(() => {
+    const preference = matchMedia('(prefers-reduced-motion: reduce)');
+    const stop = () => { if (!enabled || preference.matches) current.current?.skipTransition(); };
+    stop();
+    preference.addEventListener('change', stop);
+    return () => { preference.removeEventListener('change', stop); current.current?.skipTransition(); };
+  }, [enabled]);
+  return useCallback((kind, commit, animate = true) => {
+    const sequence = ++generation.current;
+    current.current?.skipTransition();
+    const element = root.current;
+    if (!animate || !enabled || matchMedia('(prefers-reduced-motion: reduce)').matches || !document.startViewTransition || !element) {
+      if (element) delete element.dataset.prototypeTransition;
+      commit();
+      return;
+    }
+    element.dataset.prototypeTransition = kind;
+    const transition = document.startViewTransition(() => {
+      if (sequence === generation.current) flushSync(commit);
+    });
+    current.current = transition;
+    // Superseded selections intentionally skip their pending snapshot animation.
+    void transition.ready.catch(failure => {
+      if (!(failure instanceof DOMException && failure.name === 'AbortError')) throw failure;
+    });
+    void transition.finished.then(() => {
+      if (current.current === transition) {
+        current.current = null;
+        delete element.dataset.prototypeTransition;
+      }
+    });
+  }, [root, enabled]);
 }
 
 function useFriendlyMotion(root: RefObject<HTMLDivElement | null>, enabled: boolean, variant: PrototypeVariant,
@@ -145,6 +242,7 @@ function useFriendlyMotion(root: RefObject<HTMLDivElement | null>, enabled: bool
     let previousScreen = '';
     let previousSave = '';
     let previousGoal = '';
+    let previousEditor: Element | null = null;
     let initial = true;
     const openDialogs = new Set<Element>();
     const knownRecords = new Set<Element>();
@@ -160,9 +258,11 @@ function useFriendlyMotion(root: RefObject<HTMLDivElement | null>, enabled: bool
       const knownParents = new Set([...knownRecords].filter(record => record.isConnected).map(record => record.parentElement));
       if (screenChanged) {
         setScreen(screen);
-        if (!initial) {
-          const heading = element.querySelector('.page-heading');
-          if (heading) animate(heading, [{ opacity: .65, transform: 'translateY(3px)' }, { opacity: 1, transform: 'translateY(0)' }], 180);
+        if (!initial && element.dataset.prototypeTransition !== 'page') {
+          const target = element.querySelector(variant === 'A' ? '#main-content' : '.page-heading');
+          if (target) animate(target, variant === 'A'
+            ? [{ opacity: .35, transform: 'translateX(12px)' }, { opacity: 1, transform: 'translateX(0)' }]
+            : [{ opacity: .65, transform: 'translateY(3px)' }, { opacity: 1, transform: 'translateY(0)' }], variant === 'A' ? 220 : 180);
         }
         previousScreen = screen;
       }
@@ -180,6 +280,12 @@ function useFriendlyMotion(root: RefObject<HTMLDivElement | null>, enabled: bool
         if (links) animate(links, [{ opacity: .4, transform: 'translateX(6px)' }, { opacity: 1, transform: 'translateX(0)' }], 220);
       }
       previousGoal = focus?.dataset.selectedGoal ?? '';
+      const editor = element.querySelector('.activity-editor');
+      if (variant === 'A' && !screenChanged && previousEditor && editor && editor !== previousEditor
+        && element.dataset.prototypeTransition !== 'activity') {
+        animate(editor, [{ opacity: .15, transform: 'translateX(24px)' }, { opacity: 1, transform: 'translateX(0)' }], 260);
+      }
+      previousEditor = editor;
       const dialogs = element.querySelectorAll('dialog[open]');
       for (const dialog of dialogs) {
         if (!openDialogs.has(dialog) && !initial) {
@@ -236,8 +342,10 @@ export function FriendlierPrototype() {
   const [interaction, setInteraction] = useState<InteractionState>({});
   const root = useRef<HTMLDivElement>(null);
   const current = FRIENDLIER_VARIANTS.find(item => item.key === variant)!;
+  const transition = usePrototypeTransitions(root, motion && variant === 'A');
+  useSlidingRail(root, variant === 'A' && !compare, motion);
   useFriendlyMotion(root, motion, variant, setScreen);
-  useEffect(() => { if (compare || variant === 'A') setInteraction({}); }, [compare, variant]);
+  useEffect(() => { if (compare) setInteraction({}); }, [compare]);
   useEffect(() => {
     console.info('SWCC throwaway prototype state', { variant, comparison: compare, motionRequested: motion,
       systemReducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches, screen, interaction, ...snapshot });
@@ -246,13 +354,15 @@ export function FriendlierPrototype() {
     <div className="prototype-notice"><strong>Throwaway preview</strong><span>Fictional records. Reload resets edits; your portfolio is not connected.</span></div>
     <PrototypeContext.Provider value={{ variant, compare, setInteraction }}>
       <div ref={root}><ActionFeedbackProvider>
-        <App operations={store.operations} prototypeOverview={FriendlierOverview} />
+        <App operations={store.operations} prototypeOverview={FriendlierOverview}
+          prototypeTransition={variant === 'A' && !compare ? transition : undefined} />
       </ActionFeedbackProvider></div>
     </PrototypeContext.Provider>
     {stateOpen && <aside className="prototype-state" id="prototype-state" aria-label="Prototype details">
       <h2>{compare ? 'Current design' : `${current.key}: ${current.name}`}</h2>
       <p>{compare ? 'Unmodified layout and feedback for comparison.' : current.description}</p>
       <p><strong>Try it:</strong> edit your self-assessment, add a goal, record an activity, or complete Step 2.
+        {variant === 'A' && !compare && ' Hover or focus an activity reference beneath a goal, switch sidebar pages, then select another activity in the development plan.'}
         {variant === 'B' && !compare && ' Open and close a goal to see its connections unfold.'}
         {variant === 'C' && !compare && ' Select different goals to see their supporting activities.'}</p>
       <p><strong>Recommendation:</strong> A is the smallest change. Keep motion brief and action-led; do not add looping animation or confetti.

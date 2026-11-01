@@ -7,6 +7,35 @@
 .prototype-notice strong { font-size: 12px; }
 .friendlier-prototype[data-compare="false"] .relationship-board { border-color: #d7deca; }
 .friendlier-prototype[data-compare="false"] .goal-node { border-radius: 12px; }
+.prototype-overview-a { display: contents; }
+.friendlier-prototype[data-variant="A"][data-compare="false"] .activity-node:is(:hover, :focus-visible, [data-prototype-linked]) {
+  background: #f2f4eb; border-color: #526332; box-shadow: inset 0 0 0 1px #526332; filter: brightness(.94);
+}
+.friendlier-prototype .map-rail nav[data-prototype-sliding] { position: relative; isolation: isolate; }
+.friendlier-prototype .map-rail nav[data-prototype-sliding] button { position: relative; z-index: 1; }
+.friendlier-prototype .map-rail nav[data-prototype-sliding] button:nth-of-type(-n+4)[aria-current] { background: transparent; }
+.prototype-rail-selection {
+  position: absolute; top: 0; left: 0; z-index: 0; border-radius: 8px;
+  background: #ffffff24; pointer-events: none;
+}
+.prototype-rail-selection[data-moving="true"] {
+  transition: transform 240ms cubic-bezier(.2,.8,.2,1), width 240ms ease, height 240ms ease;
+}
+:root:has(.friendlier-prototype) { view-transition-name: none; }
+.friendlier-prototype [data-prototype-transition="page"] #main-content { view-transition-name: prototype-page; }
+.friendlier-prototype [data-prototype-transition="activity"] .activity-editor { view-transition-name: prototype-activity; }
+::view-transition { pointer-events: none; }
+::view-transition-group(prototype-page), ::view-transition-group(prototype-activity) {
+  animation-duration: 260ms; overflow: clip;
+}
+::view-transition-old(prototype-page) { animation: prototype-page-out 180ms ease both; mix-blend-mode: normal; }
+::view-transition-new(prototype-page) { animation: prototype-page-in 240ms cubic-bezier(.2,.8,.2,1) both; mix-blend-mode: normal; }
+::view-transition-old(prototype-activity) { animation: prototype-activity-out 180ms ease both; mix-blend-mode: normal; }
+::view-transition-new(prototype-activity) { animation: prototype-activity-in 260ms cubic-bezier(.2,.8,.2,1) both; mix-blend-mode: normal; }
+@keyframes prototype-page-out { to { opacity: 0; transform: translateX(-12px); } }
+@keyframes prototype-page-in { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes prototype-activity-out { to { opacity: 0; transform: translateX(-24px); } }
+@keyframes prototype-activity-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: translateX(0); } }
 .friendlier-prototype[data-compare="false"] .save-status {
   display: inline-flex; align-items: center; gap: 6px; border-radius: 20px; padding: 6px 9px;
   background: #f2f4eb; min-width: 80px;
@@ -102,7 +131,12 @@
   .friendlier-prototype[data-motion="true"] button,
   .friendlier-prototype[data-motion="true"] .field :is(input, textarea),
   .friendlier-prototype[data-motion="true"] .prototype-expand-shell,
-  .friendlier-prototype[data-motion="true"] .prototype-goal-toggle > svg { transition: none; }
+  .friendlier-prototype[data-motion="true"] .prototype-goal-toggle > svg,
+  .prototype-rail-selection[data-moving="true"] { transition: none; }
   .friendlier-prototype[data-motion="true"] button:active:not(:disabled),
   .friendlier-prototype[data-motion="true"] .map-rail button:active:not(:disabled) { transform: none; }
+  .friendlier-prototype [data-prototype-transition] :is(#main-content, .activity-editor) { view-transition-name: none; }
+  ::view-transition-group(prototype-page), ::view-transition-group(prototype-activity),
+  ::view-transition-old(prototype-page), ::view-transition-new(prototype-page),
+  ::view-transition-old(prototype-activity), ::view-transition-new(prototype-activity) { animation: none; }
 }

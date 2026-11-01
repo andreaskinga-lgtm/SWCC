@@ -3,7 +3,7 @@ import { useEffect, useSyncExternalStore } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 export const FRIENDLIER_VARIANTS = [
-  { key: 'A', name: 'Gentle feedback', description: 'Same layout. A soft press, a settling dialog, and a quiet saved confirmation.' },
+  { key: 'A', name: 'Gentle feedback', description: 'Same layout. Linked activity highlights, a sliding navigation marker, page and activity-form transitions, and quiet save feedback.' },
   { key: 'B', name: 'Unfold the connections', description: 'Expand a goal to reveal its activities. Motion explains the relationship.' },
   { key: 'C', name: 'One goal at a time', description: 'Select a goal and its activities settle into the adjacent pane.' },
 ] as const;
