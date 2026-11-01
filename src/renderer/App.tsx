@@ -47,6 +47,7 @@ export function App({ operations }: { operations: DesktopOperations }) {
     phase: 'idle', filesCompleted: 0, filesTotal: 0, bytesCompleted: 0, bytesTotal: 0,
   });
   const [restoreRunning, setRestoreRunning] = useState(false);
+  const [restoreReplacing, setRestoreReplacing] = useState(false);
   const [restoreProgress, setRestoreProgress] = useState<RestoreProgress>({
     phase: 'idle', filesCompleted: 0, filesTotal: 0, bytesCompleted: 0, bytesTotal: 0,
   });
@@ -115,6 +116,7 @@ export function App({ operations }: { operations: DesktopOperations }) {
     void operations.getState().then(result => {
       if (!result.ok) { setError(result.error.message); return; }
       setState(result.value);
+      if (result.value.recoveryNotice) setFeedback(result.value.recoveryNotice);
       session.open(result.value.selectedPackage);
       if (result.value.selectedPackage) setScreen('overview');
     }).catch(() => setError('Cannot connect to local records. Preserve your storage folder and restart SWCC.'));
@@ -190,7 +192,36 @@ export function App({ operations }: { operations: DesktopOperations }) {
       }
     });
   }
+  function replaceBackup() {
+    const preview = restorePreview;
+    if (!preview) return;
+    void run(async () => {
+      setRestoreRunning(true);
+      setRestoreReplacing(true);
+      setRestoreProgress(previous => ({ ...previous, phase: 'protecting' }));
+      try {
+        const result = await operations.replaceFullDataset({ previewId: preview.id, confirmed: true });
+        setRestorePreview(null);
+        const outcome = unwrap(result);
+        setState(outcome.state);
+        session.open(outcome.state.selectedPackage);
+        setSelectedActivityId(null);
+        setRecordRequested(false);
+        setEvidenceByPackage({});
+        setEvidenceErrors({});
+        await reviewSession.open(outcome.state.selectedPackage?.id ?? null);
+        if (outcome.state.selectedPackage) await refreshEvidence(outcome.state.selectedPackage.id);
+        setError(null);
+        setFeedback(`All years restored and fully validated. Protective backup of your previous data: ${outcome.protectiveBackup}. Create a new full backup beyond this device.${outcome.cleanupWarning ?? ''}`);
+      } finally {
+        setRestoreRunning(false);
+        setRestoreReplacing(false);
+        setRestoreProgress({ phase: 'idle', filesCompleted: 0, filesTotal: 0, bytesCompleted: 0, bytesTotal: 0 });
+      }
+    });
+  }
   async function cancelInspection() {
+    if (restoreReplacing) return;
     if (busy && !restoreRunning) return;
     if (restoreRunning) {
       const result = await operations.cancelRestorePreview();
@@ -466,8 +497,9 @@ export function App({ operations }: { operations: DesktopOperations }) {
         feedback={workflow.steps.review} complete={() => complete('review')} busy={busy} />}
       {screen === 'backup' && state && <BackupScreen state={state} busy={busy} running={backupRunning} progress={backupProgress}
         backup={backup} cancel={() => void operations.cancelFullBackup().then(result => { if (!result.ok) setError(result.error.message); })}
-        inspect={inspectBackup} inspecting={restoreRunning} restoreProgress={restoreProgress} cancelInspection={() => void cancelInspection()} />}
-      {restorePreview && <RestorePreviewDialog preview={restorePreview} busy={busy} error={error} cancel={() => void cancelInspection()} />}
+        inspect={inspectBackup} inspecting={restoreRunning} replacing={restoreReplacing} restoreProgress={restoreProgress} cancelInspection={() => void cancelInspection()} />}
+      {restorePreview && <RestorePreviewDialog preview={restorePreview} busy={busy} replacing={restoreReplacing} progress={restoreProgress} error={error}
+        replace={replaceBackup} cancel={() => void cancelInspection()} />}
       {deletingYear && <Dialog title={`Delete year ${deletingYear.year}?`} onClose={() => {
         if (!busy) { setDeletingYear(null); setYearDeleteError(null); }
       }}>

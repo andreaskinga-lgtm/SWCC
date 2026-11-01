@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import { createHash, randomUUID } from 'node:crypto';
-import { createWriteStream } from 'node:fs';
+import { createWriteStream, closeSync, fsyncSync, openSync, readSync, lstatSync } from 'node:fs';
 import { lstat, mkdir, realpath, rm } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { addAbortSignal, Transform } from 'node:stream';
@@ -22,6 +22,8 @@ import { readReviewProgress } from './review.js';
 
 export interface RestoreSystem {
   chooseArchive: () => Promise<string | null>;
+  boundary?: (phase: 'protected' | 'journaled' | 'prior-moved' | 'replacement-moved' | 'reopened' | 'validated' | 'committed' | 'recovery-prior-moved' | 'recovery-reopened') => void | Promise<void>;
+  protectiveOutput?: import('./backup.js').BackupSystem['openOutput'];
 }
 export class RestoreCleanupFailure extends Error {
   constructor(readonly directory: string, error: unknown) {
@@ -53,7 +55,7 @@ function validateSchema(db: Database.Database) {
   if (schemaSignature(db) !== supportedSchema)
     throw new Error('The backup database schema does not match the supported SWCC schema. Missing or altered constraints, tables, indexes, views and triggers are not accepted.');
 }
-async function validateStoredTypes(db: Database.Database, signal: AbortSignal) {
+function validateStoredTypes(db: Database.Database, signal: AbortSignal) {
   const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[];
   let checked = 0;
   for (const { name } of tables) {
@@ -104,7 +106,6 @@ async function validateStoredTypes(db: Database.Database, signal: AbortSignal) {
         || (row.byte_count as number) < 0 || (row.byte_count as number) > MAX_EVIDENCE_BYTES || !/^[\da-f]{64}$/.test(row.sha256 as string)))
         throw new Error('Managed evidence metadata has an invalid type, size, name or SHA-256.');
       if (++checked % 1000 === 0) {
-        await new Promise<void>(resolveTick => setImmediate(resolveTick));
         signal.throwIfAborted();
       }
     }
@@ -128,7 +129,7 @@ function object(value: unknown, keys: readonly string[]): asserts value is Recor
     || Object.keys(value).length !== keys.length || Object.keys(value).some(key => !keys.includes(key)))
     throw new Error('The backup manifest has malformed or unsupported fields.');
 }
-function manifestFrom(bytes: Buffer): FullBackupManifest {
+export function manifestFrom(bytes: Buffer): FullBackupManifest {
   const json = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
   const manifest: unknown = JSON.parse(json);
   const objects: (Set<string> | null)[] = [];
@@ -219,7 +220,7 @@ async function streamFor(zip: ZipFile, entry: Entry) {
 export async function inspectArchive(
   archive: string, paths: ReturnType<typeof storageLayout>, current: () => DatasetSummary,
   signal: AbortSignal, report: (progress: RestoreProgress) => void,
-): Promise<{ directory: string; preview: RestorePreview }> {
+): Promise<{ directory: string; preview: RestorePreview; manifest: FullBackupManifest }> {
   let directory: string | undefined;
   const zip = await openZip(archive);
   let zipError: unknown;
@@ -284,6 +285,8 @@ export async function inspectArchive(
       if (byteCount !== file.byteCount || byteCount !== entry.uncompressedSize)
         throw new Error(`The actual size of ${file.path} does not match its inventory or ZIP metadata.`);
       if (hash.digest('hex') !== file.sha256) throw new Error(`SHA-256 integrity check failed for ${file.path}.`);
+      const fd = openSync(destination, 'r+');
+      try { fsyncSync(fd); } finally { closeSync(fd); }
       progress.filesCompleted++;
       report({ ...progress });
     }
@@ -291,13 +294,32 @@ export async function inspectArchive(
     signal.throwIfAborted();
     progress.phase = 'validating';
     report({ ...progress });
-    const db = new Database(join(directory, 'database.sqlite'), { readonly: true, fileMustExist: true });
+    const backup = validateDataset(directory, manifest, signal, true);
+    signal.throwIfAborted();
+    return { directory, manifest, preview: { id: basename(directory), fileName: basename(archive), createdAt: manifest.createdAt, backup, current: current() } };
+  } catch (error) {
+    if (directory) {
+      try { await rm(directory, { recursive: true, force: true }); }
+      catch (cleanupError) { throw new RestoreCleanupFailure(directory, cleanupError); }
+    }
+    throw error;
+  } finally { zip.close(); }
+}
+
+export function validateDataset(directory: string, manifest: FullBackupManifest, signal = new AbortController().signal, verifyDatabaseBytes = false): DatasetSummary {
+    const databaseFile = join(directory, 'database.sqlite');
+    const info = lstatSync(databaseFile);
+    const saved = manifest.files.find(file => file.path === 'database.sqlite');
+    if (!info.isFile() || info.isSymbolicLink() || !saved
+      || (verifyDatabaseBytes && (info.size !== saved.byteCount || hashFile(databaseFile) !== saved.sha256)))
+      throw new Error('The staged database bytes no longer match the validated backup.');
+    const db = new Database(databaseFile, { readonly: true, fileMustExist: true });
     let backup: DatasetSummary;
     try {
       db.pragma('trusted_schema = OFF');
       db.pragma('query_only = ON');
       validateSchema(db);
-      await validateStoredTypes(db, signal);
+      validateStoredTypes(db, signal);
       if (db.pragma('integrity_check', { simple: true }) !== 'ok' || (db.pragma('foreign_key_check') as unknown[]).length)
         throw new Error('The staged database failed its integrity or relationship check.');
       if (db.pragma('user_version', { simple: true }) !== manifest.schemaVersion)
@@ -355,6 +377,13 @@ export async function inspectArchive(
         if (!new RegExp(`^${row.year}/E${row.reference}-[\\da-f-]{36}\\.${row.type}$`).test(row.path)
           || !file || row.byteCount !== file.byteCount || row.sha256 !== file.sha256)
           throw new Error('A managed evidence path, size or hash disagrees with its database ownership and archive inventory.');
+        const evidenceRoot = lstatSync(join(directory, 'evidence'));
+        const yearRoot = lstatSync(join(directory, 'evidence', String(row.year)));
+        const actual = join(directory, 'evidence', row.path);
+        const info = lstatSync(actual);
+        if (!evidenceRoot.isDirectory() || evidenceRoot.isSymbolicLink() || !yearRoot.isDirectory() || yearRoot.isSymbolicLink()
+          || !info.isFile() || info.isSymbolicLink() || info.size !== row.byteCount || hashFile(actual) !== row.sha256)
+          throw new Error('Managed evidence bytes failed their ownership, size or SHA-256 integrity check.');
       }
       const currentCompletions = db.prepare(`SELECT c.package_id AS id, c.step, p.assessment_date AS assessmentDate,
         p.plan_date AS planDate, p.strengths, p.learning_needs AS learningNeeds FROM step_completions c
@@ -382,13 +411,16 @@ export async function inspectArchive(
       }
       backup = datasetSummary(db);
     } finally { db.close(); }
-    signal.throwIfAborted();
-    return { directory, preview: { fileName: basename(archive), createdAt: manifest.createdAt, backup, current: current() } };
-  } catch (error) {
-    if (directory) {
-      try { await rm(directory, { recursive: true, force: true }); }
-      catch (cleanupError) { throw new RestoreCleanupFailure(directory, cleanupError); }
-    }
-    throw error;
-  } finally { zip.close(); }
+    return backup;
+}
+
+export function hashFile(path: string) {
+  const descriptor = openSync(path, 'r');
+  const hash = createHash('sha256');
+  const chunk = Buffer.alloc(64 * 1024);
+  try {
+    let bytes: number;
+    while ((bytes = readSync(descriptor, chunk, 0, chunk.length, null))) hash.update(chunk.subarray(0, bytes));
+    return hash.digest('hex');
+  } finally { closeSync(descriptor); }
 }

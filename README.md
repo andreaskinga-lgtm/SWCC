@@ -1,10 +1,12 @@
 # SWCC desktop
 
-The offline Electron app includes durable annual assessment drafts, independent annual standards, shared learning goals and activities, managed evidence files with integrity checks and repair, activity notes/links and reflections, per-year standards review, explicit annual step completion and external declaration records, annual Forms PDF export with readable continuations, complete annual portfolio ZIP, full-app backup and validated restore preview. The production shell follows approved C / Learning map reference at commit `5477044`; prototype samples and simulated operations are not shipped.
+The offline Electron app includes durable annual assessment drafts, independent annual standards, shared learning goals and activities, managed evidence files with integrity checks and repair, activity notes/links and reflections, per-year standards review, explicit annual step completion and external declaration records, annual Forms PDF export with readable continuations, complete annual portfolio ZIP, full-app backup and recoverable whole-dataset restore. The production shell follows approved C / Learning map reference at commit `5477044`; prototype samples and simulated operations are not shipped.
 
 ## Run and check
 
 Use npm and a compatible Node release (22.12+, or 24+). Dependencies are pinned in `package-lock.json`.
+
+Current delivery is **development-first**: run and walk through the functional app before deployment. Installer builds, installed-target acceptance and cross-platform transfer checks remain deferred; they are not required to run the app in development.
 
 ```sh
 npm ci
@@ -41,14 +43,21 @@ SWCC/
     evidence/               # managed evidence copies, organized by year
   runtime/                  # regenerable Chromium cache/session/logs
   restore-staging/          # operation-owned, validated backup inspection
-  recovery.json            # reserved for future replacement recovery journal
+  restore-recovery/         # operation-scoped protective full backups
+    restore-<id>/
+      protective.swcc-backup.zip # retained prior dataset, not encrypted
+      prior-manifest.json
+      incoming-manifest.json
+      prior/                # retained until replacement is fully verified
+      protective-dataset/   # verified fallback during recovery
+  recovery.json            # durable journal, processed before ordinary DB open
 ```
 
 The storage location is visible in the app. A persisted, non-blocking acknowledgement explains OS-user-local storage and explicit backups. There is no account or network storage. One active instance per storage root protects the normal OS-user dataset.
 
-**Full-app backup and validated restore preview are implemented; replacement is not available yet.** Open **Backup and restore → Create full backup**, then choose a location outside SWCC storage, preferably on another device or external drive. Keep the complete `.swcc-backup.zip` file safe: it contains all years and original evidence and is **not encrypted**. There is no automatic cloud sync. The quiet status shows the last successful full backup and subsequent recorded data changes.
+Open **Backup and restore → Create full backup**, then choose a location outside SWCC storage, preferably on another device or external drive. Keep the complete `.swcc-backup.zip` file safe: it contains all years and original evidence and is **not encrypted**. There is no automatic cloud sync. The quiet status shows the last successful full backup and subsequent recorded data changes.
 
-The separate **Restore all years → Preview full backup** action opens an OS archive chooser, validates the archive, and compares its creation date, years and record/file counts with the current dataset. **Replace all years** remains disabled: this build cannot replace or merge records. Cancel removes only that inspection’s staged files. Keep the existing dataset when installing a replacement app. Annual forms and portfolio exports are not restorable full-app backups. Never manually copy only an open SQLite database file.
+The separate **Restore all years → Preview full backup** action opens an OS archive chooser, validates the archive, and compares its creation date, years and record/file counts with the current dataset. **Cancel, keep current data** leaves live data untouched. **Replace all years** explicitly confirms replacement, never merging. SWCC first creates and independently validates a protective full backup of current data, then closes SQLite, moves whole directories and fully validates the opened replacement. Failure recovers prior usable records and explains the exact error. Startup processes an interrupted recovery journal before opening ordinary records. Keep the protective archive path reported in the outcome; it remains under local storage and is not a substitute for an external backup. Annual forms and portfolio exports are not restorable full-app backups. Never manually copy only an open SQLite database file.
 
 Startup refuses corrupt, empty, missing-from-an-existing-dataset, future-schema, or relationship-invalid databases. Migration/read/write/IPC errors are surfaced; SWCC never resets records as a recovery shortcut.
 
@@ -67,6 +76,7 @@ Startup refuses corrupt, empty, missing-from-an-existing-dataset, future-schema,
 | `src/main/archive.ts` | Maintained `yazl` streaming ZIP writer; hashes the exact archived bytes, propagates read/write failures and cancellation |
 | `src/shared/backup.ts` | Versioned full-backup manifest, typed outcome and honest operation progress |
 | `src/shared/restore.ts`, `src/main/data/restore.ts` | Typed inspection/preview, maintained `yauzl` ZIP reader, bounded confined extraction and strict read-only dataset validation |
+| `src/main/data/restore-recovery.ts` | Verified protective full backup, durable scoped journal, whole-directory replacement and restart-safe recovery before database opening |
 | `src/main/data/migrations.ts` | Ordered transactional migrations; SQLite `user_version` is schema version |
 | `src/main/data/storage.ts` | Stable dataset/evidence/runtime/staging/journal paths |
 | `src/main/index.ts`, `preload.cts` | Single instance, restricted typed IPC, isolated/sandboxed renderer, navigation/new-window constraints, protected close |
@@ -81,9 +91,9 @@ Startup refuses corrupt, empty, missing-from-an-existing-dataset, future-schema,
 | `src/renderer/annual-workflow.tsx` | C's adjacent annual checklist, declaration entry/warnings and explicit forms draft export |
 | `src/shared/forms.ts`, `src/main/export/forms.ts` | Draft-export warnings, measured source-template projection, local font appearances, flattening and complete PDF publication |
 | `src/shared/portfolio.ts`, `src/main/export/portfolio.ts`, `src/renderer/portfolio-dialog.tsx` | Distinct annual portfolio ZIP, original evidence inventory/hashes, portable names, draft warnings and cancellable progress |
-| `src/renderer/backup-screen.tsx` | C's full-backup action, quiet status, inspection progress/cancel and whole-dataset preview with replacement disabled |
+| `src/renderer/backup-screen.tsx` | C's full-backup action, quiet status, inspection/cancel, explicit whole-dataset confirmation and replacement/recovery progress |
 
-Export/backup implementations belong in **main-process modules**, not renderer/file-system bridges. The dashboard has separate **Export Forms PDF** and **Export Complete Portfolio ZIP** actions, invoking narrowly typed `exportForms` and `exportPortfolio` operations. Record deletion, managed evidence and repair, readiness, manual completion, external declaration recording, full-app backup and validated restore preview are implemented. Recoverable replacement remains unavailable. Ready never means manually Completed.
+Export/backup implementations belong in **main-process modules**, not renderer/file-system bridges. The dashboard has separate **Export Forms PDF** and **Export Complete Portfolio ZIP** actions, invoking narrowly typed `exportForms` and `exportPortfolio` operations. Record deletion, managed evidence and repair, readiness, manual completion, external declaration recording, full-app backup and recoverable replacement are implemented. Ready never means manually Completed.
 
 Public operations return `Result<T>`, not success-shaped failures. `createYear` returns a stable package and persists selection. A duplicate returns `DUPLICATE_YEAR` with `existingPackageId` for actionable opening. `openYear` persists selection without advancing content/data revisions. `saveDraft` accepts a **complete `Draft`** plus package ID and expected content revision; unknown draft fields, malformed dates, and stale revisions are rejected without overwriting the saved record.
 
@@ -138,7 +148,25 @@ Absolute/parent-traversal/backslash paths, duplicate entries/properties, symlink
 
 Inspection never modifies live records, evidence or successful-backup metadata. Failure/cancellation removes only the operation-owned staging directory, leaving other staging artifacts alone. Cleanup errors remain failures with a retry action rather than claiming cancellation succeeded. Normal close cancels an open preview after the shared successful flush; close during inspection is blocked until it finishes or is cancelled. Use the native dialog’s Cancel action while choosing. Forced termination may leave its private staging artifacts, but cannot replace the live dataset.
 
-The C comparison is a **preview**, not completed restoration. **Replace all years** stays disabled. Recovery backup, replacement moves/journal and interrupted replacement recovery belong to ticket 13 and are not implemented here.
+The C comparison is a **preview**, not completed restoration. Only **Replace all years** explicitly confirms that preview.
+
+## Recoverable whole-dataset replacement
+
+`replaceFullDataset({ previewId, confirmed: true })` is the same narrow typed operation used by preload, renderer and real-SQLite checks. It accepts no archive or filesystem path. Only the successfully validated current preview can be confirmed. Both editing sessions flush again before confirmation; failed saves retain visible edits and block replacement. Main immediately reserves replacement, drains admitted asynchronous mutations/exports and refuses a stale preview if those writes changed current data. Conflicting writes, deletion, exports, backups, new inspection and normal close remain blocked through verification or recovery. Cancellation is available before confirmation, not during moves.
+
+The protective archive uses the actual full-backup writer and SQLite backup API, then the actual strict archive inspector verifies its ZIP, standalone database and original evidence. Its private location is outside `dataset/`. A failed protective backup or changed staged bytes aborts before moving live data. The safety copy does not advance successful external-backup metadata or data revisions.
+
+Extracted files, directories and journal writes are flushed before moves. A durable, versioned `recovery.json` names only confined operation-owned copies outside the replaceable directory. Invalid or symbolic-link journals, including dangling links, refuse ordinary dataset initialization. SQLite is closed before the entire current `dataset/` becomes `prior/` and the validated staging directory becomes `dataset/`. Main reopens normal records and runs the shared full schema/database/source-set, ownership/reference/revision/date/completion and actual evidence size/hash validation. All records, IDs, counters (including deleted-reference gaps), original filenames, date-only strings, relevant/manual completions, declarations and snapshot metadata are preserved.
+
+Until full validation is durably recorded, failure or restart restores the prior directory, or its independently verified protective snapshot if that directory is unusable. Recovery itself is journaled and retryable across another interruption. If recovery cannot complete, SWCC refuses ordinary database initialization, preserves the journal/copies and explicitly reports records unavailable—not an empty success. A durably verified replacement is revalidated on restart before finishing the commit. Only after the outcome is durable are redundant operation-owned directories removed; cleanup failures identify retained copies without undoing verified usable records. The protective ZIP remains.
+
+Success refreshes the selected year, editing/review sessions, evidence and workflow views. Backup status reflects the **restored snapshot's recorded metadata**, not a fictitious new backup of incoming data. Create a new full backup outside this device after restoring. Force quit cannot flush unsaved renderer text; recovery tests verify already saved data, not preservation of uncommitted in-memory edits.
+
+`tests/restore.test.ts` uses actual public operations, multi-year SQLite/WAL, original evidence and independently read protective ZIPs. `tests/restore-process.mjs` runs those production operations in fresh Electron-Node processes; SIGKILL at journal/move/reopen/validation boundaries and during recovery is followed by actual restarted-process readback. `tests/desktop/restore.spec.ts` uses real offline Electron main/preload/renderer actions for confirmation, cancellation, protective-write progress/failure, busy/close protection, both-session failed flushes, retry and startup recovery. Pauses/errors are injected only at internal transaction or filesystem/OS boundaries, never through a competing renderer interface.
+
+Ticket 13 development verification, October 31, 2026, available macOS / arm64 host: merged the latest integration including complete portfolio ticket 10 (`3a9a96f`), preserving both typed operations and archive/restore gates. **176 public-operation tests**, typecheck, lint and production-asset build passed. **33 targeted real offline Electron checks** passed across restore, backup, forms, portfolio, drafts and completion, including **11 restore renderer checks**. Restarts use actual killed/new processes, not in-process exception recovery alone. Fresh/populated replacement readback preserves all records, original evidence, G/A/E counter gaps, dates, review/manual completion revisions and declarations; protective archives are independently inspected. No dependency manifests changed. No installers, installed-target or Windows/Intel/cross-platform-transfer checks were run; deployment remains deferred. The existing Vite large-chunk advisory remains.
+
+The final journal-link safety fix (`5f5f918`) was reverified with all **176 operations**, typecheck, lint, build and a complete passing **33-check desktop run**. One earlier run recorded a roughly six-minute filesystem-backed stall and two timeout failures; those exact cases passed three isolated repeats and the subsequent full operation run. An existing busy-write desktop check once observed an extra trailing space; it likewise passed three isolated repeats and the complete final desktop run. No assertions, timeouts or unrelated production behavior were relaxed. The stall's underlying host/I/O cause was not established; no reproducible functional failure remains.
 
 ## Shared and supplementary activities
 

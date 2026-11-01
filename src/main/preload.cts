@@ -8,6 +8,7 @@ async function invoke<T>(channel: string, input?: unknown): Promise<Result<T>> {
   }
 }
 const operations: DesktopOperations = {
+  replaceFullDataset: input => invoke('swcc:replace-full-dataset', input),
   exportPortfolio: input => invoke('swcc:export-portfolio', input),
   getPortfolioProgress: () => invoke('swcc:get-portfolio-progress'),
   cancelPortfolioExport: () => invoke('swcc:cancel-portfolio-export'),

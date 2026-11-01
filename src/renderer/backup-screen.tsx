@@ -19,12 +19,17 @@ const restoreLabels: Record<RestoreProgress['phase'], string> = {
   validating: 'Checking database integrity, record ownership and managed evidence.',
   preview: 'Backup validated for preview. No records have been restored.',
   cleanup: 'Staged inspection files could not be removed. Check folder permissions and retry cleanup.',
+  protecting: 'Creating and independently validating a protective full backup of the current dataset.',
+  moving: 'Replacing the closed database and evidence together. Do not force quit.',
+  reopening: 'Opening the replacement dataset.',
+  verifying: 'Verifying restored database, sources, references, relationships and original evidence.',
+  recovering: 'Recovering your prior usable dataset. Replacement has not succeeded.',
 };
 
-export function BackupScreen({ state, busy, running, progress, backup, cancel, inspect, inspecting, restoreProgress, cancelInspection }: {
+export function BackupScreen({ state, busy, running, progress, backup, cancel, inspect, inspecting, replacing, restoreProgress, cancelInspection }: {
   state: AppState; busy: boolean; running: boolean; progress: BackupProgress;
   backup: () => void; cancel: () => void;
-  inspect: () => void; inspecting: boolean; restoreProgress: RestoreProgress; cancelInspection: () => void;
+  inspect: () => void; inspecting: boolean; replacing: boolean; restoreProgress: RestoreProgress; cancelInspection: () => void;
 }) {
   const unbacked = state.lastBackupRevision === null || state.dataRevision > state.lastBackupRevision;
   return <>
@@ -64,15 +69,15 @@ export function BackupScreen({ state, busy, running, progress, backup, cancel, i
           <h2>Restore all years</h2>
           <p>Inspect a full backup and compare it with the entire current dataset. Restore replaces all years; it does not merge them.</p>
           <button className="secondary" type="button" disabled={busy} onClick={inspect}>Preview full backup</button>
-          <p>Inspection does not change live records. Replacement is not available in this build. Keep your existing dataset when updating SWCC.</p>
+          <p>Inspection does not change live records. Only explicit confirmation replaces them, after a verified protective full backup.</p>
           {restoreProgress.phase === 'cleanup' && <button className="secondary" type="button" disabled={busy} onClick={cancelInspection}>Retry staging cleanup</button>}
-          {inspecting && <section className="backup-progress" role="status" aria-label="Inspection progress">
+          {inspecting && <section className="backup-progress" role="status" aria-label={replacing ? 'Restore progress' : 'Inspection progress'}>
             <p>{restoreLabels[restoreProgress.phase] || 'Preparing backup inspection.'}</p>
             {restoreProgress.filesTotal > 0 && <>
-              <progress aria-label="Backup bytes inspected" max={Math.max(1, restoreProgress.bytesTotal)} value={restoreProgress.bytesCompleted} />
+              <progress aria-label={replacing ? 'Protective backup bytes checked' : 'Backup bytes inspected'} max={Math.max(1, restoreProgress.bytesTotal)} value={restoreProgress.bytesCompleted} />
               <p>{restoreProgress.filesCompleted} of {restoreProgress.filesTotal} files checked · {Math.round(restoreProgress.bytesCompleted / 1024)} KiB read</p>
             </>}
-            <button className="secondary" type="button" onClick={cancelInspection}>Cancel inspection</button>
+            {!replacing && <button className="secondary" type="button" onClick={cancelInspection}>Cancel inspection</button>}
           </section>}
         </section>
       </aside>
@@ -86,7 +91,9 @@ function Summary({ summary }: { summary: DatasetSummary }) {
     <p>{summary.goals} goals · {summary.activities} activities · {summary.evidenceFiles} evidence files</p>
   </>;
 }
-export function RestorePreviewDialog({ preview, busy, error, cancel }: { preview: RestorePreview; busy: boolean; error: string | null; cancel: () => void }) {
+export function RestorePreviewDialog({ preview, busy, replacing, progress, error, cancel, replace }: {
+  preview: RestorePreview; busy: boolean; replacing: boolean; progress: RestoreProgress; error: string | null; cancel: () => void; replace: () => void;
+}) {
   return <Dialog title="Preview full-app restore" className="goal-dialog restore-dialog" onClose={() => { if (!busy) cancel(); }}>
     <p className="storage-path">{preview.fileName}</p>
     <div className="restore-compare">
@@ -96,12 +103,17 @@ export function RestorePreviewDialog({ preview, busy, error, cancel }: { preview
       </section>
       <section><h3>Current dataset to be replaced</h3><Summary summary={preview.current} /></section>
     </div>
-    <p className="warning">Restore would replace the entire dataset, not merge or resolve duplicate years.
-      No records have been restored. Replacement is unavailable until recoverable restore is implemented.</p>
+    <p className="warning">Restore replaces the entire dataset, not merge or resolve duplicate years.
+      {!replacing && ' No records have been restored.'} Confirm only if you want the validated backup to replace every current year.
+      SWCC first creates and verifies a protective full backup, then retains your prior data until replacement passes full validation.</p>
+    {replacing && <section role="status" aria-label="Replacement progress" className="backup-progress">
+      <p>{restoreLabels[progress.phase] || 'Preparing recoverable replacement.'}</p>
+      <p>Editing, deletion and close are paused. Wait for validation or recovery; do not force quit.</p>
+    </section>}
     {error && <p className="goal-validation" role="alert">{error}</p>}
     <div className="goal-dialog-actions">
       <button className="secondary" type="button" disabled={busy} onClick={cancel}>Cancel, keep current data</button>
-      <button type="button" disabled>Replace all years</button>
+      <button type="button" disabled={busy} onClick={replace}>Replace all years</button>
     </div>
   </Dialog>;
 }

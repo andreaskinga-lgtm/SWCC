@@ -26,6 +26,7 @@ import { exportAnnualPortfolio } from '../export/portfolio.js';
 import type { PortfolioSystem } from '../export/portfolio.js';
 import type { PortfolioProgress } from '../../shared/portfolio.js';
 import { datasetSummary, inspectArchive, RestoreCleanupFailure } from './restore.js';
+import { recoverRestore, recoveryJournalExists, replaceDataset } from './restore-recovery.js';
 import type { RestoreSystem } from './restore.js';
 import type { RestoreProgress } from '../../shared/restore.js';
 import { rm } from 'node:fs/promises';
@@ -106,25 +107,34 @@ export function openApplication(
   const dataset = paths.dataset;
   const databaseFile = paths.database;
   let db: Database.Database | undefined;
-  try {
-    mkdirSync(dataset, { recursive: true });
-    if (!existsSync(databaseFile) && readdirSync(dataset).length > 0) throw new Error('The database is missing from an existing dataset. Recover the complete dataset from a backup.');
-    if (existsSync(databaseFile) && statSync(databaseFile).size === 0) throw new Error('The database is empty. Preserve the dataset and recover from a backup.');
-    db = new Database(databaseFile);
-    db.pragma('foreign_keys = ON');
-    db.pragma('busy_timeout = 5000');
-    if (db.pragma('quick_check', { simple: true }) !== 'ok') throw new Error('SQLite integrity check failed.');
-    migrate(db);
-    if ((db.pragma('foreign_key_check') as unknown[]).length) throw new Error('Dataset relationships are invalid.');
-    db.pragma('journal_mode = WAL');
-    db.pragma('synchronous = FULL');
-    mkdirSync(paths.evidence, { recursive: true });
-    recoverEvidenceDeletions(db, paths.evidence);
-  } catch (error) {
-    db?.close();
-    throw new Error(`Cannot open local records: ${error instanceof Error ? error.message : String(error)} The existing dataset has not been replaced.`, { cause: error });
+  function openDatabase() {
+    try {
+      mkdirSync(dataset, { recursive: true });
+      if (!existsSync(databaseFile) && readdirSync(dataset).length > 0) throw new Error('The database is missing from an existing dataset. Recover the complete dataset from a backup.');
+      if (existsSync(databaseFile) && statSync(databaseFile).size === 0) throw new Error('The database is empty. Preserve the dataset and recover from a backup.');
+      db = new Database(databaseFile);
+      db.pragma('foreign_keys = ON');
+      db.pragma('busy_timeout = 5000');
+      if (db.pragma('quick_check', { simple: true }) !== 'ok') throw new Error('SQLite integrity check failed.');
+      migrate(db);
+      if ((db.pragma('foreign_key_check') as unknown[]).length) throw new Error('Dataset relationships are invalid.');
+      db.pragma('journal_mode = WAL');
+      db.pragma('synchronous = FULL');
+      mkdirSync(paths.evidence, { recursive: true });
+      recoverEvidenceDeletions(db, paths.evidence);
+    } catch (error) {
+      if (db?.open) db.close();
+      throw new Error(`Cannot open local records: ${error instanceof Error ? error.message : String(error)} The existing dataset has not been replaced.`, { cause: error });
+    }
+    return db;
   }
-  const database = db;
+  let recoveryNotice: string | null;
+  try { recoveryNotice = recoverRestore(paths, restoreSystem?.boundary, () => { openDatabase(); }); }
+  catch (error) {
+    if (db?.open) db.close();
+    throw error;
+  }
+  let database = db?.open ? db : openDatabase();
   const now = () => (clock.now?.() ?? new Date()).toISOString();
   const today = () => clock.today?.() ?? localDate();
   const packageSelect = `SELECT id, year, source_set_id AS sourceSetId, assessment_date AS assessmentDate,
@@ -185,6 +195,7 @@ export function openApplication(
       lastBackupRevision: meta.lastBackupRevision,
       schemaVersion: SCHEMA_VERSION,
       storageDirectory: dataset,
+      recoveryNotice,
     };
   }
   async function operation<T>(work: () => T | Promise<T>, failureMessage = 'Local records could not be saved or read'): Promise<Result<T>> {
@@ -200,7 +211,13 @@ export function openApplication(
       } };
     }
   }
-  const evidence = evidenceOperations(database, paths.evidence, getPackage, now, fail, identifier, evidenceSystem);
+  let evidence = evidenceOperations(database, paths.evidence, getPackage, now, fail, identifier, evidenceSystem);
+  let review = reviewOperations(database, now, reviewSystem);
+  function reopen() {
+    database = openDatabase();
+    evidence = evidenceOperations(database, paths.evidence, getPackage, now, fail, identifier, evidenceSystem);
+    review = reviewOperations(database, now, reviewSystem);
+  }
   let backupController: AbortController | null = null;
   let portfolioController: AbortController | null = null;
   const idleProgress = (): BackupProgress => ({
@@ -210,13 +227,44 @@ export function openApplication(
   let portfolioProgress: PortfolioProgress = idleProgress();
   let restoreController: AbortController | null = null;
   let restoreDirectory: string | null = null;
+  let validatedPreview: Awaited<ReturnType<typeof inspectArchive>> | null = null;
+  let previewRevision: number | null = null;
+  let replacing = false;
   const idleRestore = (): RestoreProgress => ({ phase: 'idle', filesCompleted: 0, filesTotal: 0, bytesCompleted: 0, bytesTotal: 0 });
   let restoreProgress = idleRestore();
   let inspecting: Promise<Result<import('../../shared/restore.js').RestoreInspectionOutcome>> | null = null;
   const mutations = new Set<Promise<unknown>>();
   const operations: ApplicationOperations = {
+    replaceFullDataset: input => operation(async () => {
+      if (replacing || restoreController || backupController || portfolioController) fail('BUSY', 'A backup, portfolio export or restore is running. Wait for it to finish.');
+      if (!input || input.confirmed !== true || Object.keys(input).some(key => !['previewId', 'confirmed'].includes(key))
+        || !validatedPreview || input.previewId !== validatedPreview.preview.id)
+        fail('CONFIRMATION_REQUIRED', 'Inspect a complete full backup and explicitly confirm that validated preview before replacing all years.');
+      replacing = true;
+      const incoming = validatedPreview;
+      try {
+        restoreProgress = { ...restoreProgress, phase: 'protecting' };
+        await Promise.allSettled([...mutations]);
+        if (state().dataRevision !== previewRevision) fail('CONFLICT', 'Your current data changed since this preview. Inspect again before confirming replacement.');
+        const outcome = await replaceDataset(database, paths, incoming, now(), restoreSystem,
+          async () => { await Promise.allSettled([...mutations]); }, () => { if (database.open) database.close(); },
+          reopen, (phase, progress) => {
+            restoreProgress = { phase, filesCompleted: progress?.filesCompleted ?? 0, filesTotal: progress?.filesTotal ?? 0,
+              bytesCompleted: progress?.bytesCompleted ?? 0, bytesTotal: progress?.bytesTotal ?? 0 };
+          }, fail);
+        return { state: state(), ...outcome };
+      } finally {
+        replacing = false;
+        validatedPreview = null;
+        previewRevision = null;
+        if (restoreDirectory && !recoveryJournalExists(paths)) await rm(restoreDirectory, { recursive: true, force: true });
+        restoreDirectory = null;
+        restoreProgress = idleRestore();
+      }
+    }),
     exportPortfolio: input => operation(async () => {
-      if (backupController || portfolioController || restoreController) fail('BUSY', 'An archive operation is already running. Wait for it to finish before exporting a portfolio.');
+      if (backupController || portfolioController || restoreController || replacing || !database.open || recoveryJournalExists(paths))
+        fail('BUSY', 'An archive operation or restore recovery is running. Wait for it to finish before exporting a portfolio.');
       if (!input || typeof input !== 'object' || Array.isArray(input)
         || Object.keys(input).some(key => !['packageId', 'confirmDraft'].includes(key))
         || (input.confirmDraft !== undefined && input.confirmDraft !== true))
@@ -266,7 +314,8 @@ export function openApplication(
       portfolioController?.abort();
     }),
     inspectFullBackup: () => {
-      if (restoreController || restoreDirectory || backupController || portfolioController) return operation(() => fail('BUSY', 'Finish or cancel the current archive operation before choosing another archive.'));
+      if (restoreController || restoreDirectory || backupController || portfolioController || replacing || !database.open || recoveryJournalExists(paths))
+        return operation(() => fail('BUSY', 'Finish or cancel the current archive operation or recover local records before choosing another archive.'));
       restoreController = new AbortController();
       const controller = restoreController;
       restoreProgress = { ...idleRestore(), phase: 'choosing' };
@@ -275,9 +324,12 @@ export function openApplication(
           if (!restoreSystem) fail('VALIDATION', 'The backup archive dialog is unavailable.');
           const archive = await restoreSystem.chooseArchive();
           if (!archive || controller.signal.aborted) return { cancelled: true as const };
+          await Promise.allSettled([...mutations]);
           const inspected = await inspectArchive(archive, paths, () => datasetSummary(database), controller.signal,
             progress => { restoreProgress = progress; });
           restoreDirectory = inspected.directory;
+          validatedPreview = inspected;
+          previewRevision = state().dataRevision;
           restoreProgress = { ...restoreProgress, phase: 'preview' };
           return { cancelled: false as const, preview: inspected.preview };
         } catch (error) {
@@ -298,6 +350,7 @@ export function openApplication(
     },
     getRestoreProgress: () => operation(() => ({ ...restoreProgress })),
     cancelRestorePreview: () => operation(async () => {
+      if (replacing) fail('BUSY', 'Replacement has been confirmed. Wait for validation or recovery; it cannot safely be cancelled during directory moves.');
       restoreController?.abort();
       if (inspecting) await inspecting;
       if (restoreDirectory) {
@@ -308,10 +361,13 @@ export function openApplication(
         }
         restoreDirectory = null;
       }
+      validatedPreview = null;
+      previewRevision = null;
       restoreProgress = idleRestore();
     }),
     createFullBackup: () => operation(async () => {
-      if (backupController || restoreController || portfolioController) fail('BUSY', 'An archive operation is already running. Wait for it to finish.');
+      if (backupController || restoreController || portfolioController || replacing || !database.open || recoveryJournalExists(paths))
+        fail('BUSY', 'An archive operation or restore recovery is already running. Wait for it to finish.');
       backupController = new AbortController();
       backupProgress = { ...idleProgress(), phase: 'choosing' };
       try {
@@ -328,7 +384,8 @@ export function openApplication(
       if (backupProgress.phase === 'publishing') fail('BUSY', 'The complete archive is being published. Wait for publication to finish.');
       backupController?.abort();
     }),
-    ...reviewOperations(database, now, reviewSystem),
+    ...Object.fromEntries(Object.keys(review).map(key => [key, (input: unknown) =>
+      (review[key as keyof typeof review] as (input: unknown) => Promise<Result<unknown>>)(input)])) as unknown as typeof review,
     exportForms: input => operation(() => {
       if (!input || typeof input !== 'object' || Array.isArray(input)
         || Object.keys(input).some(key => !['packageId', 'confirmDraft'].includes(key)))
@@ -613,10 +670,10 @@ export function openApplication(
   for (const key of protectedOperations) {
     const original = operations[key] as (input: unknown) => Promise<Result<unknown>>;
     const guarded = async (input: unknown): Promise<Result<unknown>> => {
-      if (backupController || restoreController || portfolioController) return {
+      if (backupController || restoreController || portfolioController || replacing || !database.open || recoveryJournalExists(paths)) return {
         ok: false, error: { code: 'BUSY', message: backupController || portfolioController
           ? `A ${portfolioController ? 'portfolio export' : 'full backup'} is collecting your records and evidence. Wait for it to finish, then retry; your edit has not been applied.`
-          : 'Backup inspection is running. Wait for it or cancel inspection, then retry; your edit has not been applied.' },
+          : 'Restore or recovery is running. Wait for it to finish, then retry; your edit has not been applied.' },
       };
       const running = original(input);
       mutations.add(running);
@@ -625,9 +682,22 @@ export function openApplication(
     };
     Object.assign(operations, { [key]: guarded });
   }
+  const guardedReads = [
+    'getState', 'getWorkflow', 'getPlanReadiness', 'getEvidence', 'previewEvidence',
+    'openEvidence', 'openEvidenceLink', 'getReview', 'getReviewDocument',
+  ] as const satisfies readonly (keyof ApplicationOperations)[];
+  for (const key of guardedReads) {
+    const original = operations[key] as (input: unknown) => Promise<Result<unknown>>;
+    Object.assign(operations, { [key]: (input: unknown): Promise<Result<unknown>> => {
+      if (replacing) return operation(() => fail('BUSY', 'Dataset replacement is running. Wait for full validation or recovery before reading restored records.'));
+      if (!database.open || recoveryJournalExists(paths)) return operation(() =>
+        fail('STORAGE', `Recovery has not finished. Records are unavailable, not empty. Preserve ${paths.recoveryJournal} and the recovery copies; restart SWCC to retry.`));
+      return original(input);
+    } });
+  }
   return { operations, close: () => {
     if (backupController || portfolioController) throw new Error('Wait for the archive operation to finish before closing local records.');
-    if (restoreController || restoreDirectory) throw new Error('Cancel the restore inspection or preview before closing local records.');
-    database.close();
+    if (restoreController || restoreDirectory || replacing) throw new Error('Finish the restore or cancel its preview before closing local records.');
+    if (database.open) database.close();
   } };
 }

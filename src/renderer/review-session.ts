@@ -22,9 +22,10 @@ export class ReviewSession {
     this.current = { ...this.current, ...patch };
     this.listeners.forEach(listener => listener());
   }
-  async open(packageId: string) {
+  async open(packageId: string | null) {
     await this.flush();
     const opening = ++this.opening;
+    if (packageId === null) { this.update({ record: null, status: 'Saved', error: null }); return; }
     this.update({ record: null, status: 'Saving', error: null });
     const result = await this.operations.getReview(packageId);
     if (opening !== this.opening) return;
