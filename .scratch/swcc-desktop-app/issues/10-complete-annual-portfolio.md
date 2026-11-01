@@ -4,7 +4,7 @@
 
 **Blocked by:** 09: Carry long annual narratives onto readable continuation pages.
 
-**Status:** claimed
+**Status:** resolved
 
 Claimed October 31, 2026 after ticket 09 integration; implementation branch `ticket/10`.
 
@@ -17,3 +17,11 @@ Claimed October 31, 2026 after ticket 09 integration; implementation branch `tic
 - [ ] Incomplete readiness/manual completion warns and permits draft export; missing/corrupt required attachment bytes, PDF generation errors, or storage/write failures fail explicitly. Never silently omit evidence.
 - [ ] Publish the final archive only after all output is completely written. A cancelled or failed operation cannot report success or leave a partial archive looking complete.
 - [ ] Public-operation checks inspect real ZIP contents/manifests/indexes, extract original files, and compare their hashes/bytes. Cover long forms, shared/supplementary activities, duplicate/Windows-reserved/accented names, broken evidence, attempted concurrent edits/deletions, failed flush, and write failure.
+
+## Comments
+
+### 2026-10-31 — complete annual portfolio integrated
+
+Implemented at `6decf3c`, with integration-tip merge `0739ef5`, and merged into `integration/swcc-desktop-app` with `e9cee535cc836be3fca2063c6758de753b460d38`. The separate annual ZIP operation includes complete original-layout forms, evidence index, portfolio manifest, and original evidence bytes under safe stable E paths. Draft warnings, coherent snapshots, mutation protection, cancellation, publication, integrity failures, and clear full-backup/portfolio distinction are implemented.
+
+Canonical tree exactly matched the tested ticket tip and passed 153 operation tests, typecheck, lint, and build. The implementer passed 26 real offline Electron checks and inspected genuine ZIP/PDF/evidence/hash results. Canonical GUI tests were deferred while ticket 13 remained active. Windows/Intel and installers remain unverified; deployment work is deferred by user.
