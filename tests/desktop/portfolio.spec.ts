@@ -59,6 +59,36 @@ async function contents(path: string): Promise<Map<string, Buffer>> {
   });
 }
 
+test('portfolio failed progress Result is visible and retry keeps the same in-flight export', async () => {
+  await desktop.evaluate(({ dialog, ipcMain }) => {
+    dialog.showSaveDialog = () => new Promise(resolveDialog => {
+      (globalThis as typeof globalThis & { releasePortfolioDialog: () => void }).releasePortfolioDialog =
+        () => resolveDialog({ canceled: true, filePath: '' });
+    });
+    ipcMain.removeHandler('swcc:get-portfolio-progress');
+    ipcMain.handle('swcc:get-portfolio-progress', () => ({
+      ok: false, error: { code: 'IPC', message: 'portfolio progress connection interrupted' },
+    }));
+  });
+  await page.getByRole('button', { name: 'Export Complete Portfolio ZIP', exact: true }).click();
+  const warning = page.getByRole('dialog', { name: 'Export complete annual portfolio' });
+  await warning.getByRole('button', { name: 'Export draft ZIP', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('portfolio progress connection interrupted');
+  await desktop.evaluate(({ ipcMain }) => {
+    ipcMain.removeHandler('swcc:get-portfolio-progress');
+    ipcMain.handle('swcc:get-portfolio-progress', () => ({
+      ok: true, value: { phase: 'choosing', filesCompleted: 0, filesTotal: 0, bytesCompleted: 0, bytesTotal: 0 },
+    }));
+  });
+  await page.getByRole('button', { name: 'Retry portfolio progress', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Retry portfolio progress', exact: true })).toHaveCount(0);
+  await expect(warning).toBeVisible();
+  await desktop.evaluate(() => {
+    (globalThis as typeof globalThis & { releasePortfolioDialog: () => void }).releasePortfolioDialog();
+  });
+  await expect(page.locator('.operation-feedback')).toContainText('Portfolio export cancelled');
+});
+
 test('C dashboard keyboard portfolio export consumes latest edits and writes real long forms and original evidence offline', async () => {
   test.setTimeout(60_000);
   const path = resolve(root, 'CCP-2024-portfolio.zip');

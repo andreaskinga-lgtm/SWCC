@@ -3,6 +3,7 @@ import type { AnnualWorkflow } from '../shared/workflow.js';
 import type { PortfolioProgress } from '../shared/portfolio.js';
 import { formsExportWarnings } from '../shared/forms.js';
 import { Dialog } from './assessment-screen.js';
+import { ProgressFailure, type ProgressMonitor } from './operation-progress.js';
 
 const phaseLabels: Record<PortfolioProgress['phase'], string> = {
   idle: 'Preparing annual portfolio.',
@@ -14,9 +15,10 @@ const phaseLabels: Record<PortfolioProgress['phase'], string> = {
   publishing: 'Publishing the complete portfolio ZIP.',
 };
 
-export function PortfolioExportDialog({ pkg, workflow, busy, running, progress, error, exportPortfolio, cancel, close }: {
+export function PortfolioExportDialog({ pkg, workflow, busy, running, progress, error, exportPortfolio, cancel, close, monitor }: {
   pkg: YearPackage; workflow: AnnualWorkflow; busy: boolean; running: boolean; progress: PortfolioProgress;
   error: string | null; exportPortfolio: (draft: boolean) => void; cancel: () => void; close: () => void;
+  monitor: ProgressMonitor;
 }) {
   const missing = formsExportWarnings(pkg, workflow);
   return <Dialog title="Export complete annual portfolio" onClose={() => { if (!busy) close(); }}>
@@ -28,6 +30,7 @@ export function PortfolioExportDialog({ pkg, workflow, busy, running, progress, 
       <p>You can explicitly export a draft; missing fields stay blank. Application readiness and completion are not College compliance.</p>
       <ul>{missing.map(item => <li key={item}>{item}</li>)}</ul>
     </section>}
+    <ProgressFailure monitor={monitor} label="portfolio" />
     {error && <p className="goal-validation" role="alert">{error}</p>}
     {running && <section className="backup-progress" role="status" aria-label="Portfolio export progress">
       <p>{phaseLabels[progress.phase]}</p>

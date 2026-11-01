@@ -1,4 +1,4 @@
-import type { Activity, ActivityFields, ApplicationOperations, CreateGoal, Draft, Goal, YearPackage } from '../shared/application.js';
+import type { Activity, ActivityFields, ApplicationOperations, CreateGoal, Draft, Goal, Result, YearPackage } from '../shared/application.js';
 
 type PendingGoal = Pick<CreateGoal, 'title' | 'description' | 'activityId'>;
 type PendingActivity = Pick<ActivityFields, 'title' | 'description' | 'goalIds'>;
@@ -120,6 +120,29 @@ export class DraftSession {
     this.saving = this.savePending().finally(() => { this.saving = undefined; });
     return this.saving;
   }
+  async withSavedRecord(work: (record: YearPackage) => Promise<void>): Promise<void> {
+    await this.flush();
+    const record = this.current.record;
+    if (!record) throw new Error('Open a year before changing saved records.');
+    this.saving = (async () => {
+      try { await work(record); }
+      finally { await this.savePending(); }
+    })().finally(() => { this.saving = undefined; });
+    return this.saving;
+  }
+  private async savedResult(
+    work: () => Promise<Result<YearPackage>>,
+    connectionError = 'The desktop connection failed. Keep your edits here and retry saving.',
+  ): Promise<YearPackage> {
+    let result;
+    try { result = await work(); }
+    catch { result = { ok: false as const, error: { message: connectionError } }; }
+    if (!result.ok) {
+      this.update({ ...this.current, status: 'Not saved', error: result.error.message });
+      throw new Error(result.error.message);
+    }
+    return result.value;
+  }
   private async savePending() {
     while (this.current.record && (
       this.savedDraftVersion !== this.draftVersion || this.goalEdits.size > 0 || this.pendingGoalCreation
@@ -129,24 +152,15 @@ export class DraftSession {
         const draftVersion = this.draftVersion;
         const record = this.current.record;
         this.update({ ...this.current, status: 'Saving', error: null });
-        let result;
-        try {
-          result = await this.operations.saveDraft({
-            packageId: record.id, expectedRevision: record.contentRevision,
-            draft: {
-              assessmentDate: record.assessmentDate, planDate: record.planDate, strengths: record.strengths,
-              peerFeedback: record.peerFeedback, learningNeeds: record.learningNeeds, annualStandards: record.annualStandards,
-            },
-          });
-        } catch {
-          result = { ok: false as const, error: { message: 'The desktop connection failed. Keep your edits here and retry saving.' } };
-        }
-        if (!result.ok) {
-          this.update({ ...this.current, status: 'Not saved', error: result.error.message });
-          throw new Error(result.error.message);
-        }
+        const saved = await this.savedResult(() => this.operations.saveDraft({
+          packageId: record.id, expectedRevision: record.contentRevision,
+          draft: {
+            assessmentDate: record.assessmentDate, planDate: record.planDate, strengths: record.strengths,
+            peerFeedback: record.peerFeedback, learningNeeds: record.learningNeeds, annualStandards: record.annualStandards,
+          },
+        }));
         if (this.draftVersion === draftVersion) this.savedDraftVersion = draftVersion;
-        this.applySaved(result.value);
+        this.applySaved(saved);
         continue;
       }
 
@@ -154,21 +168,12 @@ export class DraftSession {
         const [goalId, edit] = this.goalEdits.entries().next().value as [string, GoalEdit];
         const record = this.current.record;
         this.update({ ...this.current, status: 'Saving', error: null });
-        let result;
-        try {
-          result = await this.operations.updateGoal({
-            packageId: record.id, goalId, expectedRevision: record.contentRevision,
-            title: edit.goal.title, description: edit.goal.description,
-          });
-        } catch {
-          result = { ok: false as const, error: { message: 'The desktop connection failed. Keep your edits here and retry saving.' } };
-        }
-        if (!result.ok) {
-          this.update({ ...this.current, status: 'Not saved', error: result.error.message });
-          throw new Error(result.error.message);
-        }
+        const saved = await this.savedResult(() => this.operations.updateGoal({
+          packageId: record.id, goalId, expectedRevision: record.contentRevision,
+          title: edit.goal.title, description: edit.goal.description,
+        }));
         if (this.goalEdits.get(goalId)?.version === edit.version) this.goalEdits.delete(goalId);
-        this.applySaved(result.value);
+        this.applySaved(saved);
         continue;
       }
 
@@ -176,37 +181,25 @@ export class DraftSession {
         const [activityId, edit] = this.activityEdits.entries().next().value as [string, ActivityEdit];
         const record = this.current.record;
         this.update({ ...this.current, status: 'Saving', error: null });
-        let result;
-        try {
-          const { title, description, status, completionDate, evidenceDescription, evidenceLinks, applicationToPractice, goalIds } = edit.activity;
-          result = await this.operations.updateActivity({
-            packageId: record.id, expectedRevision: record.contentRevision, activityId,
-            title, description, status, completionDate, evidenceDescription, evidenceLinks, applicationToPractice, goalIds,
-          });
-        } catch { result = { ok: false as const, error: { message: 'The desktop connection failed. Keep your edits here and retry saving.' } }; }
-        if (!result.ok) {
-          this.update({ ...this.current, status: 'Not saved', error: result.error.message });
-          throw new Error(result.error.message);
-        }
+        const { title, description, status, completionDate, evidenceDescription, evidenceLinks, applicationToPractice, goalIds } = edit.activity;
+        const saved = await this.savedResult(() => this.operations.updateActivity({
+          packageId: record.id, expectedRevision: record.contentRevision, activityId,
+          title, description, status, completionDate, evidenceDescription, evidenceLinks, applicationToPractice, goalIds,
+        }));
         if (this.activityEdits.get(activityId)?.version === edit.version) this.activityEdits.delete(activityId);
-        this.applySaved(result.value);
+        this.applySaved(saved);
         continue;
       }
 
       if (this.pendingActivityCreation) {
         const request = this.pendingActivityCreation;
         const record = this.current.record;
-        let result;
-        try {
-          result = await this.operations.createActivity({ ...request, packageId: record.id, expectedRevision: record.contentRevision });
-        } catch { result = { ok: false as const, error: { message: 'The desktop connection failed. Keep this activity here and retry saving.' } }; }
-        if (!result.ok) {
-          this.update({ ...this.current, status: 'Not saved', error: result.error.message });
-          throw new Error(result.error.message);
-        }
+        const saved = await this.savedResult(() => this.operations.createActivity({
+          ...request, packageId: record.id, expectedRevision: record.contentRevision,
+        }), 'The desktop connection failed. Keep this activity here and retry saving.');
         this.pendingActivityCreation = null;
         this.update({ ...this.current, pendingActivityCreation: null });
-        this.applySaved(result.value);
+        this.applySaved(saved);
         continue;
       }
 
@@ -214,23 +207,14 @@ export class DraftSession {
         const request = this.pendingGoalCreation;
         const record = this.current.record;
         this.update({ ...this.current, status: 'Saving', error: null });
-        let result;
-        try {
-          result = await this.operations.createGoal({
-            packageId: record.id, expectedRevision: record.contentRevision,
-            title: request.title, description: request.description,
-            ...(request.activityId ? { activityId: request.activityId } : {}),
-          });
-        } catch {
-          result = { ok: false as const, error: { message: 'The desktop connection failed. Keep your edits here and retry saving.' } };
-        }
-        if (!result.ok) {
-          this.update({ ...this.current, status: 'Not saved', error: result.error.message });
-          throw new Error(result.error.message);
-        }
+        const saved = await this.savedResult(() => this.operations.createGoal({
+          packageId: record.id, expectedRevision: record.contentRevision,
+          title: request.title, description: request.description,
+          ...(request.activityId ? { activityId: request.activityId } : {}),
+        }));
         this.pendingGoalCreation = null;
         this.update({ ...this.current, pendingGoalCreation: null });
-        this.applySaved(result.value);
+        this.applySaved(saved);
       }
     }
     this.savedVersion = this.version;
@@ -238,7 +222,7 @@ export class DraftSession {
   }
   acceptSaved(saved: YearPackage) {
     const current = this.current.record;
-    if (!current) return;
+    if (!current || current.id !== saved.id) return;
     const goals = saved.goals.map(goal => this.goalEdits.has(goal.id)
       ? current.goals.find(item => item.id === goal.id) ?? goal
       : goal);

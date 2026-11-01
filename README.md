@@ -74,6 +74,7 @@ Startup refuses corrupt, empty, missing-from-an-existing-dataset, future-schema,
 | `src/main/data/evidence.ts` | Main-owned file chooser/open actions, managed copies, stable E references, SHA-256 integrity and repair |
 | `src/main/data/backup.ts` | Full-dataset SQLite backup, confined evidence inventory, main-owned save dialog, complete-file publication and successful status |
 | `src/main/archive.ts` | Maintained `yazl` streaming ZIP writer; hashes the exact archived bytes, propagates read/write failures and cancellation |
+| `src/main/export/destination.ts` | Shared forms/portfolio/backup destination confinement, protecting app storage and rejecting symbolic-linked output |
 | `src/shared/backup.ts` | Versioned full-backup manifest, typed outcome and honest operation progress |
 | `src/shared/restore.ts`, `src/main/data/restore.ts` | Typed inspection/preview, maintained `yauzl` ZIP reader, bounded confined extraction and strict read-only dataset validation |
 | `src/main/data/restore-recovery.ts` | Verified protective full backup, durable scoped journal, whole-directory replacement and restart-safe recovery before database opening |
@@ -81,6 +82,7 @@ Startup refuses corrupt, empty, missing-from-an-existing-dataset, future-schema,
 | `src/main/data/storage.ts` | Stable dataset/evidence/runtime/staging/journal paths |
 | `src/main/index.ts`, `preload.cts` | Single instance, restricted typed IPC, isolated/sandboxed renderer, navigation/new-window constraints, protected close |
 | `src/renderer/draft-session.ts` | Retained draft, goal and activity edits/creation, serialized autosave, shared flush/failure contract |
+| `src/renderer/operation-progress.tsx` | Shared progress monitoring with explicit failed IPC feedback and retry without restarting the operation |
 | `src/renderer/assessment-screen.tsx` | C-style assessment writing, annual standards, shared goal editors and Step 2 readiness |
 | `src/renderer/plan-screen.tsx` | C goal-connection strip, activity index, one selected shared editor and Step 3 readiness |
 | `src/renderer/EvidencePreview.tsx`, `pdfjs-worker.ts` | Local PDF.js previews and safe raster-image previews from verified bytes |
@@ -109,7 +111,9 @@ Each package owns `reference_counters` for `G`, `A`, and `E`, initialized at 1. 
 
 `DraftSession.edit()` retains text immediately. Autosave debounces 400 ms and serializes writes. Keystrokes during a save remain visible; returned revisions advance underneath them, and the newest draft is saved next.
 
-**Every renderer action that consumes or leaves edited records must first flush both `DraftSession` and `ReviewSession`**: navigation, completion, declaration entry, forms export, and full backup. Resolution means all edits present during the flush have committed. Rejection means pending changes remain visible, status is **Not saved**, and the consuming action must not continue. Never swallow a rejected flush and report Saved/success. Retrying saves the retained changes; revision conflicts must not silently overwrite newer saved data.
+**Every renderer action that consumes or leaves edited records must first flush both `DraftSession` and `ReviewSession`**: navigation/activity selection, goal/activity/evidence operations, completion, declaration entry, exports, and full backup. The shell supplies the same both-session flush to assessment and plan consumers. Resolution means all edits present during the flush have committed. Rejection means pending changes remain visible, status is **Not saved**, and the consuming action must not continue. Never swallow a rejected flush and report Saved/success. Retrying saves the retained changes; revision conflicts must not silently overwrite newer saved data.
+
+Evidence import/replacement leaves text editing enabled while the OS chooser and managed copy run. `DraftSession.withSavedRecord()` serializes that operation with autosave and navigation. The returned saved package is adopted only for the same package ID, beneath retained draft/goal/activity edits; those edits then save against the returned revision. Invalid or failed edits remain visible and retryable rather than being discarded by reopening the package.
 
 Normal window close, app Quit, Windows session-end query, and macOS shutdown notification request that same renderer flush. Main permits termination only after a successful renderer acknowledgement. Failed flush keeps the window open with actionable status and Retry save. A retry after a failed close saves without silently closing; the worker can then close deliberately.
 
@@ -144,7 +148,7 @@ Focused tests use the public operation with real multi-year SQLite/WAL records, 
 
 Detection uses ZIP contents and the manifest, never the filename extension. This build accepts archive version 1 and the shipped schema 7 only, with exact application/source-set identity and strict manifest fields. Older/future schemas require a compatible build, not a silent migration or repaired substitute. The database is opened read-only in private `restore-staging/inspection-<id>/`, outside `dataset/`. Its schema, SQLite integrity, foreign keys, stored types, unique ownership, dates/statuses, completion/declaration/backup revisions and stable reference counters must be valid. Every managed evidence record must match exactly one inventoried, streamed, hash-verified file.
 
-Absolute/parent-traversal/backslash paths, duplicate entries/properties, symlinks/special files, encrypted ZIPs and missing/undeclared files fail visibly. Actual inflated evidence bytes are stopped at 52,428,800 bytes (50 MiB), regardless of declared sizes. Defensive inspection ceilings are 4 MiB for the manifest, 512 MiB for the standalone database and 50,000 inventoried files; larger archives require a compatible inspection implementation. These are inspection bounds, not a yearly evidence quota.
+Absolute/parent-traversal/backslash paths, duplicate entries/properties, symlinks/special files, encrypted ZIPs and missing/undeclared files fail visibly. Actual inflated evidence bytes are stopped at 52,428,800 bytes (50 MiB), regardless of declared sizes. Defensive inspection ceilings are 4 MiB for the manifest, 512 MiB for the standalone database and 50,000 inventoried files. The full-backup writer uses those same shared limits, checks the actual serialized inventory before archiving and again before publication, and refuses unsupported output without replacing an existing backup or recording success. Larger datasets require a compatible backup/inspection implementation; their records and evidence remain editable. These are archive compatibility bounds, not a yearly evidence quota.
 
 Inspection never modifies live records, evidence or successful-backup metadata. Failure/cancellation removes only the operation-owned staging directory, leaving other staging artifacts alone. Cleanup errors remain failures with a retry action rather than claiming cancellation succeeded. Normal close cancels an open preview after the shared successful flush; close during inspection is blocked until it finishes or is cancelled. Use the native dialog’s Cancel action while choosing. Forced termination may leave its private staging artifacts, but cannot replace the live dataset.
 
@@ -188,6 +192,8 @@ The renderer requests import or replacement for a package/activity/evidence ID; 
 
 Imports are streamed into a private partial file, hashed, flushed, and published with attachment metadata in a SQLite transaction. Failed/cancelled imports do not allocate E references or present success. The app reports unreadable inputs, unsupported types, size limits, managed-folder permission failures, and insufficient disk space. Integrity checks compare actual byte count and SHA-256. Missing, unreadable, or changed files are visible and can be replaced without changing their E reference or removed without reusing it.
 
+Replacement uses the existing durable deletion stage for the previous bytes. A failed metadata commit restores those bytes. If old-byte cleanup fails **after** the replacement commits, the new evidence stays usable under its original E reference; the operation reports `committed: true` and the retained recovery path, and the renderer adopts the committed revision. Check permissions and restart SWCC to retry the journaled cleanup, rather than repeating the replacement. The existing schema is unchanged.
+
 PDFs and raster images are previewed internally from verified bytes with the locally bundled PDF.js worker/assets; PDF scripting and annotation layers are not enabled. DOC/DOCX, XLS/XLSX, PPT/PPTX, RTF, TXT, and CSV open only on explicit action through main-process `shell.openPath` resolved from the managed evidence ID. The renderer receives no filesystem path or general shell/filesystem bridge. OS association errors are shown to the worker.
 
 ## Offline standards review
@@ -203,6 +209,8 @@ A page qualifies only **after its actual canvas render finishes**, in a visible/
 `reviewRevision` advances only when a reset actually removes mapped visits or a recorded resources launch. Rereading, new automatic checks, page/position/zoom changes and year navigation do not invalidate Step 1. Review writes do not advance assessment/plan/content revisions; durable review changes advance app `dataRevision` for future backup tracking. Ready is not Completed; review has an explicit Complete Step 1 action.
 
 Only actually displaying physical page 48 exposes Other required resources. Explicit action invokes main-process `shell.openExternal` with the fixed plain College URL, and checks the item only after OS launch succeeds and the timestamp commits. Browser failures report the OS error and leave an unchecked item unchecked. Internet is needed to view the website; launch success proves neither loading nor reading. An explicit reset clears the timestamp.
+
+Failed reader-activation queries show **Retry review tracking** without hiding the PDF or claiming a visit. Failed backup/portfolio/restore progress queries show an operation-specific monitoring retry; the operation may still be running, and retry does not launch another archive operation.
 
 ## Annual completion and declarations
 
@@ -232,7 +240,7 @@ SAT columns advance independently; split goals repeat only their G reference wit
 
 Wrapping uses bundled-font widths and grapheme boundaries, including unbroken words and HTTP/HTTPS URLs. Paragraph/newline breaks, composed and decomposed accents, and supported punctuation are retained; CRLF/CR become line breaks and tabs become four spaces. Unsupported glyphs fail explicitly without changing saved text or publishing output. A grapheme that cannot physically fit the field at 10 pt still produces an actionable `OVERFLOW`, never clipping. For original evidence bytes, use the separate Complete Portfolio ZIP action.
 
-The entire PDF is generated before writing a unique private partial file beside the destination. The file is completely written, flushed and closed before rename publishes it. Errors preserve any previous complete destination, and success is reported only after publication. A forms export is **not** a restorable full-app backup.
+The chosen Forms PDF destination is checked before generation: it must be outside SWCC storage, including resolved symbolic-linked directories, and must not be a symbolic-linked output file. The entire PDF is generated before writing a unique private partial file beside that validated destination. The file is completely written, flushed and closed before rename publishes it. Errors preserve any previous complete destination, and success is reported only after publication. A forms export is **not** a restorable full-app backup.
 
 `tests/forms-export.test.ts` exercises public operations with real SQLite, managed evidence and actual templates. It checks complete extracted column narratives (ignoring extraction whitespace, excluding only explicit continuation metadata), stable references, uneven split-record row alignment, paragraph spacing, synchronous snapshot consistency, cancellation/failures, unsupported glyphs, raster checklist/standard alignment, and text inside measured fields at ≥10 pt. Every stress SAT/PDP page is rendered and pixel-compared with its source outside the measured fields/footer; this also verifies that SAT selections do not recur on continuations. To retain generated inspection examples locally:
 

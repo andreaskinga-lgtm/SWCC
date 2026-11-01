@@ -9,6 +9,7 @@ import type { EvidenceAttachment, OperationError, YearPackage } from '../../shar
 import type { FormsExportOutcome } from '../../shared/forms.js';
 import { reviewReadiness } from '../../shared/review.js';
 import type { ReviewProgress } from '../../shared/review.js';
+import { exportDestination } from './destination.js';
 
 export interface FormsSystem {
   chooseDestination(selection: { defaultName: string }): Promise<string | null>;
@@ -112,13 +113,14 @@ function paginateActivities(records: { ref: string; texts: string[] }[], geometr
   return pages;
 }
 
-export async function exportAnnualForms(snapshot: AnnualFormsSnapshot, system: FormsSystem, fail: Fail): Promise<FormsExportOutcome> {
+export async function exportAnnualForms(snapshot: AnnualFormsSnapshot, dataset: string, system: FormsSystem, fail: Fail): Promise<FormsExportOutcome> {
   let destination: string | null;
   try { destination = await system.chooseDestination({ defaultName: `CCP-${snapshot.package.year}-forms.pdf` }); }
   catch (error) {
     fail('EXPORT', `The forms destination dialog could not be opened: ${error instanceof Error ? error.message : String(error)}. Retry the export. No output was published.`);
   }
   if (!destination) return { cancelled: true };
+  destination = await exportDestination(destination, dataset, 'forms PDF', fail);
   const { bytes, pageCount } = await generateAnnualForms(snapshot, system, fail);
   const partial = join(dirname(destination), `.${basename(destination)}.${randomUUID()}.partial`);
   try {

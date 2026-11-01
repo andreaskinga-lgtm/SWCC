@@ -56,11 +56,12 @@ function GoalEditor({ goal, session, onDelete }: { goal: Goal; session: DraftSes
   </article>;
 }
 
-export function GoalCreateDialog({ source, session, onClose, activityId }: {
+export function GoalCreateDialog({ source, session, onClose, activityId, flushEdits }: {
   source: 'assessment' | 'plan';
   session: DraftSession;
   onClose: () => void;
   activityId?: string;
+  flushEdits: () => Promise<void>;
 }) {
   const state = useSyncSession(session);
   const [title, setTitle] = useState('');
@@ -84,8 +85,11 @@ export function GoalCreateDialog({ source, session, onClose, activityId }: {
     event.preventDefault();
     if (!title.trim()) { setValidationError('Name the goal before adding it.'); return; }
     setValidationError('');
-    setSubmitted(true);
-    try { await session.createGoal(title, description, activityId); }
+    try {
+      await flushEdits();
+      setSubmitted(true);
+      await session.createGoal(title, description, activityId);
+    }
     catch (error) { setValidationError(error instanceof Error ? error.message : String(error)); }
   }
   async function retry() {
@@ -116,11 +120,12 @@ export function GoalCreateDialog({ source, session, onClose, activityId }: {
   </Dialog>;
 }
 
-export function GoalDeleteDialog({ goal, session, operations, onClose }: {
+export function GoalDeleteDialog({ goal, session, operations, onClose, flushEdits }: {
   goal: Goal;
   session: DraftSession;
   operations: ApplicationOperations;
   onClose: () => void;
+  flushEdits: () => Promise<void>;
 }) {
   const draftState = useSyncSession(session);
   const [error, setError] = useState<string | null>(null);
@@ -129,14 +134,14 @@ export function GoalDeleteDialog({ goal, session, operations, onClose }: {
     setBusy(true);
     setError(null);
     try {
-      await session.flush();
+      await flushEdits();
       const current = session.getSnapshot().record;
       if (!current) throw new Error('Open a year package before deleting a learning goal.');
       const result = await operations.deleteGoal({
         packageId: current.id, goalId: goal.id, expectedRevision: current.contentRevision, confirmed: true,
       });
       if (!result.ok) throw new Error(result.error.message);
-      session.open(result.value);
+      session.acceptSaved(result.value);
       onClose();
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
@@ -186,12 +191,13 @@ function ReadinessPanel({ pkg, complete, busy }: { pkg: YearPackage; complete: (
   </section>;
 }
 
-export function AssessmentScreen({ pkg, session, operations, complete, busy }: {
+export function AssessmentScreen({ pkg, session, operations, complete, busy, flushEdits }: {
   pkg: YearPackage;
   session: DraftSession;
   operations: ApplicationOperations;
   complete: () => void;
   busy: boolean;
+  flushEdits: () => Promise<void>;
 }) {
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState<Goal | null>(null);
@@ -228,7 +234,7 @@ export function AssessmentScreen({ pkg, session, operations, complete, busy }: {
         <ReadinessPanel pkg={pkg} complete={complete} busy={busy} />
       </aside>
     </div>
-    {creating && <GoalCreateDialog source="assessment" session={session} onClose={() => setCreating(false)} />}
-    {deleting && <GoalDeleteDialog goal={deleting} session={session} operations={operations} onClose={() => setDeleting(null)} />}
+    {creating && <GoalCreateDialog source="assessment" session={session} flushEdits={flushEdits} onClose={() => setCreating(false)} />}
+    {deleting && <GoalDeleteDialog goal={deleting} session={session} operations={operations} flushEdits={flushEdits} onClose={() => setDeleting(null)} />}
   </>;
 }

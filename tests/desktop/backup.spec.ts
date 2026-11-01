@@ -49,6 +49,37 @@ function storageFailure(action: string) {
   if (result.status !== 0) throw new Error(result.stderr);
 }
 
+test('backup progress IPC rejection is visible and retry resumes monitoring without restarting the backup', async () => {
+  await page.getByRole('button', { name: 'I understand' }).click();
+  await navigate('Backup and restore');
+  await desktop.evaluate(({ dialog, ipcMain }) => {
+    dialog.showSaveDialog = () => new Promise(resolveDialog => {
+      (globalThis as typeof globalThis & { cancelBackupDialog: () => void }).cancelBackupDialog =
+        () => resolveDialog({ canceled: true, filePath: '' });
+    });
+    ipcMain.removeHandler('swcc:get-backup-progress');
+    ipcMain.handle('swcc:get-backup-progress', () => { throw new Error('backup progress connection interrupted'); });
+  });
+  try {
+    await page.getByRole('button', { name: 'Create full backup', exact: true }).click();
+    await expect(page.getByRole('alert')).toContainText('The desktop connection failed');
+    await desktop.evaluate(({ ipcMain }) => {
+      ipcMain.removeHandler('swcc:get-backup-progress');
+      ipcMain.handle('swcc:get-backup-progress', () => ({
+        ok: true, value: { phase: 'choosing', filesCompleted: 0, filesTotal: 0, bytesCompleted: 0, bytesTotal: 0 },
+      }));
+    });
+    await page.getByRole('button', { name: 'Retry backup progress', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Retry backup progress', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('status', { name: 'Backup progress' })).toContainText('Choose where');
+  } finally {
+    await desktop.evaluate(() => {
+      (globalThis as typeof globalThis & { cancelBackupDialog: () => void }).cancelBackupDialog();
+    });
+  }
+  await expect(page.locator('.operation-feedback')).toContainText('Backup cancelled');
+});
+
 test('C backup screen creates a real full archive after flushing drafts; quiet status survives restart and later changes', async () => {
   await expect(page.getByRole('heading', { name: 'Your records stay on this device.' })).toBeVisible();
   await page.getByRole('button', { name: 'I understand' }).click();

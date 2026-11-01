@@ -302,13 +302,7 @@ export function evidenceOperations(
     type, byte_count AS byteCount, sha256, imported_at AS importedAt FROM evidence_attachments`;
 
   function managedFilePath(managedPath: string): string | null {
-    if (!managedPath || isAbsolute(managedPath) || managedPath.includes('\\') || managedPath.includes('\0')) return null;
-    const parts = managedPath.split('/');
-    if (parts.some(part => !part || part === '.' || part === '..')) return null;
-    const path = resolve(root, ...parts);
-    const relativePath = relative(root, path);
-    if (!relativePath || relativePath === '..' || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath)) return null;
-    return path;
+    return managedRelativePath(managedPath, root);
   }
 
   function rowsForPackage(packageId: string): EvidenceRow[] {
@@ -532,7 +526,9 @@ export function evidenceOperations(
       throw error;
     });
     let updated: { row: EvidenceRow; package: YearPackage };
+    let staged: EvidenceDeletionStage | null = null;
     try {
+      staged = stageDeletion(request.packageId, chosen.pkg.year, request.activityId, request.evidenceId);
       updated = db.transaction(() => {
         const { pkg, activity } = assertCurrentPackage(request.packageId, request.activityId, request.expectedRevision);
         const current = rowFor(request);
@@ -555,11 +551,18 @@ export function evidenceOperations(
     } catch (error) {
       cleanup(temporaryPath);
       cleanup(publishedPath);
+      try { rollbackDeletion(staged); }
+      catch (recoveryError) {
+        throw new Error(`Evidence replacement failed and its previous managed file could not be restored. The previous evidence record remains. Preserve ${staged?.directory ?? root}. ${messageOf(error)} ${messageOf(recoveryError)}`);
+      }
       throw error;
     }
-    const previousPath = managedFilePath(existing.managedPath);
-    if (previousPath) {
-      try { removeFile(previousPath); } catch { /* The committed replacement remains usable. */ }
+    try { finalizeDeletion(staged); }
+    catch (error) {
+      throw new EvidenceCleanupFailure(
+        `${messageOf(error)} E${existing.referenceNumber} was replaced and the new file remains usable. Old bytes remain in the recovery folder. Check permissions and restart SWCC to retry cleanup; do not repeat the replacement.`,
+        staged?.directory,
+      );
     }
     return { cancelled: false, attachment: asEntry(updated.row, 'readable'), package: updated.package };
   }

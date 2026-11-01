@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { BookOpen, ClipboardList, Home, Layers, HardDrive, Sprout, Network } from 'lucide-react';
 import type { AppState, DesktopOperations, EvidenceAttachment, OperationError, Result } from '../shared/application.js';
 import { localDate } from '../shared/application.js';
@@ -16,6 +16,7 @@ import type { PortfolioProgress } from '../shared/portfolio.js';
 import { PortfolioExportDialog } from './portfolio-dialog.js';
 import type { RestorePreview, RestoreProgress } from '../shared/restore.js';
 import { RestorePreviewDialog } from './backup-screen.js';
+import { useProgressMonitor } from './operation-progress.js';
 
 type Screen = 'years' | 'overview' | 'assessment' | 'plan' | 'review' | 'backup';
 function unwrap<T>(result: Result<T>): T {
@@ -34,6 +35,9 @@ const destinations = [
 export function App({ operations }: { operations: DesktopOperations }) {
   const [session] = useState(() => new DraftSession(operations));
   const [reviewSession] = useState(() => new ReviewSession(operations));
+  const flushEdits = useCallback(async () => {
+    await Promise.all([session.flush(), reviewSession.flush()]);
+  }, [session, reviewSession]);
   const draft = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const review = useSyncExternalStore(reviewSession.subscribe, reviewSession.getSnapshot);
   const [state, setState] = useState<AppState | null>(null);
@@ -75,40 +79,9 @@ export function App({ operations }: { operations: DesktopOperations }) {
   const effectivePackage = pkg ? { ...pkg, reviewRevision: reviewRecord?.reviewRevision ?? pkg.reviewRevision } : null;
   const workflow = effectivePackage ? evaluateWorkflow(effectivePackage,
     reviewRecord ?? { visitedPages: [], resourcesLaunchedAt: null }, undefined, readableEvidenceActivityIds) : null;
-  useEffect(() => {
-    if (!backupRunning) return;
-    let active = true;
-    const update = async () => {
-      const result = await operations.getBackupProgress();
-      if (active && result.ok) setBackupProgress(result.value);
-    };
-    void update();
-    const timer = setInterval(() => void update(), 150);
-    return () => { active = false; clearInterval(timer); };
-  }, [backupRunning, operations]);
-  useEffect(() => {
-    if (!portfolioRunning) return;
-    let active = true;
-    const update = async () => {
-      const result = await operations.getPortfolioProgress();
-      if (active && result.ok) setPortfolioProgress(result.value);
-    };
-    void update();
-    const timer = setInterval(() => void update(), 150);
-    return () => { active = false; clearInterval(timer); };
-  }, [portfolioRunning, operations]);
-  useEffect(() => {
-    if (!restoreRunning) return;
-    let active = true;
-    const update = async () => {
-      const result = await operations.getRestoreProgress();
-      if (active && result.ok) setRestoreProgress(result.value);
-      else if (active && !result.ok) setError(result.error.message);
-    };
-    void update();
-    const timer = setInterval(() => void update(), 150);
-    return () => { active = false; clearInterval(timer); };
-  }, [restoreRunning, operations]);
+  const backupMonitor = useProgressMonitor(backupRunning, operations.getBackupProgress, setBackupProgress);
+  const portfolioMonitor = useProgressMonitor(portfolioRunning, operations.getPortfolioProgress, setPortfolioProgress);
+  const restoreMonitor = useProgressMonitor(restoreRunning, operations.getRestoreProgress, setRestoreProgress);
   useEffect(() => {
     if (pkg) void reviewSession.open(pkg.id).catch(() => {});
   }, [pkg?.id, reviewSession]);
@@ -121,11 +94,11 @@ export function App({ operations }: { operations: DesktopOperations }) {
       if (result.value.selectedPackage) setScreen('overview');
     }).catch(() => setError('Cannot connect to local records. Preserve your storage folder and restart SWCC.'));
     return operations.onCloseRequested(() => {
-      void Promise.all([session.flush(), reviewSession.flush()]).then(() => operations.completeClose()).then(result => {
+      void flushEdits().then(() => operations.completeClose()).then(result => {
         if (!result.ok) { setError(result.error.message); setExportError(result.error.message); }
       }).catch(() => { /* The session displays the retained edit and retry action. */ });
     });
-  }, [operations, session, reviewSession]);
+  }, [operations, session, reviewSession, flushEdits]);
   useEffect(() => {
     if (!pkg) return;
     let active = true;
@@ -159,7 +132,7 @@ export function App({ operations }: { operations: DesktopOperations }) {
     setBusy(true);
     setError(null);
     setFeedback('');
-    try { await Promise.all([session.flush(), reviewSession.flush()]); await work(); }
+    try { await flushEdits(); await work(); }
     catch (failure) { if (!session.getSnapshot().error && !reviewSession.getSnapshot().error) setError(failure instanceof Error ? failure.message : String(failure)); }
     finally { setBusy(false); }
   }
@@ -271,7 +244,7 @@ export function App({ operations }: { operations: DesktopOperations }) {
     setBusy(true);
     setYearDeleteError(null);
     try {
-      await Promise.all([session.flush(), reviewSession.flush()]);
+      await flushEdits();
       const current = unwrap(await operations.getState());
       const target = current.years.find(item => item.id === deletingYear.id);
       if (!target) throw new Error('This year package no longer exists. Refresh the year list before retrying.');
@@ -339,7 +312,7 @@ export function App({ operations }: { operations: DesktopOperations }) {
     if (busy) return;
     setBusy(true);
     try {
-      await Promise.all([session.flush(), reviewSession.flush()]);
+      await flushEdits();
       const current = session.getSnapshot().record;
       if (!current) throw new Error('Open a year before recording a declaration.');
       session.acceptSaved(unwrap(await operations.recordDeclaration({
@@ -369,7 +342,7 @@ export function App({ operations }: { operations: DesktopOperations }) {
     setExportError(null);
     setFeedback('');
     try {
-      await Promise.all([session.flush(), reviewSession.flush()]);
+      await flushEdits();
       const current = session.getSnapshot().record;
       if (!current) throw new Error('Open a year before exporting its forms.');
       const outcome = unwrap(await operations.exportForms({
@@ -391,7 +364,7 @@ export function App({ operations }: { operations: DesktopOperations }) {
     setExportError(null);
     setFeedback('');
     try {
-      await Promise.all([session.flush(), reviewSession.flush()]);
+      await flushEdits();
       const current = session.getSnapshot().record;
       if (!current) throw new Error('Open a year before exporting its portfolio.');
       setPortfolioProgress({ phase: 'waiting', filesCompleted: 0, filesTotal: 0, bytesCompleted: 0, bytesTotal: 0 });
@@ -487,8 +460,10 @@ export function App({ operations }: { operations: DesktopOperations }) {
             complete={complete} declare={openDeclaration} exportForms={() => openExport('forms')} exportPortfolio={() => openExport('portfolio')} />}
           </div></>}
       {screen === 'assessment' && pkg && <AssessmentScreen pkg={pkg} session={session} operations={operations}
+        flushEdits={flushEdits}
         complete={() => complete('assessment')} busy={busy} />}
       {screen === 'plan' && pkg && <PlanScreen key={pkg.id} pkg={pkg} session={session} operations={operations}
+        flushEdits={flushEdits}
         selectedId={selectedActivityId} select={setSelectedActivityId} recordRequested={recordRequested} clearRecordRequest={() => setRecordRequested(false)}
         evidence={packageEvidence} evidenceError={evidenceErrors[pkg.id] ?? ''}
         evidenceLoaded={Object.hasOwn(evidenceByPackage, pkg.id)} refreshEvidence={() => refreshEvidence(pkg.id)} reportError={setError}
@@ -496,9 +471,11 @@ export function App({ operations }: { operations: DesktopOperations }) {
       {screen === 'review' && pkg && workflow && <Review packageId={pkg.id} year={pkg.year} operations={operations} session={reviewSession}
         feedback={workflow.steps.review} complete={() => complete('review')} busy={busy} />}
       {screen === 'backup' && state && <BackupScreen state={state} busy={busy} running={backupRunning} progress={backupProgress}
+        backupMonitor={backupMonitor} restoreMonitor={restoreMonitor}
         backup={backup} cancel={() => void operations.cancelFullBackup().then(result => { if (!result.ok) setError(result.error.message); })}
         inspect={inspectBackup} inspecting={restoreRunning} replacing={restoreReplacing} restoreProgress={restoreProgress} cancelInspection={() => void cancelInspection()} />}
       {restorePreview && <RestorePreviewDialog preview={restorePreview} busy={busy} replacing={restoreReplacing} progress={restoreProgress} error={error}
+        monitor={restoreMonitor}
         replace={replaceBackup} cancel={() => void cancelInspection()} />}
       {deletingYear && <Dialog title={`Delete year ${deletingYear.year}?`} onClose={() => {
         if (!busy) { setDeletingYear(null); setYearDeleteError(null); }
@@ -515,6 +492,7 @@ export function App({ operations }: { operations: DesktopOperations }) {
       {showFormsExport && pkg && workflow && <FormsExportDialog pkg={pkg} workflow={workflow} busy={busy} error={exportError}
         exportForms={draft => void exportForms(draft)} close={() => setShowFormsExport(false)} />}
       {showPortfolioExport && pkg && workflow && <PortfolioExportDialog pkg={pkg} workflow={workflow} busy={busy}
+        monitor={portfolioMonitor}
         running={portfolioRunning} progress={portfolioProgress} error={exportError}
         exportPortfolio={draft => void exportPortfolio(draft)} close={() => setShowPortfolioExport(false)}
         cancel={() => void operations.cancelPortfolioExport().then(result => { if (!result.ok) setExportError(result.error.message); })} />}
