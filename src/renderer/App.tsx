@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import type { ComponentType, ReactNode } from 'react';
 import { BookOpen, ClipboardList, Home, Layers, HardDrive, Sprout, Network } from 'lucide-react';
-import type { AppState, DesktopOperations, EvidenceAttachment, Result } from '../shared/application.js';
+import type { AppState, DesktopOperations, EvidenceAttachment, Result, YearPackage } from '../shared/application.js';
 import { localDate } from '../shared/application.js';
 import { hasSubstantiveAssessmentContent } from '../shared/assessment.js';
 import { activityDateError } from '../shared/plan.js';
@@ -22,6 +23,15 @@ import { useProgressMonitor } from './operation-progress.js';
 import { useActionFeedback } from './action-feedback.js';
 
 type Screen = 'years' | 'overview' | 'assessment' | 'plan' | 'review' | 'backup';
+export interface PrototypeOverviewProps {
+  children: ReactNode;
+  pkg: YearPackage;
+  navigate: (screen: 'assessment' | 'plan') => void;
+  openActivity: (id: string | null) => void;
+}
+function OverviewContent({ children }: PrototypeOverviewProps) {
+  return <>{children}</>;
+}
 function unwrap<T>(result: Result<T>): T {
   if (!result.ok) throw new Error(result.error.message);
   return result.value;
@@ -35,7 +45,10 @@ const destinations = [
   { screen: 'backup', name: 'Backup and restore', icon: HardDrive },
 ] as const;
 
-export function App({ operations }: { operations: DesktopOperations }) {
+export function App({ operations, prototypeOverview: Overview = OverviewContent }: {
+  operations: DesktopOperations;
+  prototypeOverview?: ComponentType<PrototypeOverviewProps>;
+}) {
   const { showFeedback } = useActionFeedback();
   const [session] = useState(() => new DraftSession(operations));
   const [reviewSession] = useState(() => new ReviewSession(operations));
@@ -561,6 +574,7 @@ export function App({ operations }: { operations: DesktopOperations }) {
         <div className="map-overview">
           {workflow && <AnnualWorkflowPanel pkg={pkg} workflow={workflow} busy={busy} navigate={navigate}
             declare={openDeclaration} exportForms={() => openExport('forms')} exportPortfolio={() => openExport('portfolio')} />}
+          <Overview pkg={pkg} navigate={navigate} openActivity={activityEntry}>
           <section className="relationship-board surface"><div className="relationship-columns">
           <div className="overview-column"><h2>Learning goals</h2><div className="goal-nodes">
             {pkg.goals.map(goal => <article className="goal-node" key={goal.id}><span className="goal-reference">{goal.ref}</span><h3>{goal.title}</h3>
@@ -584,7 +598,7 @@ export function App({ operations }: { operations: DesktopOperations }) {
           </button>)}
           {!pkg.activities.length && <p>Record an activity and connect it to a goal, or keep it supplementary.</p>}</div>
           <button className="secondary" onClick={() => navigate('plan')}>View development plan</button></div>
-        </div><p className="board-footer">Evidence and reflection will stay with each activity, never with its links.</p></section>
+        </div><p className="board-footer">Evidence and reflection will stay with each activity, never with its links.</p></section></Overview>
           </div></>}
       {screen === 'assessment' && pkg && <AssessmentScreen pkg={pkg} session={session} operations={operations}
         flushEdits={flushEdits}

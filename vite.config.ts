@@ -28,7 +28,7 @@ export default defineConfig(({ command }) => ({
     name: 'development-csp',
     transformIndexHtml: (html: string) => html.replace("script-src 'self'", "script-src 'self' 'unsafe-inline'")
       .replace("style-src 'self'", "style-src 'self' 'unsafe-inline'")
-      .replace("connect-src 'self'", "connect-src 'self' ws://127.0.0.1:5173"),
+      .replace("connect-src 'self'", "connect-src 'self' ws://127.0.0.1:5173 ws://127.0.0.1:5174"),
   }] : [])],
   server: { host: '127.0.0.1', port: 5173, strictPort: true },
   build: { outDir: '../../dist/renderer', emptyOutDir: true },
