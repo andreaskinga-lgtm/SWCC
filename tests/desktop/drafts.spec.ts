@@ -56,8 +56,10 @@ test('keyboard creation, duplicate recovery and autosaved dates survive producti
   await page.getByRole('button', { name: 'All years', exact: true }).click();
   await page.getByLabel('New package year').fill('2024');
   await page.getByLabel('New package year').press('Enter');
-  await expect(page.getByRole('alert')).toContainText('already has a package');
-  await page.getByRole('button', { name: 'Open existing package' }).click();
+  const duplicate = page.getByRole('dialog', { name: 'Year package already exists' });
+  await expect(duplicate.getByRole('alert')).toContainText('already has a package');
+  await duplicate.getByRole('button', { name: 'Open existing package' }).click();
+  await expect(duplicate).toBeHidden();
   await desktop.close();
   await launch('Pacific/Honolulu');
   await expect(page.getByRole('button', { name: 'I understand' })).toHaveCount(0);

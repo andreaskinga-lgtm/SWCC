@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { dismissActionFeedback, expectActionFeedback } from './feedback-helpers.js';
 
 let desktop: ElectronApplication;
 let page: Page;
@@ -99,6 +100,8 @@ test('keyboard manual completion works in any order beside C’s map; historical
   await complete.focus();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('status', { name: 'Step 3 readiness' })).toHaveText('Completed');
+  await expectActionFeedback(page, 'manually confirmed');
+  await dismissActionFeedback(page);
   await navigate('Year overview');
   const workflow = page.getByRole('complementary', { name: 'Annual workflow' });
   await expect(workflow.getByRole('status', { name: 'Step 1 readiness' })).not.toHaveText('Completed');
@@ -107,6 +110,7 @@ test('keyboard manual completion works in any order beside C’s map; historical
   await workflow.getByRole('button', { name: 'Complete Step 2', exact: true }).focus();
   await page.keyboard.press('Space');
   await expect(workflow.getByRole('status', { name: 'Step 2 readiness' })).toHaveText('Completed');
+  await dismissActionFeedback(page);
   await workflow.getByRole('button', { name: 'Record submission date', exact: true }).click();
   const declaration = page.getByRole('dialog', { name: 'Record external submission date' });
   await expect(declaration.getByRole('alert')).toContainText('application steps are incomplete');
@@ -115,6 +119,8 @@ test('keyboard manual completion works in any order beside C’s map; historical
   await declaration.getByRole('button', { name: 'Record submission date', exact: true }).click();
   await expect(workflow).toContainText('Submission date recorded: 2024-12-20');
   await expect(page.getByRole('status', { name: 'Annual package status' })).toHaveText('In Progress');
+  await expectActionFeedback(page, 'SWCC has not submitted or verified a declaration');
+  await dismissActionFeedback(page);
   await workflow.getByRole('button', { name: 'Export Forms PDF' }).click();
   await expect(page.getByRole('dialog', { name: 'Export annual forms' })).toContainText('separate Complete Portfolio ZIP action');
   await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
@@ -136,8 +142,10 @@ test('completed review survives real rereading; current manual confirmations plu
   test.setTimeout(90_000);
   await preparePlan();
   await page.getByRole('button', { name: 'Complete Step 3', exact: true }).click();
+  await dismissActionFeedback(page);
   await navigate('Year overview');
   await page.getByRole('button', { name: 'Complete Step 2', exact: true }).click();
+  await dismissActionFeedback(page);
   await navigate('Review');
   for (const number of [2, 4, 7, 8, ...Array.from({ length: 32 }, (_, index) => index + 9), 48]) await readPage(number);
   await desktop.evaluate(({ shell }) => { shell.openExternal = async () => {}; });
@@ -146,6 +154,7 @@ test('completed review survives real rereading; current manual confirmations plu
   await page.getByRole('button', { name: 'Complete Step 1', exact: true }).focus();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('status', { name: 'Step 1 readiness' })).toHaveText('Completed');
+  await dismissActionFeedback(page);
   const confirmed = (await selectedPackage()).stepCompletions.review;
   await readPage(2);
   await page.getByRole('button', { name: 'Zoom in', exact: true }).click();
@@ -159,6 +168,7 @@ test('completed review survives real rereading; current manual confirmations plu
   await declaration.getByLabel('Actual external submission date').fill('2024-12-20');
   await declaration.getByRole('button', { name: 'Record submission date', exact: true }).click();
   await expect(page.getByRole('status', { name: 'Annual package status' })).toHaveText('Complete');
+  await dismissActionFeedback(page);
   const recorded = await selectedPackage();
   await navigate('Review');
   await page.getByRole('button', { name: 'Reset Meaning of Client', exact: true }).click();
@@ -175,6 +185,7 @@ test('completed review survives real rereading; current manual confirmations plu
   await expect(page.getByRole('status', { name: 'Step 1 readiness' })).toHaveText('Ready');
   await page.getByRole('button', { name: 'Complete Step 1', exact: true }).click();
   await expect(page.getByRole('status', { name: 'Step 1 readiness' })).toHaveText('Completed');
+  await dismissActionFeedback(page);
   await navigate('All years');
   await expect(page.locator('.year-list')).toContainText('Complete');
   await page.getByLabel('New package year').fill('2025');
@@ -195,6 +206,7 @@ test('completed review survives real rereading; current manual confirmations plu
   await page.getByRole('button', { name: 'Complete Step 3', exact: true }).focus();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('status', { name: 'Annual package status' })).toHaveText('Complete');
+  await dismissActionFeedback(page);
   expect(await selectedPackage()).toMatchObject({
     declarationDate: recorded.declarationDate, declarationRecordedAt: recorded.declarationRecordedAt,
   });
@@ -212,6 +224,7 @@ test('failed draft flush leaves confirmation unchanged and edits visible until r
   await preparePlan();
   await navigate('Self-assessment');
   await page.getByRole('button', { name: 'Complete Step 2', exact: true }).click();
+  await dismissActionFeedback(page);
   const confirmed = (await selectedPackage()).stepCompletions.assessment;
   storageFailure('true');
   await page.getByLabel('Strengths').fill('Unsaved but still substantive strengths');
@@ -226,16 +239,23 @@ test('failed draft flush leaves confirmation unchanged and edits visible until r
   await expect(page.getByRole('status', { name: 'Step 2 readiness' })).toHaveText('Ready');
   await page.getByRole('button', { name: 'Complete Step 2', exact: true }).click();
   await expect(page.getByRole('status', { name: 'Step 2 readiness' })).toHaveText('Completed');
+  await dismissActionFeedback(page);
   expect((await selectedPackage()).stepCompletions.assessment.completedAt).not.toBe(confirmed.completedAt);
 });
 
 test('unready completion remains actionable and explains missing items without locking other steps', async () => {
   await page.getByRole('button', { name: 'Complete Step 3', exact: true }).click();
-  await expect(page.getByRole('alert')).toContainText('Add at least one learning goal.');
+  const planFeedback = await expectActionFeedback(page, 'This step is not ready for manual completion.');
+  await expect(planFeedback.getByRole('list', { name: 'Step 3 readiness reasons' }).getByRole('listitem'))
+    .toContainText(['Add at least one learning goal.']);
+  await dismissActionFeedback(page);
   expect((await selectedPackage()).stepCompletions.plan.completedAt).toBeNull();
   await expect(page.getByRole('button', { name: 'Complete Step 2', exact: true })).toBeEnabled();
   await navigate('Self-assessment');
   await expect(page.getByLabel('Strengths')).toBeVisible();
   await page.getByRole('button', { name: 'Complete Step 2', exact: true }).click();
-  await expect(page.getByRole('alert')).toContainText('Add your strengths.');
+  const assessmentFeedback = await expectActionFeedback(page, 'This step is not ready for manual completion.');
+  await expect(assessmentFeedback.getByRole('list', { name: 'Step 2 readiness reasons' }).getByRole('listitem'))
+    .toContainText(['Add your strengths.']);
+  await dismissActionFeedback(page);
 });

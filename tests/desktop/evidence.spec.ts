@@ -3,6 +3,7 @@ import type { ElectronApplication, Page } from '@playwright/test';
 import { copyFileSync, mkdirSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { dismissActionFeedback, expectActionFeedback } from './feedback-helpers.js';
 
 let desktop: ElectronApplication;
 let page: Page;
@@ -161,7 +162,8 @@ test('committed replacement cleanup failure refreshes the renderer revision and 
   });
   try {
     await evidence.getByRole('button', { name: 'Replace E1', exact: true }).click();
-    await expect(editor.getByRole('alert')).toContainText('new file remains usable');
+    await expectActionFeedback(page, 'new file remains usable');
+    await dismissActionFeedback(page);
     await expect(evidence).toContainText('21 bytes');
     await expect(evidence).toContainText('Readable');
     await editor.getByLabel('Evidence notes').fill('Saved after a committed cleanup failure');
@@ -200,7 +202,8 @@ test('an image preview uses imported bytes and other-document open errors remain
     shell.openPath = async () => 'No application is associated with this file type.';
   });
   await documentEvidence.getByRole('button', { name: 'Open E2 in installed app', exact: true }).click();
-  await expect(documentEvidence.getByRole('alert')).toContainText('No application is associated with this file type.');
+  await expectActionFeedback(page, 'No application is associated with this file type.');
+  await dismissActionFeedback(page);
 });
 
 test('a missing E entry is visible, replaceable under the same reference, and removable', async () => {
@@ -218,7 +221,8 @@ test('a missing E entry is visible, replaceable under the same reference, and re
   const managedPath = resolve(managedDirectory, readdirSync(managedDirectory)[0]);
   writeFileSync(managedPath, 'tampered evidence');
   await editor.getByRole('button', { name: 'Preview E1', exact: true }).click();
-  await expect(editor.getByRole('alert')).toContainText('SHA-256 integrity check');
+  await expectActionFeedback(page, 'SHA-256 integrity check');
+  await dismissActionFeedback(page);
   await editor.getByRole('button', { name: 'Check file integrity', exact: true }).click();
   await expect(evidence).toContainText('E1 failed its SHA-256 integrity check; replace it or remove it.');
 

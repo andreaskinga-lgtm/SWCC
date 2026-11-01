@@ -1,19 +1,35 @@
-import { useSyncExternalStore } from 'react';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { CheckCircle2, Circle } from 'lucide-react';
 import type { DesktopOperations } from '../shared/application.js';
 import { PdfReader } from './PdfReader.js';
 import { ReviewSession } from './review-session.js';
 import type { StepFeedback } from '../shared/workflow.js';
+import { useActionFeedback } from './action-feedback.js';
 
 export function Review({ packageId, year, operations, session, feedback, complete, busy }: {
   packageId: string; year: number; operations: DesktopOperations; session: ReviewSession;
   feedback: StepFeedback; complete: () => void; busy: boolean;
 }) {
+  const { showFeedback } = useActionFeedback();
   const snapshot = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const state = snapshot.record?.packageId === packageId ? snapshot.record : null;
+  const reportedError = useRef<string | null>(null);
+  useEffect(() => {
+    if (!snapshot.error) {
+      reportedError.current = null;
+      return;
+    }
+    if (snapshot.status !== 'Saved' || reportedError.current === snapshot.error) return;
+    reportedError.current = snapshot.error;
+    showFeedback({
+      title: 'Review action could not be completed',
+      message: snapshot.error,
+      kind: 'error',
+    });
+  }, [showFeedback, snapshot.error, snapshot.status]);
   return <>
     <div className="page-heading"><h1>Review the standards.</h1><p>{year} · Supplied Second Edition, amended September 7, 2018. Resume, browse, or revisit any section.</p></div>
-    {snapshot.error && <section className="error-panel" role="alert"><p>{snapshot.error}</p>
+    {snapshot.error && snapshot.status === 'Not saved' && <section className="error-panel" role="alert"><p>{snapshot.error}</p>
       {snapshot.status === 'Not saved' && <><p>Your pending review changes are retained. Navigation and close wait for a successful retry.</p>
         <button onClick={() => void (state ? session.flush() : session.open(packageId)).catch(() => {})}>Retry review save</button></>}
     </section>}

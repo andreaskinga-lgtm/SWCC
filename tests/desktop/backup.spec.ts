@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { dismissActionFeedback, expectActionFeedback } from './feedback-helpers.js';
 
 let desktop: ElectronApplication;
 let page: Page;
@@ -62,14 +63,16 @@ test('backup progress IPC rejection is visible and retry resumes monitoring with
   });
   try {
     await page.getByRole('button', { name: 'Create full backup', exact: true }).click();
-    await expect(page.getByRole('alert')).toContainText('The desktop connection failed');
+    const progressFeedback = await expectActionFeedback(page, 'The desktop connection failed');
+    await expect(progressFeedback.getByRole('alert')).toContainText('The desktop connection failed');
     await desktop.evaluate(({ ipcMain }) => {
       ipcMain.removeHandler('swcc:get-backup-progress');
       ipcMain.handle('swcc:get-backup-progress', () => ({
         ok: true, value: { phase: 'choosing', filesCompleted: 0, filesTotal: 0, bytesCompleted: 0, bytesTotal: 0 },
       }));
     });
-    await page.getByRole('button', { name: 'Retry backup progress', exact: true }).click();
+    await progressFeedback.getByRole('button', { name: 'Retry backup progress', exact: true }).click();
+    await expect(progressFeedback).toBeHidden();
     await expect(page.getByRole('button', { name: 'Retry backup progress', exact: true })).toHaveCount(0);
     await expect(page.getByRole('status', { name: 'Backup progress' })).toContainText('Choose where');
   } finally {
@@ -77,7 +80,8 @@ test('backup progress IPC rejection is visible and retry resumes monitoring with
       (globalThis as typeof globalThis & { cancelBackupDialog: () => void }).cancelBackupDialog();
     });
   }
-  await expect(page.locator('.operation-feedback')).toContainText('Backup cancelled');
+  await expectActionFeedback(page, 'Backup cancelled');
+  await dismissActionFeedback(page);
 });
 
 test('C backup screen creates a real full archive after flushing drafts; quiet status survives restart and later changes', async () => {
@@ -96,7 +100,8 @@ test('C backup screen creates a real full archive after flushing drafts; quiet s
   await backup.focus();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('status', { name: 'Backup status' })).toContainText('No changes since');
-  await expect(page.locator('.operation-feedback')).toContainText('Full backup saved');
+  await expectActionFeedback(page, 'Full backup saved');
+  await dismissActionFeedback(page);
   expect(readFileSync(resolve(output, 'saved.swcc-backup.zip')).subarray(0, 2).toString()).toBe('PK');
   const state = await page.evaluate(async () => window.swcc.getState());
   expect(state).toMatchObject({ ok: true, value: { selectedPackage: { strengths: 'Draft committed before backup' } } });
@@ -130,7 +135,8 @@ test('a failed draft flush keeps text visible and blocks backup; cancelling the 
   await navigate('Backup and restore');
   await saveDialog(true);
   await page.getByRole('button', { name: 'Create full backup', exact: true }).click();
-  await expect(page.locator('.operation-feedback')).toContainText('Backup cancelled');
+  await expectActionFeedback(page, 'Backup cancelled');
+  await dismissActionFeedback(page);
   await expect(page.getByRole('status', { name: 'Backup status' })).toContainText('No successful full backup');
   expect(readdirSync(output)).toEqual([]);
 });
@@ -156,12 +162,14 @@ test('backup shows busy progress, rejects conflicting typed operations and prote
     return window.swcc.exportForms({ packageId: state.value.selectedPackage.id, confirmDraft: true });
   })).toMatchObject({ ok: false, error: { code: 'BUSY' } });
   await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
-  await expect(page.getByRole('alert')).toContainText('full backup is still running');
+  await expectActionFeedback(page, 'full backup is still running');
+  await dismissActionFeedback(page);
   expect(desktop.windows().length).toBe(1);
   await desktop.evaluate(() => {
     (globalThis as typeof globalThis & { cancelBackupDialog: () => void }).cancelBackupDialog();
   });
-  await expect(page.locator('.operation-feedback')).toContainText('Backup cancelled');
+  await expectActionFeedback(page, 'Backup cancelled');
+  await dismissActionFeedback(page);
   await expect(page.getByRole('status', { name: 'Backup progress' })).toHaveCount(0);
   await expect(page.getByRole('alert')).toHaveCount(0);
   expect(desktop.windows().length).toBe(1);

@@ -7,6 +7,7 @@ import { resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import yauzl from 'yauzl';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
+import { dismissActionFeedback, expectActionFeedback } from './feedback-helpers.js';
 
 let desktop: ElectronApplication;
 let page: Page;
@@ -73,20 +74,23 @@ test('portfolio failed progress Result is visible and retry keeps the same in-fl
   await page.getByRole('button', { name: 'Export Complete Portfolio ZIP', exact: true }).click();
   const warning = page.getByRole('dialog', { name: 'Export complete annual portfolio' });
   await warning.getByRole('button', { name: 'Export draft ZIP', exact: true }).click();
-  await expect(page.getByRole('alert')).toContainText('portfolio progress connection interrupted');
+  const progressFeedback = await expectActionFeedback(page, 'portfolio progress connection interrupted');
+  await expect(progressFeedback.getByRole('alert')).toContainText('portfolio progress connection interrupted');
   await desktop.evaluate(({ ipcMain }) => {
     ipcMain.removeHandler('swcc:get-portfolio-progress');
     ipcMain.handle('swcc:get-portfolio-progress', () => ({
       ok: true, value: { phase: 'choosing', filesCompleted: 0, filesTotal: 0, bytesCompleted: 0, bytesTotal: 0 },
     }));
   });
-  await page.getByRole('button', { name: 'Retry portfolio progress', exact: true }).click();
+  await progressFeedback.getByRole('button', { name: 'Retry portfolio progress', exact: true }).click();
+  await expect(progressFeedback).toBeHidden();
   await expect(page.getByRole('button', { name: 'Retry portfolio progress', exact: true })).toHaveCount(0);
   await expect(warning).toBeVisible();
   await desktop.evaluate(() => {
     (globalThis as typeof globalThis & { releasePortfolioDialog: () => void }).releasePortfolioDialog();
   });
-  await expect(page.locator('.operation-feedback')).toContainText('Portfolio export cancelled');
+  await expectActionFeedback(page, 'Portfolio export cancelled');
+  await dismissActionFeedback(page);
 });
 
 test('C dashboard keyboard portfolio export consumes latest edits and writes real long forms and original evidence offline', async () => {
@@ -129,8 +133,9 @@ test('C dashboard keyboard portfolio export consumes latest edits and writes rea
   expect(existsSync(path)).toBe(false);
   await warning.getByRole('button', { name: 'Export draft ZIP', exact: true }).focus();
   await page.keyboard.press('Enter');
-  await expect(page.getByRole('status').filter({ hasText: 'Complete Portfolio ZIP written' })).toContainText('CCP-2024-portfolio.zip');
-  await expect(warning).not.toBeVisible();
+  await expectActionFeedback(page, 'CCP-2024-portfolio.zip');
+  await dismissActionFeedback(page);
+  await expect(warning).toBeHidden();
   const zip = await contents(path);
   expect(zip.get('evidence/E1/_CON.txt')).toEqual(original);
   expect(zip.get('evidence-index.txt')?.toString()).toContain('A1 | E1');
@@ -174,7 +179,8 @@ test('portfolio progress protects mutations and close, remains keyboard-accessib
   await warning.getByRole('button', { name: 'Close dialog', exact: true }).click();
   await expect(warning).toBeVisible();
   await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
-  await expect(warning.getByRole('alert')).toContainText('portfolio export is still running');
+  await expectActionFeedback(page, 'portfolio export is still running');
+  await dismissActionFeedback(page);
   expect(desktop.windows()).toHaveLength(1);
   await page.setViewportSize({ width: 620, height: 800 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
@@ -183,7 +189,8 @@ test('portfolio progress protects mutations and close, remains keyboard-accessib
   await desktop.evaluate(() => {
     (globalThis as typeof globalThis & { releasePortfolioDialog: () => void }).releasePortfolioDialog();
   });
-  await expect(page.locator('.operation-feedback')).toContainText('Portfolio export cancelled');
+  await expectActionFeedback(page, 'Portfolio export cancelled');
+  await dismissActionFeedback(page);
   expect(existsSync(path)).toBe(false);
   expect(desktop.windows()).toHaveLength(1);
   await warning.getByRole('button', { name: 'Cancel', exact: true }).click();
@@ -232,7 +239,8 @@ test('failed draft and real review flushes prevent stale portfolio export and re
   const warning = page.getByRole('dialog', { name: 'Export complete annual portfolio' });
   await expect(warning).not.toContainText('Add your strengths.');
   await warning.getByRole('button', { name: 'Export draft ZIP', exact: true }).click();
-  await expect(page.locator('.operation-feedback')).toContainText('Complete Portfolio ZIP written');
+  await expectActionFeedback(page, 'Complete Portfolio ZIP');
+  await dismissActionFeedback(page);
   const zip = await contents(path);
   const pdf = await getDocument({ data: new Uint8Array(zip.get('CCP-2024-forms.pdf')!), useSystemFonts: true }).promise;
   try {
@@ -250,7 +258,8 @@ test('real ZIP output errors and cancellation preserve the prior portfolio and p
   await page.getByRole('button', { name: 'Export Complete Portfolio ZIP', exact: true }).click();
   const warning = page.getByRole('dialog', { name: 'Export complete annual portfolio' });
   await warning.getByRole('button', { name: 'Export draft ZIP', exact: true }).click();
-  await expect(page.locator('.operation-feedback')).toContainText('Portfolio export cancelled');
+  await expectActionFeedback(page, 'Portfolio export cancelled');
+  await dismissActionFeedback(page);
   expect(readFileSync(path).toString()).toBe('Previous complete file');
   await destination(path);
   await desktop.evaluate(() => {
@@ -264,13 +273,15 @@ test('real ZIP output errors and cancellation preserve the prior portfolio and p
       () => { fs.WriteStream.prototype._write = original; };
   });
   await warning.getByRole('button', { name: 'Export draft ZIP', exact: true }).click();
-  await expect(warning.getByRole('alert')).toContainText('disk full');
+  const failure = await expectActionFeedback(page, 'disk full');
+  await expect(failure.getByRole('alert')).toContainText('disk full');
+  await dismissActionFeedback(page);
   expect(readFileSync(path).toString()).toBe('Previous complete file');
-  await expect(page.locator('.operation-feedback').filter({ hasText: 'Complete Portfolio ZIP written' })).toHaveCount(0);
   await desktop.evaluate(() => {
     (globalThis as typeof globalThis & { restorePortfolioWrites: () => void }).restorePortfolioWrites();
   });
   await warning.getByRole('button', { name: 'Export draft ZIP', exact: true }).click();
-  await expect(page.locator('.operation-feedback')).toContainText('Complete Portfolio ZIP written');
+  await expectActionFeedback(page, 'Complete Portfolio ZIP');
+  await dismissActionFeedback(page);
   expect((await contents(path)).has('CCP-2024-forms.pdf')).toBe(true);
 });

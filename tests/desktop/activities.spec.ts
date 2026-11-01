@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { dismissActionFeedback, expectActionFeedback } from './feedback-helpers.js';
 
 const electronExecutable = createRequire(import.meta.url)('electron') as string;
 let desktop: ElectronApplication;
@@ -295,6 +296,7 @@ test('invalid links remain protected; only explicit valid browser actions launch
   await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Saved');
   await expect(editor.getByRole('alert')).toHaveCount(0);
   await editor.getByRole('button', { name: 'Open evidence link 1' }).click();
-  await expect(editor.getByRole('alert')).toContainText('Browser launch unavailable');
+  await expectActionFeedback(page, 'Browser launch unavailable');
   await expect(editor.getByLabel('Evidence links')).toHaveValue('https://example.org/notes');
+  await dismissActionFeedback(page);
 });
