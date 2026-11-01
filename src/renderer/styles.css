@@ -15,10 +15,10 @@ small { line-height: 1.6; }
 .map-layout { display: grid; grid-template-columns: 84px minmax(0, 1fr); min-height: 100vh; }
 .map-rail { background: var(--accent); color: white; padding: 25px 8px; display: flex; flex-direction: column; align-items: center; position: sticky; top: 0; z-index: 1; align-self: start; height: 100vh; overflow-y: auto; scroll-padding-block: 8px; }
 .map-mark { margin-bottom: 30px; }
-.map-rail nav { display: flex; flex-direction: column; gap: 14px; width: 100%; }
+.map-rail nav { display: flex; flex-direction: column; gap: 14px; width: 100%; flex-grow: 1; }
 .map-rail button { display: flex; flex-direction: column; align-items: center; gap: 7px; width: 100%; padding: 10px 2px; border: 0; background: transparent; font-size: 10px; line-height: 1.3; }
 .map-rail button[aria-current] { background: #ffffff24; }
-.map-rail button:nth-last-child(2) { margin-top: 48px; }
+.map-rail button:nth-last-child(2) { margin-top: auto; }
 .map-workspace { min-width: 0; }
 .map-top { display: flex; flex-wrap: wrap; align-items: center; gap: 24px; padding: 24px 42px; background: white; border-bottom: 1px solid #d7deca; }
 .map-wordmark { font-size: 20px; font-weight: bold; flex: 1; }

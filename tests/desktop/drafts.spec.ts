@@ -190,6 +190,12 @@ for (const viewport of [
       expect(fourth!.y).toBeGreaterThan(first!.y);
     } else {
       expect(main!.x).toBeGreaterThanOrEqual(initialRail!.x + initialRail!.width);
+      if (viewport.height >= 400) {
+        const allYears = await page.getByRole('navigation').getByRole('button', { name: 'All years', exact: true }).boundingBox();
+        const backup = await page.getByRole('navigation').getByRole('button', { name: 'Backup and restore', exact: true }).boundingBox();
+        expect(backup!.y + backup!.height).toBeGreaterThan(viewport.height - 40);
+        expect(backup!.y - (allYears!.y + allYears!.height)).toBeLessThanOrEqual(20);
+      }
     }
     await page.mouse.move(viewport.width - 100, viewport.height - 30);
     await page.mouse.wheel(0, 1200);
