@@ -8,6 +8,7 @@ async function invoke<T>(channel: string, input?: unknown): Promise<Result<T>> {
   }
 }
 const operations: DesktopOperations = {
+  replaceFullDataset: input => invoke('swcc:replace-full-dataset', input),
   inspectFullBackup: () => invoke('swcc:inspect-full-backup'),
   getRestoreProgress: () => invoke('swcc:get-restore-progress'),
   cancelRestorePreview: () => invoke('swcc:cancel-restore-preview'),

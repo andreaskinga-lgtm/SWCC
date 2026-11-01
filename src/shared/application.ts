@@ -111,6 +111,7 @@ export interface UpdateActivity extends Partial<ActivityFields> {
   activityId: string;
 }
 export interface AppState {
+  recoveryNotice?: string | null;
   years: YearSummary[];
   selectedPackage: YearPackage | null;
   acknowledgedAt: string | null;
@@ -183,6 +184,7 @@ export interface YearPackage extends Draft {
   activities: Activity[];
 }
 export interface ApplicationOperations extends ReviewOperations {
+  replaceFullDataset(input: import('./restore.js').ReplaceFullDataset): Promise<Result<import('./restore.js').RestoreOutcome>>;
   inspectFullBackup(): Promise<Result<import('./restore.js').RestoreInspectionOutcome>>;
   getRestoreProgress(): Promise<Result<import('./restore.js').RestoreProgress>>;
   cancelRestorePreview(): Promise<Result<void>>;

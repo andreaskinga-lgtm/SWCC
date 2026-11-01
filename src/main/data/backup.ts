@@ -25,6 +25,7 @@ export async function createFullBackup(
   drainMutations: () => Promise<void>,
   report: (progress: BackupProgress) => void,
   fail: (code: OperationError['code'], message: string) => never,
+  protective = false,
 ): Promise<FullBackupOutcome> {
   let progress: BackupProgress = { phase: 'choosing', filesCompleted: 0, filesTotal: 0, bytesCompleted: 0, bytesTotal: 0 };
   const phase = (next: BackupProgress['phase']) => { progress = { ...progress, phase: next }; report(progress); };
@@ -36,7 +37,7 @@ export async function createFullBackup(
   const destinationDirectory = await realpath(dirname(selected));
   const destination = join(destinationDirectory, basename(selected));
   const relativeDirectory = relative(storageRoot, destinationDirectory);
-  if (!relativeDirectory || (!relativeDirectory.startsWith(`..${sep}`) && relativeDirectory !== '..' && !isAbsolute(relativeDirectory)))
+  if (!protective && (!relativeDirectory || (!relativeDirectory.startsWith(`..${sep}`) && relativeDirectory !== '..' && !isAbsolute(relativeDirectory))))
     fail('VALIDATION', 'Choose a backup location outside SWCC storage, such as an external drive. A backup must not overwrite managed records or evidence.');
   try {
     if ((await lstat(destination)).isSymbolicLink()) fail('VALIDATION', 'Choose a regular backup file, not a symbolic link.');
@@ -115,7 +116,7 @@ export async function createFullBackup(
     finally { await file.close(); }
     await rm(staging, { recursive: true });
     await rename(temporary, destination);
-    db.prepare('UPDATE app_metadata SET last_backup_at = ?, last_backup_revision = ? WHERE id = 1')
+    if (!protective) db.prepare('UPDATE app_metadata SET last_backup_at = ?, last_backup_revision = ? WHERE id = 1')
       .run(createdAt, meta.revision);
     return { cancelled: false, fileName: basename(destination), createdAt, dataRevision: meta.revision };
   } catch (error) {

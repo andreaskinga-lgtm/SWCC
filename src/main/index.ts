@@ -143,6 +143,7 @@ if (startupFailure) {
       });
       const operations = application.operations;
       const channels: Record<string, keyof ApplicationOperations> = {
+        'swcc:replace-full-dataset': 'replaceFullDataset',
         'swcc:inspect-full-backup': 'inspectFullBackup', 'swcc:get-restore-progress': 'getRestoreProgress',
         'swcc:cancel-restore-preview': 'cancelRestorePreview',
         'swcc:export-forms': 'exportForms',
@@ -202,7 +203,9 @@ if (startupFailure) {
         };
         const restore = await operations.getRestoreProgress();
         if (!restore.ok || !['idle', 'preview'].includes(restore.value.phase)) return {
-          ok: false, error: { code: 'BUSY', message: 'Backup inspection is still running. Wait for it or cancel inspection, then close SWCC deliberately.' },
+          ok: false, error: { code: 'BUSY', message: ['protecting', 'moving', 'reopening', 'verifying', 'recovering'].includes(restore.ok ? restore.value.phase : '')
+            ? 'Dataset replacement is still running. Wait for validation or recovery, then close SWCC deliberately.'
+            : 'Backup inspection is still running. Wait for it or cancel inspection, then close SWCC deliberately.' },
         };
         const cancelled = await operations.cancelRestorePreview();
         if (!cancelled.ok) return cancelled;
