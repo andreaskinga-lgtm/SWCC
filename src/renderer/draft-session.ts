@@ -1,4 +1,5 @@
 import type { Activity, ActivityFields, ApplicationOperations, CreateGoal, Draft, Goal, Result, YearPackage } from '../shared/application.js';
+import { activityDateError } from '../shared/plan.js';
 
 type PendingGoal = Pick<CreateGoal, 'title' | 'description' | 'activityId'>;
 type PendingActivity = Pick<ActivityFields, 'title' | 'description' | 'goalIds'>;
@@ -179,6 +180,8 @@ export class DraftSession {
 
       if (this.activityEdits.size > 0) {
         const [activityId, edit] = this.activityEdits.entries().next().value as [string, ActivityEdit];
+        const validationError = activityDateError(edit.activity);
+        if (validationError) throw new Error(validationError);
         const record = this.current.record;
         this.update({ ...this.current, status: 'Saving', error: null });
         const { title, description, status, completionDate, evidenceDescription, evidenceLinks, applicationToPractice, goalIds } = edit.activity;
