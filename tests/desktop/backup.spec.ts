@@ -126,6 +126,8 @@ test('a failed draft flush keeps text visible and blocks backup; cancelling the 
   storageFailure('true');
   await page.getByLabel('Strengths').fill('Keep these unsaved strengths');
   await navigate('Backup and restore');
+  await expectActionFeedback(page, 'disk full');
+  await dismissActionFeedback(page);
   await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Not saved');
   await expect(page.getByLabel('Strengths')).toHaveValue('Keep these unsaved strengths');
   await expect(page.getByRole('button', { name: 'Create full backup' })).toHaveCount(0);
@@ -190,6 +192,8 @@ test('failed real reader writes block backup navigation until retained review pr
   await page.getByLabel('Physical PDF page', { exact: true }).fill('2');
   await page.getByLabel('Physical PDF page', { exact: true }).press('Enter');
   await expect(page.getByRole('img', { name: 'Supplied Code of Ethics, physical page 2', exact: true })).toBeVisible();
+  await expectActionFeedback(page, 'disk full');
+  await dismissActionFeedback(page);
   await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Not saved');
   await navigate('Backup and restore');
   await expect(page.getByLabel('Physical PDF page', { exact: true })).toHaveValue('2');

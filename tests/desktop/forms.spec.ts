@@ -106,6 +106,8 @@ test('failed draft flush retains edits and prevents stale export; retry exports 
   failSaving(true);
   await page.getByLabel('Strengths', { exact: true }).fill('Dernier brouillon — café.');
   await page.getByRole('navigation').getByRole('button', { name: 'Year overview', exact: true }).click();
+  await expectActionFeedback(page, 'disk full');
+  await dismissActionFeedback(page);
   await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Not saved');
   await expect(page.getByLabel('Strengths', { exact: true })).toHaveValue('Dernier brouillon — café.');
   await expect(page.getByRole('button', { name: 'Export Forms PDF', exact: true })).toHaveCount(0);

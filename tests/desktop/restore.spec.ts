@@ -182,6 +182,8 @@ function storageFailure(failing: boolean | string) {
     await page.getByLabel('Physical PDF page', { exact: true }).fill('2');
     await page.getByLabel('Physical PDF page', { exact: true }).press('Enter');
     await expect(page.getByRole('img', { name: 'Supplied Code of Ethics, physical page 2', exact: true })).toBeVisible();
+    await expectActionFeedback(page, 'disk full');
+    await dismissActionFeedback(page);
     await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Not saved');
     await navigate('Backup and restore');
     await expect(page.getByLabel('Physical PDF page', { exact: true })).toHaveValue('2');
@@ -340,6 +342,8 @@ test('failed real draft flush blocks inspection navigation and keeps the pending
   storageFailure(true);
   await page.getByLabel('Strengths').fill('Keep this unsaved draft, do not inspect');
   await navigate('Backup and restore');
+  await expectActionFeedback(page, 'disk full');
+  await dismissActionFeedback(page);
   await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Not saved');
   await expect(page.getByLabel('Strengths')).toHaveValue('Keep this unsaved draft, do not inspect');
   await expect(page.getByRole('button', { name: 'Preview full backup' })).toHaveCount(0);

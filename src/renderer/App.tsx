@@ -44,6 +44,22 @@ export function App({ operations }: { operations: DesktopOperations }) {
   }, [session, reviewSession]);
   const draft = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const review = useSyncExternalStore(reviewSession.subscribe, reviewSession.getSnapshot);
+  useEffect(() => {
+    if (!draft.failureEvent) return;
+    showFeedback({
+      title: 'Draft could not be saved',
+      message: draft.failureEvent.message,
+      kind: 'error',
+    });
+  }, [draft.failureEvent, showFeedback]);
+  useEffect(() => {
+    if (!review.failureEvent) return;
+    showFeedback({
+      title: 'Review progress could not be saved',
+      message: review.failureEvent.message,
+      kind: 'error',
+    });
+  }, [review.failureEvent, showFeedback]);
   const [state, setState] = useState<AppState | null>(null);
   const [screen, setScreen] = useState<Screen>('years');
   const [year, setYear] = useState(localDate().slice(0, 4));
@@ -160,6 +176,20 @@ export function App({ operations }: { operations: DesktopOperations }) {
       }
     }
     finally { setBusy(false); }
+  }
+  function retryDraftSave() {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    void session.retry().catch(() => {}).finally(() => setBusy(false));
+  }
+  function retryReviewSave() {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    const activeRecord = reviewSession.getSnapshot().record;
+    const retry = activeRecord ? reviewSession.retry() : pkg ? reviewSession.open(pkg.id) : Promise.resolve();
+    void retry.catch(() => {}).finally(() => setBusy(false));
   }
   function backup() {
     void run(async () => {
@@ -507,13 +537,11 @@ export function App({ operations }: { operations: DesktopOperations }) {
       {draft.error && <section className="error-panel" role="alert">
         <p>{draft.error}</p>
         <p>Your unsaved edits remain visible. Navigation and close are blocked until saving succeeds. Copy your text elsewhere if recovery is needed.</p>
-        <button onClick={() => void run(async () => {})} disabled={busy}>Retry save</button>
+        <button onClick={retryDraftSave} disabled={busy}>Retry save</button>
       </section>}
       {error && hasInvalidActivityDate() && <section className="error-panel" role="alert"><p>{error}</p></section>}
       {review.error && review.status === 'Not saved' && screen !== 'review' && <section className="error-panel" role="alert"><p>{review.error}</p>
-        {review.status === 'Not saved' && <button disabled={busy} onClick={() => void run(async () => {
-          if (pkg && !reviewSession.getSnapshot().record) await reviewSession.open(pkg.id);
-        })}>Retry review save</button>}
+        {review.status === 'Not saved' && <button disabled={busy} onClick={retryReviewSave}>Retry review save</button>}
       </section>}
       {!state && !error && <p role="status">Opening local records…</p>}
       {screen === 'years' && <><div className="page-heading"><h1>Your year packages</h1><p>One portfolio per calendar year. Earlier years stay open for editing.</p></div>

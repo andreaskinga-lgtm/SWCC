@@ -31,7 +31,7 @@ export function Review({ packageId, year, operations, session, feedback, complet
     <div className="page-heading"><h1>Review the standards.</h1><p>{year} · Supplied Second Edition, amended September 7, 2018. Resume, browse, or revisit any section.</p></div>
     {snapshot.error && snapshot.status === 'Not saved' && <section className="error-panel" role="alert"><p>{snapshot.error}</p>
       {snapshot.status === 'Not saved' && <><p>Your pending review changes are retained. Navigation and close wait for a successful retry.</p>
-        <button onClick={() => void (state ? session.flush() : session.open(packageId)).catch(() => {})}>Retry review save</button></>}
+        <button disabled={busy} onClick={() => void (state ? session.retry() : session.open(packageId)).catch(() => {})}>Retry review save</button></>}
     </section>}
     {!state && <p role="status">Opening this year’s review…</p>}
     {state && <div className="review-layout"><aside className="review-sections">

@@ -94,7 +94,7 @@ export function GoalCreateDialog({ source, session, onClose, activityId, flushEd
   }
   async function retry() {
     setValidationError('');
-    try { await session.flush(); }
+    try { await session.retry(); }
     catch (error) { setValidationError(error instanceof Error ? error.message : String(error)); }
   }
   return <Dialog title={titleText} onClose={close}>
@@ -149,7 +149,7 @@ export function GoalDeleteDialog({ goal, session, operations, onClose, flushEdit
   }
   async function retrySave() {
     setError(null);
-    try { await session.flush(); }
+    try { await session.retry(); }
     catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
   }
   return <Dialog title={`Delete ${goal.ref}?`} onClose={() => { if (!busy) onClose(); }}>
