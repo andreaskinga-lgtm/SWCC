@@ -31,3 +31,5 @@ Retained inspection artifacts: `.work/forms-continuation-inspection/{sat-stress.
 No ticket10 portfolio or restore/backup implementation was added. No new dependency manifests, schema, IPC, snapshot/busy gate, destination/publication/cancellation or close/flush changes. Unsupported glyphs remain explicit failures, not omissions. Available-host checks were macOS 26.6.2 / arm64, not installer or Windows/Intel/macOS14 acceptance; existing Vite chunk and locked npm dependency advisories remain.
 
 Integration confirmed at `32e1cc4cdc5a10452150e514b482256f56c17f96`, incorporating implementation `740aecbd05e7af7a3e81035fd2545c2a5e90f627`. Canonical checks passed 87 operation tests, typecheck, lint, and build; canonical tree matched the tested implementation tree. The full canonical desktop rerun was deferred while the independent restore-preview implementer was active to avoid competing window focus.
+
+After integration, the completed implementer worktree was removed. Stress-layout inspection artifacts were preserved outside the repository at `/Users/andreasking/.copilot/session-state/0c86f7c4-6bec-490f-b057-a7d3d6df13b0/files/forms-continuation-inspection/`.

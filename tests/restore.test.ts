@@ -14,6 +14,7 @@ import { spawnSync } from 'node:child_process';
 import type { RestoreSystem } from '../src/main/data/restore.js';
 import type { EvidenceSystem } from '../src/main/data/evidence.js';
 import { Writable } from 'node:stream';
+import type { PortfolioSystem } from '../src/main/export/portfolio.js';
 
 function value<T>(result: Result<T>): T {
   if (!result.ok) throw new Error(result.error.message);
@@ -67,8 +68,13 @@ async function fixture() {
   writeFileSync(source, 'Verifiable original evidence');
   const system: RestoreSystem = { chooseArchive: async () => selected };
   const evidenceSystem: EvidenceSystem = { chooseFile: async () => source };
-  const app = openApplication(root, {}, { openExternal: async () => {}, readDocument: () => readFileSync('Code-of-Ethics-and-Standards-of-Practice-September-7-2018 (1).pdf') }, evidenceSystem, undefined,
-    { chooseDestination: async () => archive }, system);
+  const portfolioSystem: PortfolioSystem = { chooseDestination: async () => resolve(output, 'annual-portfolio.zip') };
+  const app = openApplication(root, {}, { openExternal: async () => {}, readDocument: () => readFileSync('Code-of-Ethics-and-Standards-of-Practice-September-7-2018 (1).pdf') }, evidenceSystem, {
+    chooseDestination: async () => resolve(output, 'annual.pdf'),
+    readChecklist: () => readFileSync('Step One SWCC.pdf'),
+    readAssessment: () => readFileSync('OCSWSSW-CCP-Assess-Tool-2026-English.pdf'),
+    readFont: () => readFileSync('resources/fonts/NotoSans-Regular.ttf'),
+  }, { chooseDestination: async () => archive }, system, portfolioSystem);
   apps.push(app);
   let pkg = value(await app.operations.createYear(2024));
   pkg = value(await app.operations.createGoal({ packageId: pkg.id, expectedRevision: pkg.contentRevision, title: 'Goal' }));
@@ -96,7 +102,7 @@ async function fixture() {
   writeFileSync(resolve(unrelated, 'keep.txt'), 'Not owned by this operation');
   const hostile = resolve(output, 'hostile.swcc-backup.zip');
   return {
-    app, system, evidenceSystem, root, output, archive, files, manifest, pkg, operations: app.operations,
+    app, system, evidenceSystem, portfolioSystem, root, output, archive, files, manifest, pkg, operations: app.operations,
     select: () => { selected = hostile; }, hostile,
     save: async () => { files.set('manifest.json', Buffer.from(JSON.stringify(manifest))); await writeZip(hostile, files); selected = hostile; },
     tamperDatabase: (sql: string) => {
@@ -241,6 +247,9 @@ test('a failed protective ZIP write leaves current records, evidence and success
       expect(await f.operations.getState()).toMatchObject({ ok: false, error: { code: 'BUSY' } });
       expect(await f.operations.getReview(f.pkg.id)).toMatchObject({ ok: false, error: { code: 'BUSY' } });
       expect(await f.operations.getEvidence(f.pkg.id)).toMatchObject({ ok: false, error: { code: 'BUSY' } });
+      expect(await f.operations.exportPortfolio({ packageId: f.pkg.id, confirmDraft: true })).toMatchObject({ ok: false, error: { code: 'BUSY' } });
+      expect(await f.operations.createFullBackup()).toMatchObject({ ok: false, error: { code: 'BUSY' } });
+      expect(await f.operations.inspectFullBackup()).toMatchObject({ ok: false, error: { code: 'BUSY' } });
     } finally { release(); value(await replacement); }
   });
 test.each(['move', 'migration', 'reopen', 'validation'] as const)('real %s failure recovers prior usable data and exposes the exact failure', async kind => {
@@ -378,6 +387,27 @@ test('recovery keeps its journal and protective copies until the prior dataset h
   const recovered = restarted(f.root, f.archive);
   expect(recovered.status, recovered.stderr).toBe(0);
   expect(JSON.parse(recovered.stdout.trim()).state.years.map((year: { year: number }) => year.year)).toEqual([2025, 2024]);
+});
+
+test('an admitted genuine portfolio export and a confirmed restore cannot replace each other’s protected snapshot', async () => {
+  const f = await fixture();
+  const inspected = value(await f.operations.inspectFullBackup());
+  if (inspected.cancelled) throw new Error('Unexpected cancellation');
+  let reached!: () => void;
+  let cancel!: () => void;
+  const choosing = new Promise<void>(resolveReached => { reached = resolveReached; });
+  f.portfolioSystem.chooseDestination = () => new Promise(resolveChoice => {
+    cancel = () => resolveChoice(null);
+    reached();
+  });
+  const exporting = f.operations.exportPortfolio({ packageId: f.pkg.id, confirmDraft: true });
+  await choosing;
+  try {
+    expect(await f.operations.replaceFullDataset({ previewId: inspected.preview.id, confirmed: true }))
+      .toMatchObject({ ok: false, error: { code: 'BUSY' } });
+  } finally { cancel(); expect(value(await exporting).cancelled).toBe(true); }
+  value(await f.operations.replaceFullDataset({ previewId: inspected.preview.id, confirmed: true }));
+  expect(value(await f.operations.openYear(f.pkg.id)).activities[0].title).toBe('Activity');
 });
 
 test.each(['fresh installation', 'populated replacement'])('%s reproduces all stable records, counter gaps, date-only values, revisions and manual completions', async mode => {

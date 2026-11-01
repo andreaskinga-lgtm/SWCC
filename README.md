@@ -1,6 +1,6 @@
 # SWCC desktop
 
-The offline Electron app includes durable annual assessment drafts, independent annual standards, shared learning goals and activities, managed evidence files with integrity checks and repair, activity notes/links and reflections, per-year standards review, explicit annual step completion and external declaration records, annual Forms PDF export with readable continuations, full-app backup and recoverable whole-dataset restore. The production shell follows approved C / Learning map reference at commit `5477044`; prototype samples and simulated operations are not shipped.
+The offline Electron app includes durable annual assessment drafts, independent annual standards, shared learning goals and activities, managed evidence files with integrity checks and repair, activity notes/links and reflections, per-year standards review, explicit annual step completion and external declaration records, annual Forms PDF export with readable continuations, complete annual portfolio ZIP, full-app backup and recoverable whole-dataset restore. The production shell follows approved C / Learning map reference at commit `5477044`; prototype samples and simulated operations are not shipped.
 
 ## Run and check
 
@@ -90,9 +90,10 @@ Startup refuses corrupt, empty, missing-from-an-existing-dataset, future-schema,
 | `src/renderer/App.tsx` | C shell, years, navigation, local storage acknowledgement, honest later-feature destinations |
 | `src/renderer/annual-workflow.tsx` | C's adjacent annual checklist, declaration entry/warnings and explicit forms draft export |
 | `src/shared/forms.ts`, `src/main/export/forms.ts` | Draft-export warnings, measured source-template projection, local font appearances, flattening and complete PDF publication |
+| `src/shared/portfolio.ts`, `src/main/export/portfolio.ts`, `src/renderer/portfolio-dialog.tsx` | Distinct annual portfolio ZIP, original evidence inventory/hashes, portable names, draft warnings and cancellable progress |
 | `src/renderer/backup-screen.tsx` | C's full-backup action, quiet status, inspection/cancel, explicit whole-dataset confirmation and replacement/recovery progress |
 
-Export/backup implementations belong in **main-process modules**, not renderer/file-system bridges. The dashboard's **Export Forms PDF** action invokes the narrowly typed `exportForms` operation, including continuation pages. Portfolio archives remain an independent slice. Record deletion, managed evidence and repair, readiness, manual completion, external declaration recording, full-app backup and recoverable replacement are implemented. Ready never means manually Completed.
+Export/backup implementations belong in **main-process modules**, not renderer/file-system bridges. The dashboard has separate **Export Forms PDF** and **Export Complete Portfolio ZIP** actions, invoking narrowly typed `exportForms` and `exportPortfolio` operations. Record deletion, managed evidence and repair, readiness, manual completion, external declaration recording, full-app backup and recoverable replacement are implemented. Ready never means manually Completed.
 
 Public operations return `Result<T>`, not success-shaped failures. `createYear` returns a stable package and persists selection. A duplicate returns `DUPLICATE_YEAR` with `existingPackageId` for actionable opening. `openYear` persists selection without advancing content/data revisions. `saveDraft` accepts a **complete `Draft`** plus package ID and expected content revision; unknown draft fields, malformed dates, and stale revisions are rejected without overwriting the saved record.
 
@@ -163,6 +164,8 @@ Success refreshes the selected year, editing/review sessions, evidence and workf
 
 `tests/restore.test.ts` uses actual public operations, multi-year SQLite/WAL, original evidence and independently read protective ZIPs. `tests/restore-process.mjs` runs those production operations in fresh Electron-Node processes; SIGKILL at journal/move/reopen/validation boundaries and during recovery is followed by actual restarted-process readback. `tests/desktop/restore.spec.ts` uses real offline Electron main/preload/renderer actions for confirmation, cancellation, protective-write progress/failure, busy/close protection, both-session failed flushes, retry and startup recovery. Pauses/errors are injected only at internal transaction or filesystem/OS boundaries, never through a competing renderer interface.
 
+Ticket 13 development verification, October 31, 2026, available macOS / arm64 host: merged the latest integration including complete portfolio ticket 10 (`3a9a96f`), preserving both typed operations and archive/restore gates. **176 public-operation tests**, typecheck, lint and production-asset build passed. **33 targeted real offline Electron checks** passed across restore, backup, forms, portfolio, drafts and completion, including **11 restore renderer checks**. Restarts use actual killed/new processes, not in-process exception recovery alone. Fresh/populated replacement readback preserves all records, original evidence, G/A/E counter gaps, dates, review/manual completion revisions and declarations; protective archives are independently inspected. No dependency manifests changed. No installers, installed-target or Windows/Intel/cross-platform-transfer checks were run; deployment remains deferred. The existing Vite large-chunk advisory remains.
+
 ## Shared and supplementary activities
 
 The dashboard leads with **Record an activity**, shows goals beside activities, and displays each activity once with all linked G references. Development plan uses a goal-connection strip, an activity index (including supplementary work), and one selected record editor. A references in either goal's row open the same record. Selecting another activity flushes edits first; failed edits remain visible.
@@ -225,7 +228,7 @@ The same Forms PDF operation paginates all SAT/PDP narratives at **10 pt**, with
 
 SAT columns advance independently; split goals repeat only their G reference with `(continued)`, not their title/description. PDP goals likewise advance through their own column. The three activity/evidence/reflection columns reserve corresponding rows for one A record until **all three** have emitted its remaining content; shorter columns stay blank rather than displaying another activity against the previous record. An unfinished column starts its next page with only the A reference and `(continued)`. All linked G references and **No linked goal** appear once in the activity narrative. Blank space is intentional navigation, not omitted text.
 
-Wrapping uses bundled-font widths and grapheme boundaries, including unbroken words and HTTP/HTTPS URLs. Paragraph/newline breaks, composed and decomposed accents, and supported punctuation are retained; CRLF/CR become line breaks and tabs become four spaces. Unsupported glyphs fail explicitly without changing saved text or publishing output. A grapheme that cannot physically fit the field at 10 pt still produces an actionable `OVERFLOW`, never clipping. Complete Portfolio ZIP is not implemented here.
+Wrapping uses bundled-font widths and grapheme boundaries, including unbroken words and HTTP/HTTPS URLs. Paragraph/newline breaks, composed and decomposed accents, and supported punctuation are retained; CRLF/CR become line breaks and tabs become four spaces. Unsupported glyphs fail explicitly without changing saved text or publishing output. A grapheme that cannot physically fit the field at 10 pt still produces an actionable `OVERFLOW`, never clipping. For original evidence bytes, use the separate Complete Portfolio ZIP action.
 
 The entire PDF is generated before writing a unique private partial file beside the destination. The file is completely written, flushed and closed before rename publishes it. Errors preserve any previous complete destination, and success is reported only after publication. A forms export is **not** a restorable full-app backup.
 
@@ -318,3 +321,32 @@ Ticket 11 verification on the same macOS arm64 host, October 31, 2026:
 - `npm run typecheck`, `npm run lint` and `npm run build`: passed; the existing large-bundle advisory remains.
 - `npm run test:desktop -- tests/desktop/backup.spec.ts tests/desktop/drafts.spec.ts tests/desktop/completion.spec.ts`: **13** production `file://`, offline Electron checks passed, including **4** backup renderer cases. OS save dialogs are controlled at Electron's dialog boundary; archive generation, SQLite and managed bytes are real.
 - Restore remains ticket 12. Windows/Intel macOS/macOS 14 installed backup behavior, installer upgrades, actual removable-drive exhaustion and power-loss durability have not been exercised by this ticket.
+
+## Complete annual portfolio ZIP
+
+From the year overview, choose **Export Complete Portfolio ZIP**, separately from Forms PDF and full-app backup. Review the same readable readiness/manual-completion/declaration warnings, then explicitly choose **Export draft ZIP** if incomplete. Drafts are permitted; missing fields remain blank. Main owns the OS destination dialog and suggests:
+
+```text
+CCP-<year>-portfolio.zip
+  CCP-<year>-forms.pdf
+  evidence-index.txt
+  manifest.json
+  evidence/E1/<safe-original-filename>
+  evidence/E2/<safe-original-filename>
+```
+
+This copy contains the complete checklist/SAT/PDP and their readable continuations, plus every annual attachment's original bytes once, including shared and supplementary activity evidence. The index connects A/E references, original filenames and archive paths without repeating reflections. Original names remain metadata; control/format characters in PDF filename labels are represented by printable Unicode escapes, not interpreted as narrative formatting.
+
+The manifest has `kind: "portfolio"`, `archiveVersion: 1`, application/source identity, year, package/content/data revisions and UTC `createdAt`. `files` inventories forms, index and evidence with actual byte counts and SHA-256 of the exact archived bytes; `attachments` additionally retains stable IDs, A/E references, original names, types and import timestamps. The manifest does not inventory itself. A portfolio is **not a restorable full-app backup**, does not advance backup status, and is not encrypted.
+
+Evidence is grouped by stable E reference, so duplicate original names cannot collide. Portable NFC filenames remove forbidden characters, controls, leading/trailing dots/spaces and reserved Windows device names (including superscript forms), and are bounded to 180 UTF-8 bytes without splitting graphemes. Supported extensions are retained. Original filename metadata is not changed.
+
+`exportPortfolio({ packageId, confirmDraft? })` is the public preload/application operation. The renderer flushes both draft and review sessions before opening the warning and again before generation. Main reserves collection immediately, drains admitted asynchronous evidence/review writes and Forms PDF exports, then captures one synchronous annual SQLite read transaction. The existing archive gate rejects conflicting new mutations, deletions, forms exports and full backups while records and original evidence are collected. Reads remain available; failed flushes retain visible edits and prevent stale export.
+
+`getPortfolioProgress()` exposes waiting/choosing/snapshot/generating/archiving/publishing phases and actual file/byte counts. `cancelPortfolioExport()` cancels collection, not an already-started publication; use the OS dialog's ordinary Cancel while choosing a destination. Protected close refuses to quit during export and exposes the reason in the active dialog; cancellation/completion never triggers an unexpected deferred quit.
+
+The existing streamed ZIP writer checks actual sizes and saved hashes. Missing, changed, unreadable, symbolic-linked or unsafe managed evidence fails explicitly, even for a supplementary activity. A private partial archive is completely written and flushed beside the destination, then renamed only after success. Failure/cancellation removes partial/staged output and leaves an existing complete destination unchanged. Destinations inside SWCC storage are rejected to protect the dataset.
+
+`tests/portfolio-export.test.ts` inspects real ZIPs through the public operation with real SQLite, templates, long readable PDF narratives, shared/supplementary evidence, byte/hash inventories and awkward/duplicate/reserved/accented names. It covers missing/corrupt/late-changed/symbolic-linked evidence, PDF/disk failures, cancellation, admitted imports/forms and concurrent mutation/deletion attempts. `tests/desktop/portfolio.spec.ts` exercises the real production offline Electron UI, keyboard warnings/export, failed draft and actual reader flushes, retained edits, busy/close/cancel controls, narrow-window reflow and actual filesystem output failure/retry. Substitutes are limited to OS dialogs and paused/failing filesystem boundaries; there is no test-only application interface.
+
+Ticket 10 verification on October 31, 2026, macOS 26.6.2 / arm64: after merging integration `5e9cfa8` (including ticket 12 preview), all **153 public-operation tests** (15 portfolio checks), typecheck, lint and build passed. All **26 targeted real Electron checks** passed against production offline `file://` assets: portfolio, forms, full backup, restore preview, drafts and completion. A generated real portfolio was also rejected by the existing restore-inspection operation with live records unchanged. No new dependencies or schema migrations were introduced by ticket 10; the merged manifest promotes the existing ZIP reader for ticket 12. This does not certify installers, Windows, Intel macOS, macOS 14, cross-platform extraction, removable-drive exhaustion or power-loss durability. The existing Vite large-chunk advisory and locked dependency advisories remain.

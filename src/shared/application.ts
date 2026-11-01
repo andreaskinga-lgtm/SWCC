@@ -185,6 +185,9 @@ export interface YearPackage extends Draft {
 }
 export interface ApplicationOperations extends ReviewOperations {
   replaceFullDataset(input: import('./restore.js').ReplaceFullDataset): Promise<Result<import('./restore.js').RestoreOutcome>>;
+  exportPortfolio(input: import('./forms.js').ExportForms): Promise<Result<import('./portfolio.js').PortfolioExportOutcome>>;
+  getPortfolioProgress(): Promise<Result<import('./portfolio.js').PortfolioProgress>>;
+  cancelPortfolioExport(): Promise<Result<void>>;
   inspectFullBackup(): Promise<Result<import('./restore.js').RestoreInspectionOutcome>>;
   getRestoreProgress(): Promise<Result<import('./restore.js').RestoreProgress>>;
   cancelRestorePreview(): Promise<Result<void>>;

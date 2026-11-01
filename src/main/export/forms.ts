@@ -119,13 +119,7 @@ export async function exportAnnualForms(snapshot: AnnualFormsSnapshot, system: F
     fail('EXPORT', `The forms destination dialog could not be opened: ${error instanceof Error ? error.message : String(error)}. Retry the export. No output was published.`);
   }
   if (!destination) return { cancelled: true };
-  let bytes: Uint8Array;
-  let pageCount: number;
-  try { ({ bytes, pageCount } = await generateForms(snapshot, system)); }
-  catch (error) {
-    if (error instanceof FormsOverflow) fail('OVERFLOW', error.message);
-    fail('EXPORT', `Forms PDF could not be generated: ${error instanceof Error ? error.message : String(error)}. No output was published.`);
-  }
+  const { bytes, pageCount } = await generateAnnualForms(snapshot, system, fail);
   const partial = join(dirname(destination), `.${basename(destination)}.${randomUUID()}.partial`);
   try {
     const file = await open(partial, 'wx', 0o600);
@@ -136,6 +130,14 @@ export async function exportAnnualForms(snapshot: AnnualFormsSnapshot, system: F
     fail('STORAGE', `Forms PDF could not be completely written: ${error instanceof Error ? error.message : String(error)}. Check destination permissions and available disk space, then retry. No output was published.`);
   } finally { await rm(partial, { force: true }).catch(() => {}); }
   return { cancelled: false, fileName: basename(destination), pageCount };
+}
+
+export async function generateAnnualForms(snapshot: AnnualFormsSnapshot, system: FormsSystem, fail: Fail) {
+  try { return await generateForms(snapshot, system); }
+  catch (error) {
+    if (error instanceof FormsOverflow) fail('OVERFLOW', error.message);
+    fail('EXPORT', `Forms PDF could not be generated: ${error instanceof Error ? error.message : String(error)}. No output was published.`);
+  }
 }
 
 async function generateForms(snapshot: AnnualFormsSnapshot, system: FormsSystem): Promise<{ bytes: Uint8Array; pageCount: number }> {
@@ -174,7 +176,7 @@ async function generateForms(snapshot: AnnualFormsSnapshot, system: FormsSystem)
       ].filter(Boolean).join('\n'),
       [activity.ref, activity.evidenceDescription, ...activity.evidenceLinks,
         ...snapshot.attachments.filter(entry => entry.activityId === activity.id).map(entry =>
-          `${entry.ref} ${entry.originalName}${entry.integrity === 'readable' ? '' : ` [${entry.integrity}; repair required]`}`),
+          `${entry.ref} ${entry.originalName.replace(/\p{Cc}|\p{Cf}/gu, character => `\\u{${character.codePointAt(0)!.toString(16)}}`)}${entry.integrity === 'readable' ? '' : ` [${entry.integrity}; repair required]`}`),
       ].filter(Boolean).join('\n'),
       [activity.ref, activity.applicationToPractice].filter(Boolean).join('\n'),
     ],

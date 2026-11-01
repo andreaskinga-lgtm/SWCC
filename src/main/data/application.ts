@@ -22,6 +22,9 @@ import type { FormsSystem } from '../export/forms.js';
 import { createFullBackup } from './backup.js';
 import type { BackupSystem } from './backup.js';
 import type { BackupProgress } from '../../shared/backup.js';
+import { exportAnnualPortfolio } from '../export/portfolio.js';
+import type { PortfolioSystem } from '../export/portfolio.js';
+import type { PortfolioProgress } from '../../shared/portfolio.js';
 import { datasetSummary, inspectArchive, RestoreCleanupFailure } from './restore.js';
 import { recoverRestore, replaceDataset } from './restore-recovery.js';
 import type { RestoreSystem } from './restore.js';
@@ -98,6 +101,7 @@ export function openApplication(
   formsSystem?: FormsSystem,
   backupSystem?: BackupSystem,
   restoreSystem?: RestoreSystem,
+  portfolioSystem?: PortfolioSystem,
 ) {
   const paths = storageLayout(storageRoot);
   const dataset = paths.dataset;
@@ -215,10 +219,12 @@ export function openApplication(
     review = reviewOperations(database, now, reviewSystem);
   }
   let backupController: AbortController | null = null;
+  let portfolioController: AbortController | null = null;
   const idleProgress = (): BackupProgress => ({
     phase: 'idle', filesCompleted: 0, filesTotal: 0, bytesCompleted: 0, bytesTotal: 0,
   });
   let backupProgress = idleProgress();
+  let portfolioProgress: PortfolioProgress = idleProgress();
   let restoreController: AbortController | null = null;
   let restoreDirectory: string | null = null;
   let validatedPreview: Awaited<ReturnType<typeof inspectArchive>> | null = null;
@@ -230,7 +236,7 @@ export function openApplication(
   const mutations = new Set<Promise<unknown>>();
   const operations: ApplicationOperations = {
     replaceFullDataset: input => operation(async () => {
-      if (replacing || restoreController || backupController) fail('BUSY', 'A backup or restore is running. Wait for it to finish.');
+      if (replacing || restoreController || backupController || portfolioController) fail('BUSY', 'A backup, portfolio export or restore is running. Wait for it to finish.');
       if (!input || input.confirmed !== true || Object.keys(input).some(key => !['previewId', 'confirmed'].includes(key))
         || !validatedPreview || input.previewId !== validatedPreview.preview.id)
         fail('CONFIRMATION_REQUIRED', 'Inspect a complete full backup and explicitly confirm that validated preview before replacing all years.');
@@ -256,8 +262,60 @@ export function openApplication(
         restoreProgress = idleRestore();
       }
     }),
+    exportPortfolio: input => operation(async () => {
+      if (backupController || portfolioController || restoreController || replacing || !database.open || existsSync(paths.recoveryJournal))
+        fail('BUSY', 'An archive operation or restore recovery is running. Wait for it to finish before exporting a portfolio.');
+      if (!input || typeof input !== 'object' || Array.isArray(input)
+        || Object.keys(input).some(key => !['packageId', 'confirmDraft'].includes(key))
+        || (input.confirmDraft !== undefined && input.confirmDraft !== true))
+        fail('VALIDATION', 'Choose a year package and confirm any draft warning before exporting.');
+      identifier(input.packageId);
+      const { packageId, confirmDraft } = input;
+      const controller = new AbortController();
+      portfolioController = controller;
+      portfolioProgress = { ...idleProgress(), phase: 'waiting' };
+      try {
+        let stopped!: () => void;
+        const cancelled = new Promise<void>(resolveCancelled => { stopped = resolveCancelled; });
+        controller.signal.addEventListener('abort', stopped, { once: true });
+        try { await Promise.race([Promise.allSettled([...mutations]), cancelled]); }
+        finally { controller.signal.removeEventListener('abort', stopped); }
+        if (controller.signal.aborted) return { cancelled: true };
+        portfolioProgress = { ...idleProgress(), phase: 'snapshot' };
+        const snapshot = database.transaction(() => {
+          const record = getPackage(packageId);
+          const review = readReviewProgress(database, record.id);
+          const attachments = evidence.getEvidence(record.id);
+          const workflow = evaluateWorkflow(record, review, today(), new Set(attachments
+            .filter(entry => entry.integrity === 'readable').map(entry => entry.activityId)));
+          const missing = formsExportWarnings(record, workflow);
+          if (missing.length && !confirmDraft) throw new ApplicationFailure({
+            code: 'CONFIRMATION_REQUIRED', message: 'This annual package is incomplete. Review the missing items and explicitly export a draft.', missing,
+          });
+          const rows = database.prepare('SELECT id, managed_path AS managedPath FROM evidence_attachments WHERE package_id = ?')
+            .all(record.id) as { id: string; managedPath: string }[];
+          const meta = database.prepare('SELECT data_revision AS dataRevision FROM app_metadata WHERE id = 1').get() as { dataRevision: number };
+          return { package: record, review, attachments, ...meta,
+            evidenceFiles: attachments.map(attachment => ({
+              attachment, managedPath: rows.find(row => row.id === attachment.id)!.managedPath,
+            })) };
+        })();
+        if (!formsSystem || !portfolioSystem) fail('EXPORT', 'The portfolio export resources or destination dialog are unavailable. No output was published.');
+        return await exportAnnualPortfolio(snapshot, paths, now(), formsSystem, portfolioSystem, controller.signal,
+          progress => { portfolioProgress = progress; }, fail);
+      } finally {
+        portfolioController = null;
+        portfolioProgress = idleProgress();
+      }
+    }, 'Complete Portfolio ZIP could not be completed. No output was published'),
+    getPortfolioProgress: () => operation(() => ({ ...portfolioProgress })),
+    cancelPortfolioExport: () => operation(() => {
+      if (portfolioProgress.phase === 'publishing') fail('BUSY', 'The complete portfolio is being published. Wait for publication to finish.');
+      portfolioController?.abort();
+    }),
     inspectFullBackup: () => {
-      if (restoreController || restoreDirectory || backupController) return operation(() => fail('BUSY', 'Finish or cancel the current backup inspection or full backup before choosing another archive.'));
+      if (restoreController || restoreDirectory || backupController || portfolioController || replacing || !database.open || existsSync(paths.recoveryJournal))
+        return operation(() => fail('BUSY', 'Finish or cancel the current archive operation or recover local records before choosing another archive.'));
       restoreController = new AbortController();
       const controller = restoreController;
       restoreProgress = { ...idleRestore(), phase: 'choosing' };
@@ -308,7 +366,8 @@ export function openApplication(
       restoreProgress = idleRestore();
     }),
     createFullBackup: () => operation(async () => {
-      if (backupController || restoreController || replacing) fail('BUSY', 'A backup or restore is already running. Wait for it to finish.');
+      if (backupController || restoreController || portfolioController || replacing || !database.open || existsSync(paths.recoveryJournal))
+        fail('BUSY', 'An archive operation or restore recovery is already running. Wait for it to finish.');
       backupController = new AbortController();
       backupProgress = { ...idleProgress(), phase: 'choosing' };
       try {
@@ -611,9 +670,9 @@ export function openApplication(
   for (const key of protectedOperations) {
     const original = operations[key] as (input: unknown) => Promise<Result<unknown>>;
     const guarded = async (input: unknown): Promise<Result<unknown>> => {
-      if (backupController || restoreController || replacing || !database.open || existsSync(paths.recoveryJournal)) return {
-        ok: false, error: { code: 'BUSY', message: backupController
-          ? 'A full backup is collecting your records and evidence. Wait for it to finish, then retry; your edit has not been applied.'
+      if (backupController || restoreController || portfolioController || replacing || !database.open || existsSync(paths.recoveryJournal)) return {
+        ok: false, error: { code: 'BUSY', message: backupController || portfolioController
+          ? `A ${portfolioController ? 'portfolio export' : 'full backup'} is collecting your records and evidence. Wait for it to finish, then retry; your edit has not been applied.`
           : 'Restore or recovery is running. Wait for it to finish, then retry; your edit has not been applied.' },
       };
       const running = original(input);
@@ -637,7 +696,7 @@ export function openApplication(
     } });
   }
   return { operations, close: () => {
-    if (backupController) throw new Error('Wait for the full backup to finish before closing local records.');
+    if (backupController || portfolioController) throw new Error('Wait for the archive operation to finish before closing local records.');
     if (restoreController || restoreDirectory || replacing) throw new Error('Finish the restore or cancel its preview before closing local records.');
     if (database.open) database.close();
   } };

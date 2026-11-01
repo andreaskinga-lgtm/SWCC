@@ -105,6 +105,14 @@ if (startupFailure) {
           const result = window ? await dialog.showOpenDialog(window, options) : await dialog.showOpenDialog(options);
           return result.canceled ? null : result.filePaths[0] ?? null;
         },
+      }, {
+        chooseDestination: async suggestedName => {
+          const options = { title: 'Export Complete Portfolio ZIP', defaultPath: suggestedName,
+            filters: [{ name: 'Annual portfolio ZIP (not a full backup)', extensions: ['zip'] }] };
+          const result = window ? await dialog.showSaveDialog(window, options) : await dialog.showSaveDialog(options);
+          if (result.canceled || !result.filePath) return null;
+          return /\.zip$/i.test(result.filePath) ? result.filePath : `${result.filePath}.zip`;
+        },
       });
       if (app.isPackaged) {
         for (const document of SOURCE_DOCUMENTS) {
@@ -144,6 +152,8 @@ if (startupFailure) {
       const operations = application.operations;
       const channels: Record<string, keyof ApplicationOperations> = {
         'swcc:replace-full-dataset': 'replaceFullDataset',
+        'swcc:export-portfolio': 'exportPortfolio', 'swcc:get-portfolio-progress': 'getPortfolioProgress',
+        'swcc:cancel-portfolio-export': 'cancelPortfolioExport',
         'swcc:inspect-full-backup': 'inspectFullBackup', 'swcc:get-restore-progress': 'getRestoreProgress',
         'swcc:cancel-restore-preview': 'cancelRestorePreview',
         'swcc:export-forms': 'exportForms',
@@ -200,6 +210,10 @@ if (startupFailure) {
         const progress = await operations.getBackupProgress();
         if (!progress.ok || progress.value.phase !== 'idle') return {
           ok: false, error: { code: 'BUSY', message: 'A full backup is still running. Wait for it to finish or cancel it, then close SWCC deliberately.' },
+        };
+        const portfolio = await operations.getPortfolioProgress();
+        if (!portfolio.ok || portfolio.value.phase !== 'idle') return {
+          ok: false, error: { code: 'BUSY', message: 'A portfolio export is still running. Wait for it to finish or cancel it, then close SWCC deliberately.' },
         };
         const restore = await operations.getRestoreProgress();
         if (!restore.ok || !['idle', 'preview'].includes(restore.value.phase)) return {
