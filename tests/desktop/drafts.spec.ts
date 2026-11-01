@@ -143,3 +143,135 @@ test('a second launch of the same OS-user dataset exits without creating a compe
   expect(desktop.windows()).toHaveLength(1);
   await expect(page.getByLabel('New package year')).toBeVisible();
 });
+
+for (const viewport of [
+  { name: 'wide', width: 1280, height: 800 },
+  { name: 'narrow', width: 620, height: 800 },
+  { name: 'short', width: 1280, height: 380 },
+  { name: 'narrow and short', width: 620, height: 260 },
+]) {
+  test(`portfolio navigation stays anchored and independently reachable in a ${viewport.name} window`, async () => {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await page.getByRole('button', { name: 'I understand' }).click();
+    await page.evaluate(async () => {
+      const created = await window.swcc.createYear(2024);
+      if (!created.ok) throw new Error(created.error.message);
+      let pkg = created.value;
+      for (let index = 1; index <= 12; index++) {
+        const result = await window.swcc.createGoal({
+          packageId: pkg.id, expectedRevision: pkg.contentRevision,
+          title: `Learning goal ${index}`, description: 'Develop reflective practice through regular consultation.',
+        });
+        if (!result.ok) throw new Error(result.error.message);
+        pkg = result.value;
+      }
+      for (let year = 2023; year >= 2012; year--) {
+        const result = await window.swcc.createYear(year);
+        if (!result.ok) throw new Error(result.error.message);
+      }
+      const opened = await window.swcc.openYear(pkg.id);
+      if (!opened.ok) throw new Error(opened.error.message);
+    });
+    await page.reload();
+    await page.getByRole('navigation').getByRole('button', { name: 'Self-assessment', exact: true }).click();
+    await expect(page.getByLabel('Goal title G12')).toHaveValue('Learning goal 12');
+    await page.evaluate(() => window.scrollTo(0, 0));
+    const rail = page.getByRole('complementary', { name: 'Portfolio navigation' });
+    const initialRail = await rail.boundingBox();
+    expect(initialRail).not.toBeNull();
+    const main = await page.getByRole('main').boundingBox();
+    expect(main).not.toBeNull();
+    if (viewport.width < 700) {
+      expect(main!.y).toBeGreaterThanOrEqual(initialRail!.y + initialRail!.height);
+      const first = await page.getByRole('navigation').getByRole('button', { name: 'Year overview', exact: true }).boundingBox();
+      const third = await page.getByRole('navigation').getByRole('button', { name: 'Self-assessment', exact: true }).boundingBox();
+      const fourth = await page.getByRole('navigation').getByRole('button', { name: 'Development plan', exact: true }).boundingBox();
+      expect(third!.y).toBeCloseTo(first!.y, 0);
+      expect(fourth!.y).toBeGreaterThan(first!.y);
+    } else {
+      expect(main!.x).toBeGreaterThanOrEqual(initialRail!.x + initialRail!.width);
+    }
+    await page.mouse.move(viewport.width - 100, viewport.height - 30);
+    await page.mouse.wheel(0, 1200);
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThanOrEqual(1000);
+    const scrolledRail = await rail.boundingBox();
+    expect(scrolledRail).not.toBeNull();
+    expect(scrolledRail!.y).toBeCloseTo(initialRail!.y, 0);
+    expect(scrolledRail!.height).toBeLessThanOrEqual(viewport.height);
+    await expect(page.getByRole('banner')).not.toBeInViewport();
+    const destinations = [
+      { name: 'Year overview', heading: 'Connect learning to practice.' },
+      { name: 'Review', heading: 'Review the standards.' },
+      { name: 'Self-assessment', heading: 'Reflect on your practice.' },
+      { name: 'Development plan', heading: 'Give your learning a place.' },
+      { name: 'All years', heading: 'Your year packages' },
+      { name: 'Backup and restore', heading: 'Keep a copy beyond this device.' },
+    ];
+    const documentScroll = await page.evaluate(() => window.scrollY);
+    if (viewport.height < 400) {
+      await page.mouse.move(scrolledRail!.width / 2, scrolledRail!.height / 2);
+      await page.mouse.wheel(0, 1200);
+      await expect(page.getByRole('navigation').getByRole('button', { name: 'Backup and restore', exact: true })).toBeInViewport({ ratio: 1 });
+      expect(await rail.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+      expect(await page.evaluate(() => window.scrollY)).toBe(documentScroll);
+    }
+    await page.getByRole('navigation').getByRole('button', { name: 'Year overview', exact: true }).focus();
+    for (let index = 0; index < destinations.length; index++) {
+      if (index > 0) await page.keyboard.press('Tab');
+      const action = page.getByRole('navigation').getByRole('button', { name: destinations[index].name, exact: true });
+      await expect(action).toBeFocused();
+      await expect(action).toBeInViewport({ ratio: 1 });
+      expect(await page.evaluate(() => window.scrollY)).toBe(documentScroll);
+    }
+    await page.keyboard.press('Tab');
+    const yearPicker = page.getByRole('combobox', { name: 'Year package', exact: true });
+    await expect(yearPicker).toBeFocused();
+    await expect(yearPicker).toBeInViewport({ ratio: 1 });
+    const focused = await yearPicker.boundingBox();
+    if (viewport.width < 700) expect(focused!.y).toBeGreaterThanOrEqual(scrolledRail!.height);
+    else expect(focused!.x).toBeGreaterThanOrEqual(scrolledRail!.width);
+    const narratives = ['Strengths', 'Peer feedback', 'Learning needs and interests'];
+    for (let index = 0; index < narratives.length; index++) {
+      const narrative = page.getByRole('textbox', { name: narratives[index], exact: true });
+      if (index === 0) await narrative.focus();
+      else await page.keyboard.press('Tab');
+      await expect(narrative).toBeFocused();
+      await expect(narrative).toBeInViewport();
+      if (viewport.width < 700 && viewport.height < 400) {
+        await page.keyboard.insertText('Reflect on learning and its application to practice.\n'.repeat(8));
+        await expect(narrative).toBeInViewport({ ratio: 1 });
+      }
+      const focusedNarrative = await narrative.boundingBox();
+      if (viewport.width < 700) expect(focusedNarrative!.y).toBeGreaterThanOrEqual(scrolledRail!.height);
+      else expect(focusedNarrative!.x).toBeGreaterThanOrEqual(scrolledRail!.width);
+    }
+    const standard = page.getByRole('checkbox', { name: 'Code of Ethics', exact: true });
+    await standard.focus();
+    await expect(standard).toBeInViewport({ ratio: 1 });
+    const focusedStandard = await standard.boundingBox();
+    if (viewport.width < 700) expect(focusedStandard!.y).toBeGreaterThanOrEqual(scrolledRail!.height);
+    else expect(focusedStandard!.x).toBeGreaterThanOrEqual(scrolledRail!.width);
+    for (const destination of destinations) {
+      const nextScroll = await page.evaluate(() =>
+        Math.min(window.scrollY + 1200, document.documentElement.scrollHeight - window.innerHeight));
+      await page.mouse.move(viewport.width - 100, viewport.height - 30);
+      await page.mouse.wheel(0, 1200);
+      await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(nextScroll);
+      expect(nextScroll).toBeGreaterThan(0);
+      const beforeNavigation = await page.evaluate(() => window.scrollY);
+      const action = page.getByRole('navigation').getByRole('button', { name: destination.name, exact: true });
+      await action.scrollIntoViewIfNeeded();
+      await expect(action).toBeInViewport({ ratio: 1 });
+      expect(await page.evaluate(() => window.scrollY)).toBe(beforeNavigation);
+      await action.click();
+      await expect(action).toHaveAttribute('aria-current', 'page');
+      await expect(page.getByRole('heading', { name: destination.heading, exact: true })).toBeVisible();
+      const currentRail = await rail.boundingBox();
+      expect(currentRail!.y).toBeCloseTo(initialRail!.y, 0);
+      expect(currentRail!.height).toBeLessThanOrEqual(viewport.height);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    }
+    await page.getByRole('navigation').getByRole('button', { name: 'Self-assessment', exact: true }).click();
+    await expect(page.getByLabel('Goal title G12')).toHaveValue('Learning goal 12');
+  });
+}
