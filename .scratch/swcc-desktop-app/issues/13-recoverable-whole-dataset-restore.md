@@ -4,7 +4,7 @@
 
 **Blocked by:** 12: Inspect and validate a backup without changing live records.
 
-**Status:** claimed
+**Status:** resolved
 
 Claimed October 31, 2026 after ticket 12 integration; implementation branch `ticket/13`. Complete the recovery functionality in development mode; installer/deployment work is deferred by user.
 
@@ -19,3 +19,13 @@ Claimed October 31, 2026 after ticket 12 integration; implementation branch `tic
 - [ ] Restore works in a fresh installation, not only over a populated one. Portable stored paths and date values remain independent of original device or timezone; actual Windows/macOS transfer is verified in the final portability ticket.
 - [ ] Public-operation checks use real directories, databases, evidence, and protective archives. Inject protective-backup failure and failures/interruption at staged-move, reopen, validation, and startup-recovery boundaries; restart the application/process to verify recovery rather than only catching an in-process error.
 - [ ] Renderer checks verify replacement confirmation/cancellation, busy behavior, preserved unsaved edits on failed flush, accurate success/error outcomes, and C's backup/restore composition. Remove only verified operation-owned staging remnants when safe.
+
+## Comments
+
+### 2026-10-31 — recoverable replacement integrated
+
+Implemented on `ticket/13` with final commit `f52b2e7` and journal-safety fix `5f5f918`, merged with `d0681ad90f94a0595d34766a8f2ad214a41fa991`. Explicit validated replacement, verified protective backup, database closure, staged directory moves, durable recovery journal, prior-data recovery, startup interruption handling, and refreshed C restore UI are implemented.
+
+Canonical checks passed 176 public-operation tests, typecheck, lint, build, and the full serialized production Electron suite: 53/53 checks, including 11 restore checks. Canonical and implementer trees were clean. Earlier filesystem timeout/trailing-space anomalies passed three isolated repeats and final full reruns; the host stall cause remains unconfirmed, with no reproducible functional failure remaining. Validation log: `.work/ticket13-integration-validation.log`.
+
+Verification used macOS arm64 development/production-test execution only. No new installers were built; deployment and cross-platform acceptance are deferred by user. Integration review is the remaining current-run gate.
