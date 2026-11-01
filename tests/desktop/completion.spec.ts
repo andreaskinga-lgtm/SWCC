@@ -176,7 +176,8 @@ test('completed review survives real rereading; current manual confirmations plu
   storageFailure('review-fail');
   await page.getByLabel('Physical PDF page', { exact: true }).fill('4');
   await page.getByLabel('Physical PDF page', { exact: true }).press('Enter');
-  await expect(page.getByRole('alert')).toContainText('disk full');
+  await expectActionFeedback(page, 'disk full');
+  await dismissActionFeedback(page);
   await page.getByRole('button', { name: 'Complete Step 1', exact: true }).click();
   await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Not saved');
   expect((await selectedPackage()).stepCompletions.review).toEqual(confirmed);
@@ -229,7 +230,8 @@ test('failed draft flush leaves confirmation unchanged and edits visible until r
   storageFailure('true');
   await page.getByLabel('Strengths').fill('Unsaved but still substantive strengths');
   await page.getByRole('button', { name: 'Complete Step 2', exact: true }).click();
-  await expect(page.getByRole('alert')).toContainText('disk full');
+  await expectActionFeedback(page, 'disk full');
+  await dismissActionFeedback(page);
   await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Not saved');
   await expect(page.getByLabel('Strengths')).toHaveValue('Unsaved but still substantive strengths');
   expect((await selectedPackage()).stepCompletions.assessment).toEqual(confirmed);

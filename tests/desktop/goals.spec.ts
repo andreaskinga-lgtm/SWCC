@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { dismissActionFeedback, expectActionFeedback } from './feedback-helpers.js';
 
 const electronExecutable = createRequire(import.meta.url)('electron') as string;
 
@@ -172,7 +173,9 @@ test('a failed shared-goal edit stays visible and blocks navigation and close un
 
   failWrites(true);
   await page.getByLabel('Goal title G1').fill('Unsaved goal title');
-  await expect(page.getByRole('alert')).toContainText('disk full');
+  await expectActionFeedback(page, 'disk full');
+  await dismissActionFeedback(page);
+  await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Not saved');
   await page.getByRole('navigation').getByRole('button', { name: 'All years', exact: true }).click();
   await expect(page.getByLabel('Goal title G1')).toHaveValue('Unsaved goal title');
   await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
@@ -198,6 +201,8 @@ test('a failed new-goal write remains in its dialog and retries without allocati
   const dialog = page.getByRole('dialog', { name: 'Add a learning goal' });
   await dialog.getByLabel('Goal title').fill('Pending shared goal');
   await dialog.getByRole('button', { name: 'Add goal', exact: true }).click();
+  await expectActionFeedback(page, 'disk full');
+  await dismissActionFeedback(page);
   await expect(dialog.getByRole('alert')).toContainText('disk full');
   await expect(dialog.getByLabel('Goal title')).toHaveValue('Pending shared goal');
   await dialog.getByRole('button', { name: 'Close dialog' }).click();

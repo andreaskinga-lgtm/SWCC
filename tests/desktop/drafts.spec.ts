@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { dismissActionFeedback, expectActionFeedback } from './feedback-helpers.js';
 
 const electronExecutable = createRequire(import.meta.url)('electron') as string;
 
@@ -82,26 +83,53 @@ function failWrites(enabled: boolean) {
   });
   if (fixture.status !== 0) throw new Error(fixture.stderr);
 }
-test('failed autosave keeps edits visible and blocks navigation and close until a retry succeeds', async () => {
+test('failed autosave reports once until a successful retry persists retained edits', async () => {
   await page.getByLabel('New package year').press('Enter');
   await page.getByRole('navigation').getByRole('button', { name: 'Self-assessment', exact: true }).click();
   await failWrites(true);
   await page.getByLabel('Strengths').fill('Do not discard this');
-  await expect(page.getByRole('alert')).toContainText('disk full');
-  await expect(page.getByRole('status', { name: 'Save status' })).not.toHaveText('Saved');
+  const firstFailure = await expectActionFeedback(page, 'disk full');
+  await expect(firstFailure.getByRole('alert')).toContainText('disk full');
+  await dismissActionFeedback(page);
+  await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Not saved');
+  await expect(page.getByRole('button', { name: 'Retry save' })).toBeVisible();
+  await page.getByLabel('Strengths').fill('Keep the latest retained edit');
+  await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Not saved');
+  await expect(page.locator('.action-feedback-dialog')).toBeHidden();
   await page.getByRole('button', { name: 'All years', exact: true }).click();
-  await expect(page.getByLabel('Strengths')).toHaveValue('Do not discard this');
+  await expect(page.getByLabel('Strengths')).toHaveValue('Keep the latest retained edit');
+  await expect(page.locator('.action-feedback-dialog')).toBeHidden();
   await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
   await expect(page.getByRole('alert')).toContainText('disk full');
+  await expect(page.locator('.action-feedback-dialog')).toBeHidden();
   expect(await desktop.windows()).toHaveLength(1);
   await desktop.evaluate(({ app }) => app.quit());
   await expect(page.getByRole('status', { name: 'Save status' })).not.toHaveText('Saved');
+  await expect(page.locator('.action-feedback-dialog')).toBeHidden();
   expect(desktop.windows()).toHaveLength(1);
+  await page.getByRole('button', { name: 'Retry save' }).click();
+  await expectActionFeedback(page, 'disk full');
+  await dismissActionFeedback(page);
+  await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Not saved');
   await failWrites(false);
   await page.getByRole('button', { name: 'Retry save' }).click();
   await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Saved');
-  await page.getByRole('button', { name: 'All years', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Your year packages' })).toBeVisible();
+  await expect(page.locator('.action-feedback-dialog')).toBeHidden();
+
+  await failWrites(true);
+  await page.getByLabel('Learning needs and interests').fill('A distinct failure after recovery');
+  await expectActionFeedback(page, 'disk full');
+  await dismissActionFeedback(page);
+  await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Not saved');
+  await failWrites(false);
+  await page.getByRole('button', { name: 'Retry save' }).click();
+  await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Saved');
+
+  await desktop.close();
+  await launch();
+  await page.getByRole('navigation').getByRole('button', { name: 'Self-assessment', exact: true }).click();
+  await expect(page.getByLabel('Strengths')).toHaveValue('Keep the latest retained edit');
+  await expect(page.getByLabel('Learning needs and interests')).toHaveValue('A distinct failure after recovery');
 });
 
 test('closing immediately after typing flushes the pending draft before the process exits', async () => {

@@ -5,6 +5,11 @@ if (process.argv[3] === 'lock') {
   db.exec('BEGIN IMMEDIATE');
   process.stdout.write('locked\n');
   setTimeout(() => { db.exec('COMMIT'); db.close(); }, 1800);
+} else if (process.argv[3] === 'review-position-fail' || process.argv[3] === 'review-position-repair') {
+  db.exec(process.argv[3] === 'review-position-fail'
+    ? `CREATE TRIGGER simulate_review_position_failure BEFORE UPDATE ON review_states BEGIN SELECT RAISE(FAIL, 'disk full'); END`
+    : 'DROP TRIGGER simulate_review_position_failure');
+  db.close();
 } else if (process.argv[3] === 'review-fail' || process.argv[3] === 'review-repair') {
   db.exec(process.argv[3] === 'review-fail'
     ? `CREATE TRIGGER simulate_review_failure BEFORE INSERT ON review_visits BEGIN SELECT RAISE(FAIL, 'disk full'); END`

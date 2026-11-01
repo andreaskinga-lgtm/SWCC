@@ -8,6 +8,7 @@ export interface DraftState {
   record: YearPackage | null;
   status: 'Saved' | 'Saving' | 'Not saved';
   error: string | null;
+  failureEvent: { sequence: number; message: string } | null;
   pendingGoalCreation: PendingGoal | null;
   pendingActivityCreation: PendingActivity | null;
 }
@@ -19,11 +20,16 @@ function sameStandards(left: Draft['annualStandards'], right: Draft['annualStand
 }
 
 export class DraftSession {
-  private current: DraftState = { record: null, status: 'Saved', error: null, pendingGoalCreation: null, pendingActivityCreation: null };
+  private current: DraftState = {
+    record: null, status: 'Saved', error: null, failureEvent: null, pendingGoalCreation: null, pendingActivityCreation: null,
+  };
   private version = 0;
   private savedVersion = 0;
   private draftVersion = 0;
   private savedDraftVersion = 0;
+  private failureSequence = 0;
+  private failureReported = false;
+  private explicitRetry = false;
   private goalEdits = new Map<string, GoalEdit>();
   private pendingGoalCreation: PendingGoal | null = null;
   private activityEdits = new Map<string, ActivityEdit>();
@@ -45,7 +51,12 @@ export class DraftSession {
     this.pendingGoalCreation = null;
     this.activityEdits.clear();
     this.pendingActivityCreation = null;
-    this.update({ record, status: 'Saved', error: null, pendingGoalCreation: null, pendingActivityCreation: null });
+    this.failureReported = false;
+    this.explicitRetry = false;
+    this.update({
+      record, status: 'Saved', error: null, failureEvent: this.current.failureEvent,
+      pendingGoalCreation: null, pendingActivityCreation: null,
+    });
   }
   edit(patch: Partial<Draft>) {
     const record = this.current.record;
@@ -58,9 +69,7 @@ export class DraftSession {
     this.version++;
     this.draftVersion++;
     this.update({
-      record: { ...record, ...patch }, status: 'Saving', error: null,
-      pendingGoalCreation: this.pendingGoalCreation,
-      pendingActivityCreation: this.pendingActivityCreation,
+      ...this.current, record: { ...record, ...patch }, status: 'Saving', error: null,
     });
     this.scheduleSave();
   }
@@ -73,9 +82,9 @@ export class DraftSession {
     this.version++;
     this.goalEdits.set(goalId, { goal, version: this.version });
     this.update({
+      ...this.current,
       record: { ...record, goals: record.goals.map(item => item.id === goalId ? goal : item) },
-      status: 'Saving', error: null, pendingGoalCreation: this.pendingGoalCreation,
-      pendingActivityCreation: this.pendingActivityCreation,
+      status: 'Saving', error: null,
     });
     this.scheduleSave();
   }
@@ -121,6 +130,18 @@ export class DraftSession {
     this.saving = this.savePending().finally(() => { this.saving = undefined; });
     return this.saving;
   }
+  retry(): Promise<void> {
+    clearTimeout(this.timer);
+    const saving = this.saving;
+    if (!saving) {
+      this.explicitRetry = true;
+      return this.flush();
+    }
+    return saving.catch(() => {}).then(() => {
+      this.explicitRetry = true;
+      return this.flush();
+    });
+  }
   async withSavedRecord(work: (record: YearPackage) => Promise<void>): Promise<void> {
     await this.flush();
     const record = this.current.record;
@@ -137,9 +158,18 @@ export class DraftSession {
   ): Promise<YearPackage> {
     let result;
     try { result = await work(); }
-    catch { result = { ok: false as const, error: { message: connectionError } }; }
+    catch { result = { ok: false as const, error: { code: 'IPC' as const, message: connectionError } }; }
     if (!result.ok) {
-      this.update({ ...this.current, status: 'Not saved', error: result.error.message });
+      const reportable = result.error.code !== 'VALIDATION';
+      const report = reportable && (!this.failureReported || this.explicitRetry);
+      if (reportable) this.failureReported = true;
+      this.explicitRetry = false;
+      this.update({
+        ...this.current,
+        status: 'Not saved',
+        error: result.error.message,
+        failureEvent: report ? { sequence: ++this.failureSequence, message: result.error.message } : this.current.failureEvent,
+      });
       throw new Error(result.error.message);
     }
     return result.value;
@@ -221,6 +251,8 @@ export class DraftSession {
       }
     }
     this.savedVersion = this.version;
+    this.failureReported = false;
+    this.explicitRetry = false;
     this.update({ ...this.current, status: 'Saved', error: null });
   }
   acceptSaved(saved: YearPackage) {

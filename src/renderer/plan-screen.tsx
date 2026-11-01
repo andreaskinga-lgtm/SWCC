@@ -72,7 +72,7 @@ function ActivityCreateDialog({ pkg, session, onClose, onCreated, flushEdits }: 
         {!pkg.goals.length && <p>No goals yet. Create and link one in the activity editor.</p>}
       </fieldset>
       {error && <p role="alert" className="goal-validation">{error}</p>}
-      {pending && state.status === 'Not saved' && <button type="button" onClick={() => void session.flush().catch(failure => setError(String(failure)))}>Retry save</button>}
+      {pending && state.status === 'Not saved' && <button type="button" onClick={() => void session.retry().catch(failure => setError(String(failure)))}>Retry save</button>}
       <div className="goal-dialog-actions"><button type="button" className="secondary" disabled={pending} onClick={close}>Cancel</button>
         <button type="submit" disabled={pending}>Save activity</button></div>
     </form>
@@ -363,7 +363,7 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
       {deleteError && <p role="alert" className="goal-validation">{deleteError}</p>}
       {session.getSnapshot().status === 'Not saved' && <div className="goal-retry">
         <p>{session.getSnapshot().error || 'Some edits remain unsaved.'}</p>
-        <button type="button" className="secondary" disabled={deleteBusy} onClick={() => void session.flush().catch(failure => setDeleteError(failure instanceof Error ? failure.message : String(failure)))}>Retry save</button>
+        <button type="button" className="secondary" disabled={deleteBusy} onClick={() => void session.retry().catch(failure => setDeleteError(failure instanceof Error ? failure.message : String(failure)))}>Retry save</button>
       </div>}
       <div className="goal-dialog-actions"><button type="button" className="secondary" disabled={deleteBusy} onClick={() => setDeletingActivity(false)}>Keep activity</button>
         <button type="button" className="danger" disabled={deleteBusy} onClick={() => void deleteActivity()}>Delete {activity.ref}</button></div>

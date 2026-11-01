@@ -194,6 +194,7 @@ test('a missing Completed date stays pending without a write error and protects 
 
   await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Saving');
   await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(page.locator('.action-feedback-dialog')).toBeHidden();
   const savedActivity = await page.evaluate(async () => {
     const state = await window.swcc.getState();
     if (!state.ok) throw new Error(state.error.message);
@@ -247,7 +248,10 @@ test('failed activity edits and creations remain visible, block navigation and c
   failWrites(true);
   await editor.getByLabel('Activity title', { exact: true }).fill('Unsaved activity title');
   await editor.getByLabel('Evidence notes').fill('Retain this evidence');
+  await expectActionFeedback(page, 'disk full');
+  await dismissActionFeedback(page);
   await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Not saved');
+  await expect(editor.getByLabel('Activity title', { exact: true })).toHaveValue('Unsaved activity title');
   await page.getByRole('button', { name: 'Select activity A2', exact: true }).click();
   await expect(editor.getByLabel('Activity title', { exact: true })).toHaveValue('Unsaved activity title');
   await navigate('All years');
@@ -263,6 +267,8 @@ test('failed activity edits and creations remain visible, block navigation and c
   const dialog = page.getByRole('dialog', { name: 'Record an activity' });
   await dialog.getByLabel('Activity title').fill('Pending supplementary activity');
   await dialog.getByRole('button', { name: 'Save activity', exact: true }).click();
+  await expectActionFeedback(page, 'disk full');
+  await dismissActionFeedback(page);
   await expect(dialog.getByRole('alert')).toContainText('disk full');
   await dialog.getByRole('button', { name: 'Close dialog' }).click();
   await expect(dialog).toBeVisible();

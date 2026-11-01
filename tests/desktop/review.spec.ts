@@ -285,29 +285,59 @@ test('keyboard review navigation reflows narrowly and remembers the actual scrol
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
-test('failed review writes keep visits pending and block navigation and close until a real retry', async () => {
+test('failed review position writes report once and persist after retry', async () => {
   await expect(page.locator('canvas')).toBeVisible();
   await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Saved');
   const executable = createRequire(import.meta.url)('electron') as string;
   function failReview(failed: boolean) {
-    const fixture = spawnSync(executable, ['tests/desktop/storage-fixture.mjs', resolve(root, 'dataset/database.sqlite'), failed ? 'review-fail' : 'review-repair'], {
+    const fixture = spawnSync(executable, ['tests/desktop/storage-fixture.mjs', resolve(root, 'dataset/database.sqlite'), failed ? 'review-position-fail' : 'review-position-repair'], {
       env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8',
     });
     if (fixture.status !== 0) throw new Error(fixture.stderr);
   }
   failReview(true);
   await goTo(2);
-  await expect(page.getByRole('alert')).toContainText('disk full');
-  expect((await review()).visitedPages).not.toContain(2);
+  try {
+    const firstFailure = await expectActionFeedback(page, 'disk full');
+    await expect(firstFailure.getByRole('alert')).toContainText('disk full');
+    await dismissActionFeedback(page);
+  } catch (failure) {
+    failReview(false);
+    throw failure;
+  }
+  await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Not saved');
+  await expect(page.getByRole('button', { name: 'Retry review save', exact: true })).toBeVisible();
+  expect((await review()).page).not.toBe(2);
   await page.getByRole('button', { name: 'All years', exact: true }).click();
   await expect(page.getByLabel('Physical PDF page', { exact: true })).toHaveValue('2');
+  await expect(page.locator('.action-feedback-dialog')).toBeHidden();
   await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
   await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Not saved');
+  await expect(page.locator('.action-feedback-dialog')).toBeHidden();
   expect(desktop.windows()).toHaveLength(1);
+  await page.getByRole('button', { name: 'Retry review save', exact: true }).click();
+  await expectActionFeedback(page, 'disk full');
+  await dismissActionFeedback(page);
+  await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Not saved');
   failReview(false);
   await page.getByRole('button', { name: 'Retry review save', exact: true }).click();
   await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Saved');
-  await expect.poll(async () => (await review()).visitedPages).toContain(2);
+  await expect.poll(async () => (await review()).page).toBe(2);
+
+  failReview(true);
+  await goTo(3);
+  try {
+    await expectActionFeedback(page, 'disk full');
+  } catch (failure) {
+    failReview(false);
+    throw failure;
+  }
+  await dismissActionFeedback(page);
+  expect((await review()).page).not.toBe(3);
+  failReview(false);
+  await page.getByRole('button', { name: 'Retry review save', exact: true }).click();
+  await expect.poll(async () => (await review()).page).toBe(3);
+
   await page.getByRole('button', { name: 'All years', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Your year packages' })).toBeVisible();
 });

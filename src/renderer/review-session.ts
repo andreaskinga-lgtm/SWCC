@@ -5,9 +5,10 @@ interface Snapshot {
   record: ReviewState | null;
   status: 'Saved' | 'Saving' | 'Not saved';
   error: string | null;
+  failureEvent: { sequence: number; message: string } | null;
 }
 export class ReviewSession {
-  private current: Snapshot = { record: null, status: 'Saved', error: null };
+  private current: Snapshot = { record: null, status: 'Saved', error: null, failureEvent: null };
   private listeners = new Set<() => void>();
   private jobs: (() => Promise<Result<ReviewState>>)[] = [];
   private saving: Promise<void> | undefined;
@@ -15,6 +16,9 @@ export class ReviewSession {
   private timer: ReturnType<typeof setTimeout> | undefined;
   private pendingVisits = new Set<number>();
   private opening = 0;
+  private failureSequence = 0;
+  private failureReported = false;
+  private explicitRetry = false;
   constructor(private operations: ApplicationOperations) {}
   getSnapshot = () => this.current;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
@@ -74,6 +78,18 @@ export class ReviewSession {
     this.saving = this.savePending().finally(() => { this.saving = undefined; });
     return this.saving;
   }
+  retry(): Promise<void> {
+    clearTimeout(this.timer);
+    const saving = this.saving;
+    if (!saving) {
+      this.explicitRetry = true;
+      return this.flush();
+    }
+    return saving.catch(() => {}).then(() => {
+      this.explicitRetry = true;
+      return this.flush();
+    });
+  }
   private async savePending() {
     while (this.jobs.length || this.position) {
       if (this.position) {
@@ -89,14 +105,25 @@ export class ReviewSession {
       if (!result.ok && result.error.code === 'INACTIVE') { this.jobs.shift(); continue; }
       if (!result.ok) {
         // Browser failure is an unsuccessful action, not an unsaved draft.
-        if (result.error.code === 'BROWSER' || result.error.code === 'VALIDATION') this.jobs.shift();
-        this.update({ status: result.error.code === 'BROWSER' || result.error.code === 'VALIDATION' ? 'Saved' : 'Not saved', error: result.error.message });
+        const actionFailure = result.error.code === 'BROWSER' || result.error.code === 'VALIDATION';
+        if (actionFailure) this.jobs.shift();
+        const report = !actionFailure && (!this.failureReported || this.explicitRetry);
+        if (!actionFailure) this.failureReported = true;
+        if (actionFailure && !this.jobs.length && !this.position) this.failureReported = false;
+        this.explicitRetry = false;
+        this.update({
+          status: actionFailure ? 'Saved' : 'Not saved',
+          error: result.error.message,
+          ...(report ? { failureEvent: { sequence: ++this.failureSequence, message: result.error.message } } : {}),
+        });
         throw new Error(result.error.message);
       }
       this.jobs.shift();
       const latest = this.current.record;
       this.update({ record: latest ? { ...result.value, page: latest.page, offset: latest.offset, zoom: latest.zoom } : result.value });
     }
+    this.failureReported = false;
+    this.explicitRetry = false;
     this.update({ status: 'Saved', error: null });
   }
 }

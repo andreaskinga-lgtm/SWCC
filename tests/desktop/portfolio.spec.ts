@@ -212,6 +212,8 @@ test('failed draft and real review flushes prevent stale portfolio export and re
   storageFailure('true');
   await page.getByLabel('Strengths', { exact: true }).fill('Retained latest strengths — café.');
   await page.getByRole('navigation').getByRole('button', { name: 'Year overview', exact: true }).click();
+  await expectActionFeedback(page, 'disk full');
+  await dismissActionFeedback(page);
   await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Not saved');
   await expect(page.getByLabel('Strengths', { exact: true })).toHaveValue('Retained latest strengths — café.');
   await expect(page.getByRole('button', { name: 'Export Complete Portfolio ZIP', exact: true })).toHaveCount(0);
@@ -227,6 +229,8 @@ test('failed draft and real review flushes prevent stale portfolio export and re
   await page.getByLabel('Physical PDF page', { exact: true }).fill('2');
   await page.getByLabel('Physical PDF page', { exact: true }).press('Enter');
   await expect(page.getByRole('img', { name: 'Supplied Code of Ethics, physical page 2', exact: true })).toBeVisible();
+  await expectActionFeedback(page, 'disk full');
+  await dismissActionFeedback(page);
   await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Not saved');
   await page.getByRole('navigation').getByRole('button', { name: 'Year overview', exact: true }).click();
   await expect(page.getByLabel('Physical PDF page', { exact: true })).toHaveValue('2');
