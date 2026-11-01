@@ -43,7 +43,7 @@ textarea { resize: vertical; line-height: 1.6; }
 .year-list span { display: block; color: var(--muted); font-size: 12px; margin-top: 7px; }
 .year-actions { display: flex; align-items: center; gap: 14px; }
 .year-delete { color: #7d2e24; }
-.map-overview { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 32px; align-items: start; }
+.map-overview { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 32px; align-items: start; }
 .relationship-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 25px; }
 .goal-panel { background: var(--leaf); border-radius: 12px; padding: 24px; margin-bottom: 24px; }
 .relationship-board .goal-panel { margin: 0; }
@@ -56,7 +56,6 @@ textarea { resize: vertical; line-height: 1.6; }
 .step-number { display: inline-grid; place-items: center; background: var(--leaf); border-radius: 7px; width: 27px; height: 27px; font-size: 12px; }
 .map-checklist .workflow-missing { padding-left: 18px; margin: 12px 0; list-style: circle; font-size: 12px; line-height: 1.6; color: var(--muted); }
 .map-checklist .workflow-missing li { border: 0; padding: 3px 0; }
-.annual-step > button { margin-top: 12px; }
 .annual-step > p { font-size: 12px; }
 .package-status { display: inline-block; border: 1px solid #bac6a7; border-radius: 15px; padding: 5px 12px; font-size: 12px; }
 .declaration-card { border-top: 1px solid #d7deca; padding-top: 20px; margin: 20px 0; overflow-wrap: anywhere; }

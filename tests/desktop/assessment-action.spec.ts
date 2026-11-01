@@ -95,3 +95,36 @@ test('the empty-goals overview action is clearly separated and opens self-assess
   await showOverview();
   await expect(page.getByRole('button', { name: 'Write your self assessment', exact: true })).toBeVisible();
 });
+
+test('the development-plan overview action matches self-assessment spacing with empty and existing activities', async () => {
+  await createYear();
+  async function expectMatchingSpacing() {
+    const assessmentAction = page.getByRole('button', { name: 'Write your self assessment', exact: true });
+    const planAction = page.getByRole('button', { name: 'View development plan', exact: true });
+    const assessmentGap = await gapAfter(page.locator('.goal-nodes'), assessmentAction);
+    const planGap = await gapAfter(page.locator('.activity-nodes'), planAction);
+    expect.soft(planGap).toBeGreaterThan(16);
+    expect.soft(planGap).toBeCloseTo(assessmentGap, 1);
+  }
+  for (const width of [1280, 620]) {
+    await page.setViewportSize({ width, height: 800 });
+    await expectMatchingSpacing();
+  }
+
+  await page.getByRole('button', { name: 'Record an activity', exact: true }).click();
+  const activity = page.getByRole('dialog', { name: 'Record an activity' });
+  await activity.getByLabel('Activity title', { exact: true }).fill('Existing learning activity');
+  await activity.getByRole('button', { name: 'Save activity', exact: true }).click();
+  await expect(activity).not.toBeVisible();
+  await showOverview();
+
+  for (const width of [1280, 620]) {
+    await page.setViewportSize({ width, height: 800 });
+    await expectMatchingSpacing();
+    const lastActivity = page.getByRole('button', { name: 'Open activity A1: Existing learning activity', exact: true });
+    expect.soft(await gapAfter(lastActivity, page.getByRole('button', { name: 'View development plan', exact: true })))
+      .toBeGreaterThan(16);
+  }
+  await page.getByRole('button', { name: 'View development plan', exact: true }).click();
+  await expect(page.getByRole('article', { name: 'Activity editor A1' })).toBeVisible();
+});

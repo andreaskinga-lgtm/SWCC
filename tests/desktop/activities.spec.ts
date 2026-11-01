@@ -51,6 +51,30 @@ async function addActivity(title: string) {
   await expect(dialog).toHaveCount(0);
 }
 
+test('selected activity borders keep the same corner radii as unselected cards', async () => {
+  await navigate('Development plan');
+  await addActivity('First activity');
+  await addActivity('Second activity');
+
+  for (const width of [1280, 620]) {
+    await page.setViewportSize({ width, height: 800 });
+    for (const ref of ['A1', 'A2']) {
+      const selected = page.getByRole('button', { name: `Select activity ${ref}`, exact: true });
+      await selected.focus();
+      await selected.press('Enter');
+      await expect(selected).toHaveAttribute('aria-pressed', 'true');
+      const radii = await page.locator('.activity-index > button').evaluateAll(cards => cards.map(card => {
+        const style = getComputedStyle(card);
+        return {
+          selected: card.getAttribute('aria-pressed') === 'true',
+          corners: [style.borderTopLeftRadius, style.borderTopRightRadius, style.borderBottomRightRadius, style.borderBottomLeftRadius],
+        };
+      }));
+      expect(radii.find(card => card.selected)?.corners).toEqual(radii.find(card => !card.selected)?.corners);
+    }
+  }
+});
+
 test('C learning map edits one shared activity from either goal, keeps supplementary work, and reflows for keyboard use', async () => {
   await page.getByRole('button', { name: 'Record an activity', exact: true }).click();
   const create = page.getByRole('dialog', { name: 'Record an activity' });

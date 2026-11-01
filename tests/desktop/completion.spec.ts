@@ -93,6 +93,35 @@ async function readPage(number: number) {
   })).toContain(number);
 }
 
+test('year overview puts workflow first and leaves step completion on individual pages', async () => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const workflow = page.getByRole('complementary', { name: 'Annual workflow' });
+  await expect(workflow).toBeVisible();
+  const composition = await page.locator('.map-overview').evaluate(element => {
+    const board = element.querySelector('.relationship-board')!.getBoundingClientRect();
+    const checklist = element.querySelector('.map-checklist')!.getBoundingClientRect();
+    return { adjacent: checklist.right <= board.left, topDifference: Math.abs(board.top - checklist.top) };
+  });
+  expect.soft(composition.adjacent).toBe(true);
+  expect(composition.topDifference).toBeLessThan(10);
+  expect.soft(await page.getByRole('button', { name: /Complete Step|Confirm Step/ }).count()).toBe(0);
+
+  await page.setViewportSize({ width: 620, height: 800 });
+  const stacked = await page.locator('.map-overview').evaluate(element => {
+    const board = element.querySelector('.relationship-board')!.getBoundingClientRect();
+    const checklist = element.querySelector('.map-checklist')!.getBoundingClientRect();
+    return checklist.bottom <= board.top;
+  });
+  expect.soft(stacked).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+  for (const [index, name] of ['Review', 'Self-assessment', 'Development plan'].entries()) {
+    await workflow.getByRole('button', { name, exact: true }).click();
+    await expect(page.getByRole('button', { name: `Complete Step ${index + 1}`, exact: true })).toBeEnabled();
+    await navigate('Year overview');
+  }
+});
+
 test('keyboard manual completion works in any order beside C’s map; historical entry warns and survives restart', async () => {
   await preparePlan();
   await expect(page.getByRole('status', { name: 'Step 3 readiness' })).toHaveText('Ready');
@@ -107,10 +136,12 @@ test('keyboard manual completion works in any order beside C’s map; historical
   await expect(workflow.getByRole('status', { name: 'Step 1 readiness' })).not.toHaveText('Completed');
   await expect(workflow.getByRole('status', { name: 'Step 2 readiness' })).toHaveText('Ready');
   await expect(workflow.getByRole('status', { name: 'Step 3 readiness' })).toHaveText('Completed');
-  await workflow.getByRole('button', { name: 'Complete Step 2', exact: true }).focus();
+  await workflow.getByRole('button', { name: 'Self-assessment', exact: true }).click();
+  await page.getByRole('button', { name: 'Complete Step 2', exact: true }).focus();
   await page.keyboard.press('Space');
-  await expect(workflow.getByRole('status', { name: 'Step 2 readiness' })).toHaveText('Completed');
+  await expect(page.getByRole('status', { name: 'Step 2 readiness' })).toHaveText('Completed');
   await dismissActionFeedback(page);
+  await navigate('Year overview');
   await workflow.getByRole('button', { name: 'Record submission date', exact: true }).click();
   const declaration = page.getByRole('dialog', { name: 'Record external submission date' });
   await expect(declaration.getByRole('alert')).toContainText('application steps are incomplete');
@@ -127,7 +158,7 @@ test('keyboard manual completion works in any order beside C’s map; historical
   const composition = await page.locator('.map-overview').evaluate(element => {
     const board = element.querySelector('.relationship-board')!.getBoundingClientRect();
     const checklist = element.querySelector('.map-checklist')!.getBoundingClientRect();
-    return { adjacent: board.right <= checklist.left, topDifference: Math.abs(board.top - checklist.top) };
+    return { adjacent: checklist.right <= board.left, topDifference: Math.abs(board.top - checklist.top) };
   });
   expect(composition.adjacent).toBe(true);
   expect(composition.topDifference).toBeLessThan(10);
@@ -143,7 +174,7 @@ test('completed review survives real rereading; current manual confirmations plu
   await preparePlan();
   await page.getByRole('button', { name: 'Complete Step 3', exact: true }).click();
   await dismissActionFeedback(page);
-  await navigate('Year overview');
+  await navigate('Self-assessment');
   await page.getByRole('button', { name: 'Complete Step 2', exact: true }).click();
   await dismissActionFeedback(page);
   await navigate('Review');
@@ -204,10 +235,12 @@ test('completed review survives real rereading; current manual confirmations plu
   await expect(page.getByRole('status', { name: 'Annual package status' })).toHaveText('In Progress');
   await page.setViewportSize({ width: 620, height: 800 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await navigate('Development plan');
   await page.getByRole('button', { name: 'Complete Step 3', exact: true }).focus();
   await page.keyboard.press('Enter');
-  await expect(page.getByRole('status', { name: 'Annual package status' })).toHaveText('Complete');
   await dismissActionFeedback(page);
+  await navigate('Year overview');
+  await expect(page.getByRole('status', { name: 'Annual package status' })).toHaveText('Complete');
   expect(await selectedPackage()).toMatchObject({
     declarationDate: recorded.declarationDate, declarationRecordedAt: recorded.declarationRecordedAt,
   });
@@ -246,14 +279,15 @@ test('failed draft flush leaves confirmation unchanged and edits visible until r
 });
 
 test('unready completion remains actionable and explains missing items without locking other steps', async () => {
+  await navigate('Development plan');
   await page.getByRole('button', { name: 'Complete Step 3', exact: true }).click();
   const planFeedback = await expectActionFeedback(page, 'This step is not ready for manual completion.');
   await expect(planFeedback.getByRole('list', { name: 'Step 3 readiness reasons' }).getByRole('listitem'))
     .toContainText(['Add at least one learning goal.']);
   await dismissActionFeedback(page);
   expect((await selectedPackage()).stepCompletions.plan.completedAt).toBeNull();
-  await expect(page.getByRole('button', { name: 'Complete Step 2', exact: true })).toBeEnabled();
   await navigate('Self-assessment');
+  await expect(page.getByRole('button', { name: 'Complete Step 2', exact: true })).toBeEnabled();
   await expect(page.getByLabel('Strengths')).toBeVisible();
   await page.getByRole('button', { name: 'Complete Step 2', exact: true }).click();
   const assessmentFeedback = await expectActionFeedback(page, 'This step is not ready for manual completion.');

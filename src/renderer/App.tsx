@@ -558,8 +558,11 @@ export function App({ operations }: { operations: DesktopOperations }) {
         </section></>}
       {screen === 'overview' && pkg && <><div className="page-heading map-heading"><div><h1>Connect learning to practice.</h1><p>Your {pkg.year} goals and the experiences that move them forward.</p></div>
         <button type="button" disabled={busy} onClick={() => activityEntry(null)}>Record an activity</button></div>
-        <div className="map-overview"><section className="relationship-board surface"><div className="relationship-columns">
-          <div className="overview-goal-column"><h2>Learning goals</h2><div className="goal-nodes">
+        <div className="map-overview">
+          {workflow && <AnnualWorkflowPanel pkg={pkg} workflow={workflow} busy={busy} navigate={navigate}
+            declare={openDeclaration} exportForms={() => openExport('forms')} exportPortfolio={() => openExport('portfolio')} />}
+          <section className="relationship-board surface"><div className="relationship-columns">
+          <div className="overview-column"><h2>Learning goals</h2><div className="goal-nodes">
             {pkg.goals.map(goal => <article className="goal-node" key={goal.id}><span className="goal-reference">{goal.ref}</span><h3>{goal.title}</h3>
               {goal.description && <p>{goal.description}</p>}
               <div className="goal-activity-refs">{pkg.activities.filter(activity => activity.goalIds.includes(goal.id)).map(activity =>
@@ -572,7 +575,7 @@ export function App({ operations }: { operations: DesktopOperations }) {
               {hasSubstantiveAssessmentContent(pkg) ? 'Update your self assessment' : 'Write your self assessment'}
             </button>
           </div>
-          <div><h2>Activities & experiences</h2><div className="activity-nodes">{pkg.activities.map(activity => <button type="button" key={activity.id}
+          <div className="overview-column"><h2>Activities & experiences</h2><div className="activity-nodes">{pkg.activities.map(activity => <button type="button" key={activity.id}
             className="activity-node" aria-label={`Open activity ${activity.ref}: ${activity.title}`} onClick={() => activityEntry(activity.id)}>
             <div><span className="goal-reference">{activity.ref}</span><span className="activity-state">{activity.status}</span></div><h3>{activity.title}</h3>
             <span className="goal-link-chips">{activity.goalIds.length ? pkg.goals.filter(goal => activity.goalIds.includes(goal.id)).map(goal => <span key={goal.id}>{goal.ref}</span>)
@@ -582,8 +585,6 @@ export function App({ operations }: { operations: DesktopOperations }) {
           {!pkg.activities.length && <p>Record an activity and connect it to a goal, or keep it supplementary.</p>}</div>
           <button className="secondary" onClick={() => navigate('plan')}>View development plan</button></div>
         </div><p className="board-footer">Evidence and reflection will stay with each activity, never with its links.</p></section>
-          {workflow && <AnnualWorkflowPanel pkg={pkg} workflow={workflow} busy={busy} navigate={navigate}
-            complete={complete} declare={openDeclaration} exportForms={() => openExport('forms')} exportPortfolio={() => openExport('portfolio')} />}
           </div></>}
       {screen === 'assessment' && pkg && <AssessmentScreen pkg={pkg} session={session} operations={operations}
         flushEdits={flushEdits}

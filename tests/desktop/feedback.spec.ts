@@ -47,7 +47,6 @@ test('explicit success and readiness feedback stay centered, accessible, and dis
   await page.getByLabel('Learning needs and interests').fill('Reflective supervision');
   await page.getByRole('checkbox', { name: 'Code of Ethics', exact: true }).check();
   await addGoal('Deepen supervision');
-  await navigate('Year overview');
   await page.setViewportSize({ width: 900, height: 480 });
 
   const completeAssessment = page.getByRole('button', { name: 'Complete Step 2', exact: true });
@@ -73,6 +72,7 @@ test('explicit success and readiness feedback stay centered, accessible, and dis
   await expect(success).toBeHidden();
   await expect(completeAssessment).toBeFocused();
 
+  await navigate('Development plan');
   const completePlan = page.getByRole('button', { name: 'Complete Step 3', exact: true });
   await completePlan.scrollIntoViewIfNeeded();
   await completePlan.click();

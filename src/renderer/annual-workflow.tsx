@@ -8,9 +8,9 @@ import { formsExportWarnings } from '../shared/forms.js';
 import { useActionFeedback } from './action-feedback.js';
 
 const labels = { review: 'Review', assessment: 'Self-assessment', plan: 'Development plan' };
-export function AnnualWorkflowPanel({ pkg, workflow, busy, navigate, complete, declare, exportForms, exportPortfolio }: {
+export function AnnualWorkflowPanel({ pkg, workflow, busy, navigate, declare, exportForms, exportPortfolio }: {
   pkg: YearPackage; workflow: AnnualWorkflow; busy: boolean;
-  navigate: (step: AnnualStep) => void; complete: (step: AnnualStep) => void; declare: () => void; exportForms: () => void;
+  navigate: (step: AnnualStep) => void; declare: () => void; exportForms: () => void;
   exportPortfolio: () => void;
 }) {
   return <aside className="map-checklist" aria-label="Annual workflow">
@@ -27,9 +27,6 @@ export function AnnualWorkflowPanel({ pkg, workflow, busy, navigate, complete, d
         </ul> : <p>All application readiness items are present.</p>}
         {feedback.completedAt && <small>{feedback.status === 'Completed' ? 'Manually confirmed' : 'Previous confirmation; relevant edits reopened this step'}:
           {' '}<time dateTime={feedback.completedAt}>{new Date(feedback.completedAt).toLocaleString()}</time></small>}
-        <button type="button" className="secondary" aria-label={`Complete Step ${index + 1}`} disabled={busy} onClick={() => complete(step)}>
-          {feedback.status === 'Completed' ? `Confirm Step ${index + 1} again` : `Complete Step ${index + 1}`}
-        </button>
       </li>;
     })}</ol>
     <section className="declaration-card"><h3>External renewal declaration</h3>
