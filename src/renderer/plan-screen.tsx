@@ -1,8 +1,8 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type {
   Activity, ActivityStatus, ApplicationOperations, EvidenceAttachment, EvidencePreview, Goal, YearPackage,
 } from '../shared/application.js';
-import { dateWarning } from '../shared/application.js';
+import { dateWarning, validDate } from '../shared/application.js';
 import { activityDateError, evaluatePlanReadiness, validEvidenceLink } from '../shared/plan.js';
 import { currentCompletion } from '../shared/workflow.js';
 import type { DraftSession } from './draft-session.js';
@@ -95,9 +95,30 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
   const [deletingActivity, setDeletingActivity] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState('');
+  const completionDateInput = useRef<HTMLInputElement>(null);
+  const openCompletionPicker = useRef(false);
+  const [calendarMonth, setCalendarMonth] = useState(() => monthForDate(activity.completionDate));
+  const [fallbackCalendarOpen, setFallbackCalendarOpen] = useState(false);
+  const [nativePickerUnavailable, setNativePickerUnavailable] = useState(false);
   const error = activityDateError(activity);
   const warning = dateWarning(activity.completionDate, pkg.year);
   const attached = evidence.filter(entry => entry.activityId === activity.id);
+  useLayoutEffect(() => {
+    const input = completionDateInput.current;
+    if (input && typeof input.showPicker !== 'function') setNativePickerUnavailable(true);
+    if (!openCompletionPicker.current || activity.status !== 'Completed') return;
+    openCompletionPicker.current = false;
+    if (!input) return;
+    input.focus();
+    try {
+      if (typeof input.showPicker !== 'function') throw new Error('The native date picker is unavailable.');
+      input.showPicker();
+    } catch {
+      setNativePickerUnavailable(true);
+      setCalendarMonth(monthForDate(activity.completionDate));
+      setFallbackCalendarOpen(true);
+    }
+  }, [activity.id, activity.completionDate, activity.status]);
   async function openLink(url: string) {
     setOpenError('');
     try {
@@ -238,14 +259,36 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
       onChange={event => session.editActivity(activity.id, { description: event.target.value })} /></label>
     <div className="activity-dates">
       <label className="field"><span>Activity status</span><select aria-label="Activity status" value={activity.status}
-        onChange={event => session.editActivity(activity.id, { status: event.target.value as ActivityStatus })}>
-        {(['Planned', 'In Progress', 'Completed'] as const).map(status => <option key={status}>{status}</option>)}
-      </select></label>
-      <label className="field"><span>Completion date</span><input type="date" aria-label="Completion date" value={activity.completionDate}
-        onChange={event => session.editActivity(activity.id, { completionDate: event.target.value })} />
-        {warning && <small className="warning">{warning}</small>}</label>
+      onChange={event => {
+        const status = event.target.value as ActivityStatus;
+        if (status === 'Completed' && activity.status !== 'Completed') openCompletionPicker.current = true;
+        if (status !== 'Completed') setFallbackCalendarOpen(false);
+        session.editActivity(activity.id, { status });
+      }}>
+      {(['Planned', 'In Progress', 'Completed'] as const).map(status => <option key={status}>{status}</option>)}
+    </select></label>
+    {activity.status === 'Completed' && <div className="field completion-date-field">
+      <label htmlFor={`completion-date-${activity.id}`}><span>Completion date</span></label>
+      <input ref={completionDateInput} id={`completion-date-${activity.id}`} type="date" aria-label="Completion date" value={activity.completionDate}
+        onKeyDown={event => { if (event.key === 'Escape') setFallbackCalendarOpen(false); }}
+        onChange={event => {
+          setFallbackCalendarOpen(false);
+          session.editActivity(activity.id, { completionDate: event.target.value });
+        }} />
+      {warning && <small className="warning">{warning}</small>}
+      {nativePickerUnavailable && <button type="button" className="secondary completion-calendar-toggle"
+        aria-label={fallbackCalendarOpen ? 'Close calendar' : 'Open calendar'}
+        aria-expanded={fallbackCalendarOpen} aria-controls={fallbackCalendarOpen ? `completion-calendar-${activity.id}` : undefined}
+        onClick={() => setFallbackCalendarOpen(open => !open)}>
+        {fallbackCalendarOpen ? 'Close calendar' : 'Choose date'}</button>}
+      {fallbackCalendarOpen && <CompletionCalendar id={`completion-calendar-${activity.id}`} value={activity.completionDate} month={calendarMonth}
+      onMonthChange={setCalendarMonth} onSelect={value => {
+        setFallbackCalendarOpen(false);
+        session.editActivity(activity.id, { completionDate: value });
+      }} onClose={() => setFallbackCalendarOpen(false)} />}
+    </div>}
     </div>
-    {error && <p className="goal-validation">{error}</p>}
+    {error && <p className="goal-validation" role="status">{error}</p>}
     <p className="quiet">Planned and In Progress drafts need no invented date. Completed can still have pending evidence or reflection.</p>
     <fieldset className="goal-link-editor"><legend>Linked learning goals</legend>
       {pkg.goals.map(goal => <label key={goal.id}><input type="checkbox" checked={activity.goalIds.includes(goal.id)}
@@ -319,6 +362,52 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
         <button type="button" disabled={fileBusy} onClick={() => void removeEvidence()}>Remove evidence</button></div>
     </Dialog>}
   </article>;
+}
+
+function monthForDate(value: string) {
+  const date = validDate(value) ? new Date(`${value}T00:00:00`) : new Date();
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function CompletionCalendar({ id, value, month, onMonthChange, onSelect, onClose }: {
+  id: string; value: string; month: Date; onMonthChange: (month: Date) => void; onSelect: (date: string) => void; onClose: () => void;
+}) {
+  const year = month.getFullYear();
+  const monthNumber = month.getMonth();
+  const monthLabel = month.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  const leadingDays = new Date(year, monthNumber, 1).getDay();
+  const daysInMonth = new Date(year, monthNumber + 1, 0).getDate();
+  const cells: (number | null)[] = [
+    ...Array.from({ length: leadingDays }, () => null),
+    ...Array.from({ length: daysInMonth }, (_, index) => index + 1),
+  ];
+  while (cells.length % 7) cells.push(null);
+  const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  return <div id={id} className="completion-calendar" role="group" aria-label="Choose a completion date"
+    onKeyDown={event => { if (event.key === 'Escape') onClose(); }}>
+    <div className="completion-calendar-heading">
+      <button type="button" className="secondary" aria-label="Close calendar" onClick={onClose}>Close</button>
+      <button type="button" className="secondary" aria-label="Previous month"
+        onClick={() => onMonthChange(new Date(year, monthNumber - 1, 1))}>‹</button>
+      <strong aria-live="polite">{monthLabel}</strong>
+      <button type="button" className="secondary" aria-label="Next month"
+        onClick={() => onMonthChange(new Date(year, monthNumber + 1, 1))}>›</button>
+    </div>
+    <div className="completion-calendar-grid" role="grid" aria-label={monthLabel}>
+      <div className="completion-calendar-week" role="row">
+        {weekdays.map(day => <span role="columnheader" key={day} aria-label={day}>{day.slice(0, 2)}</span>)}
+      </div>
+      {Array.from({ length: cells.length / 7 }, (_, week) => <div className="completion-calendar-week" role="row" key={week}>
+        {cells.slice(week * 7, week * 7 + 7).map((day, weekday) => {
+          if (!day) return <span aria-hidden="true" key={`empty-${week}-${weekday}`} />;
+          const date = `${year}-${String(monthNumber + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+          return <button type="button" role="gridcell" aria-label={new Date(year, monthNumber, day)
+            .toLocaleDateString(undefined, { dateStyle: 'full' })} aria-pressed={value === date} key={date}
+            onClick={() => onSelect(date)}>{day}</button>;
+        })}
+      </div>)}
+    </div>
+  </div>;
 }
 
 export function PlanScreen({ pkg, session, operations, selectedId, select, recordRequested, clearRecordRequest, evidence, evidenceError, evidenceLoaded, refreshEvidence, reportError, complete, busy, flushEdits }: {

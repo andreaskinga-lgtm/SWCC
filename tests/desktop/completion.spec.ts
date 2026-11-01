@@ -53,8 +53,10 @@ async function preparePlan() {
   await activity.getByRole('button', { name: 'Save activity', exact: true }).click();
   await expect(activity).not.toBeVisible();
   await page.getByLabel('Plan date').fill('2024-02-01');
-  await page.getByLabel('Completion date', { exact: true }).fill('2024-03-01');
   await page.getByLabel('Activity status').selectOption('Completed');
+  await expect(page.getByLabel('Completion date', { exact: true })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.getByLabel('Completion date', { exact: true }).fill('2024-03-01');
   await page.getByLabel('Evidence notes').fill('Consultation notes retained');
   await page.getByLabel('Application to practice', { exact: true }).fill('Use reflective questions in supervision');
 }

@@ -57,7 +57,7 @@ test('C learning map edits one shared activity from either goal, keeps supplemen
   await create.getByRole('button', { name: 'Save activity', exact: true }).click();
   let editor = page.getByRole('article', { name: 'Activity editor A1' });
   await expect(editor).toBeVisible();
-  await expect(editor.getByLabel('Completion date')).toHaveValue('');
+  await expect(editor.getByLabel('Completion date')).toHaveCount(0);
   await editor.getByRole('button', { name: 'Create and link a goal', exact: true }).click();
   const goal = page.getByRole('dialog', { name: 'Create a shared learning goal' });
   await goal.getByLabel('Goal title').fill('Reflective supervision');
@@ -71,8 +71,9 @@ test('C learning map edits one shared activity from either goal, keeps supplemen
   await editor.getByLabel('Evidence links').fill('https://example.org/notes');
   await editor.getByLabel('Application to practice').fill('I changed my consultation approach.');
   await editor.getByLabel('Activity status').selectOption('Completed');
-  await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Not saved');
+  await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Saving');
   await expect(editor.getByText('Completed activities require an actual completion date.', { exact: true })).toBeVisible();
+  await page.keyboard.press('Escape');
   await editor.getByLabel('Completion date').fill('2023-12-30');
   await expect(editor.getByText(/This date is outside 2024/)).toBeVisible();
   await page.getByLabel('Plan date').fill('2023-12-31');
@@ -105,8 +106,135 @@ test('C learning map edits one shared activity from either goal, keeps supplemen
   await page.getByRole('button', { name: /Open activity A1/ }).click();
   editor = page.getByRole('article', { name: 'Activity editor A1' });
   await expect(editor.getByLabel('Completion date')).toHaveValue('2023-12-30');
+  await expect(editor.getByLabel('Completion date')).not.toBeFocused();
   await expect(page.getByLabel('Plan date')).toHaveValue('2023-12-31');
   await expect(editor.getByLabel('Evidence notes')).toHaveValue('Consultation notes from one session');
+});
+
+test('completion date is visible only for Completed and stays with the activity when hidden', async () => {
+  await navigate('Development plan');
+  await addActivity('Date entry');
+  const editor = page.getByRole('article', { name: 'Activity editor A1' });
+  const status = editor.getByLabel('Activity status');
+  const date = editor.getByLabel('Completion date');
+  await expect(date).toHaveCount(0);
+
+  await status.selectOption('Completed');
+  await expect(date).toBeVisible();
+  await expect(date).toHaveValue('');
+  await expect(date).toBeFocused();
+  await page.keyboard.press('Escape');
+  await date.fill('2023-12-30');
+  await expect(editor.getByText(/This date is outside 2024/)).toBeVisible();
+  await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Saved');
+
+  await status.selectOption('Planned');
+  await expect(date).toHaveCount(0);
+  await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Saved');
+  await status.selectOption('In Progress');
+  await expect(date).toHaveCount(0);
+  await status.selectOption('Completed');
+  await expect(date).toBeVisible();
+  await expect(date).toHaveValue('2023-12-30');
+  await page.keyboard.press('Escape');
+  await navigate('Year overview');
+  await page.getByRole('button', { name: /Open activity A1/ }).click();
+  const reopened = page.getByRole('article', { name: 'Activity editor A1' });
+  await expect(reopened.getByLabel('Completion date')).toHaveValue('2023-12-30');
+  await expect(reopened.getByLabel('Completion date')).not.toBeFocused();
+});
+
+test('fallback calendar selects a date when the native picker is unavailable', async () => {
+  await navigate('Development plan');
+  await addActivity('Fallback date entry');
+  const editor = page.getByRole('article', { name: 'Activity editor A1' });
+  await page.evaluate(() => {
+    Object.defineProperty(HTMLInputElement.prototype, 'showPicker', {
+      configurable: true,
+      value() { throw new Error('Native picker unavailable'); },
+    });
+  });
+  await editor.getByLabel('Activity status').selectOption('Completed');
+  const calendar = editor.getByRole('group', { name: 'Choose a completion date' });
+  await expect(calendar).toBeVisible();
+  await calendar.getByRole('button', { name: 'Previous month' }).click();
+  await calendar.getByRole('gridcell').first().click();
+  const date = editor.getByLabel('Completion date');
+  const selectedDate = await date.inputValue();
+  expect(selectedDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  await expect(calendar).toHaveCount(0);
+  await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Saved');
+  const savedActivity = await page.evaluate(async () => {
+    const state = await window.swcc.getState();
+    if (!state.ok) throw new Error(state.error.message);
+    return state.value.selectedPackage?.activities[0];
+  });
+  expect(savedActivity).toMatchObject({ status: 'Completed', completionDate: selectedDate });
+});
+
+test('a missing Completed date stays pending without a write error and protects action-time flushes', async () => {
+  await navigate('All years');
+  await page.getByLabel('New package year').fill('2023');
+  await page.getByLabel('New package year').press('Enter');
+  await page.getByLabel('Year package').selectOption({ label: '2024' });
+  await navigate('Development plan');
+  await addActivity('Incomplete completion');
+  await addActivity('Another activity');
+  await page.getByRole('button', { name: 'Select activity A1' }).click();
+  const editor = page.getByRole('article', { name: 'Activity editor A1' });
+  const date = editor.getByLabel('Completion date');
+  await editor.getByLabel('Activity status').selectOption('Completed');
+  await expect(date).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(editor.getByLabel('Activity status')).toHaveValue('Completed');
+  await expect(date).toHaveValue('');
+  await expect(editor.getByText('Completed activities require an actual completion date.', { exact: true })).toBeVisible();
+  await page.waitForTimeout(600);
+
+  await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Saving');
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  const savedActivity = await page.evaluate(async () => {
+    const state = await window.swcc.getState();
+    if (!state.ok) throw new Error(state.error.message);
+    return state.value.selectedPackage?.activities[0];
+  });
+  expect(savedActivity).toMatchObject({ status: 'Planned', completionDate: '' });
+
+  await page.getByRole('button', { name: 'Select activity A2' }).click();
+  await expect(editor.getByLabel('Activity title')).toHaveValue('Incomplete completion');
+  await page.getByRole('button', { name: 'Complete Step 3' }).click();
+  await expect(page.getByRole('alert')).toContainText('Completed activities require an actual completion date.');
+  await expect(page.getByRole('status', { name: 'Step 3 readiness' })).not.toHaveText('Completed');
+  const selectedYear = await page.getByLabel('Year package').inputValue();
+  await page.getByLabel('Year package').selectOption({ label: '2023' });
+  await expect(page.getByLabel('Year package')).toHaveValue(selectedYear);
+  await navigate('Year overview');
+  await expect(page.getByRole('heading', { name: 'Give your learning a place.' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Export Forms PDF' })).toHaveCount(0);
+  await navigate('Backup and restore');
+  await expect(page.getByRole('heading', { name: 'Give your learning a place.' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create full backup' })).toHaveCount(0);
+  await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
+  expect(desktop.windows()).toHaveLength(1);
+  await date.fill('9999-12-31');
+  await expect(editor.getByText('The completion date cannot be in the future.', { exact: true })).toBeVisible();
+  await page.waitForTimeout(600);
+  await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Saving');
+  const stillPlanned = await page.evaluate(async () => {
+    const state = await window.swcc.getState();
+    if (!state.ok) throw new Error(state.error.message);
+    return state.value.selectedPackage?.activities[0];
+  });
+  expect(stillPlanned).toMatchObject({ status: 'Planned', completionDate: '' });
+  await date.fill('2023-12-30');
+  await expect(editor.getByText(/This date is outside 2024/)).toBeVisible();
+  await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Saved');
+  const completedActivity = await page.evaluate(async () => {
+    const state = await window.swcc.getState();
+    if (!state.ok) throw new Error(state.error.message);
+    return state.value.selectedPackage?.activities[0];
+  });
+  expect(completedActivity).toMatchObject({ status: 'Completed', completionDate: '2023-12-30' });
 });
 
 test('failed activity edits and creations remain visible, block navigation and close, and retry once', async () => {
