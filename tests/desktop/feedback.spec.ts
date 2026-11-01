@@ -41,6 +41,13 @@ async function addGoal(title: string) {
 }
 
 test('explicit success and readiness feedback stay centered, accessible, and dismiss to their trigger', async () => {
+  await page.evaluate(() => {
+    const target = window as Window & { __swccMotionEvents?: string[] };
+    target.__swccMotionEvents = [];
+    document.addEventListener('animationstart', event => {
+      target.__swccMotionEvents?.push(event.animationName);
+    });
+  });
   await navigate('Self-assessment');
   await page.getByLabel('Assessment date').fill('2024-06-01');
   await page.getByLabel('Strengths').fill('Listening and follow-up');
@@ -57,7 +64,17 @@ test('explicit success and readiness feedback stay centered, accessible, and dis
 
   const success = page.getByRole('dialog', { name: 'Step 2 completed' });
   await expect(success).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (window as Window & { __swccMotionEvents?: string[] })
+    .__swccMotionEvents ?? [])).toContain('swcc-dialog-open');
+  await expect.poll(() => page.evaluate(() => (window as Window & { __swccMotionEvents?: string[] })
+    .__swccMotionEvents ?? [])).toContain('swcc-sprout-response');
   await expect(success.getByRole('status')).toContainText('manually confirmed');
+  await page.waitForFunction(() => {
+    const dialog = document.getElementById('action-feedback-title')?.closest('dialog');
+    if (!dialog) return false;
+    const bounds = dialog.getBoundingClientRect();
+    return Math.abs(bounds.y + bounds.height / 2 - window.innerHeight / 2) < 0.5;
+  }, null, { polling: 'raf' });
   const successBounds = await success.boundingBox();
   expect(successBounds).not.toBeNull();
   expect(successBounds!.y + successBounds!.height / 2).toBeCloseTo(240, 0);
@@ -73,10 +90,14 @@ test('explicit success and readiness feedback stay centered, accessible, and dis
   await expect(completeAssessment).toBeFocused();
 
   await navigate('Development plan');
+  const sproutStartsBeforeFailure = await page.evaluate(() => (window as Window & { __swccMotionEvents?: string[] })
+    .__swccMotionEvents?.filter(name => name === 'swcc-sprout-response').length ?? 0);
   const completePlan = page.getByRole('button', { name: 'Complete Step 3', exact: true });
   await completePlan.scrollIntoViewIfNeeded();
   await completePlan.click();
   const failure = page.getByRole('dialog', { name: 'Step 3 is not ready' });
+  expect(await page.evaluate(() => (window as Window & { __swccMotionEvents?: string[] })
+    .__swccMotionEvents?.filter(name => name === 'swcc-sprout-response').length ?? 0)).toBe(sproutStartsBeforeFailure);
   await expect(failure.getByRole('list', { name: 'Step 3 readiness reasons' }).getByRole('listitem'))
     .toHaveText(['G1 needs completed supporting work.']);
   await failure.getByText('This step is not ready for manual completion.').click();

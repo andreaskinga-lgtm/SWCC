@@ -14,6 +14,7 @@ export interface ActionFeedbackRequest {
 
 interface ActionFeedbackContextValue {
   showFeedback: (feedback: ActionFeedbackRequest) => void;
+  successSequence: number;
 }
 
 const ActionFeedbackContext = createContext<ActionFeedbackContextValue | null>(null);
@@ -26,12 +27,14 @@ export function useActionFeedback() {
 
 export function ActionFeedbackProvider({ children }: { children: ReactNode }) {
   const [feedback, setFeedback] = useState<ActionFeedbackRequest | null>(null);
+  const [successSequence, setSuccessSequence] = useState(0);
   const feedbackRef = useRef<ActionFeedbackRequest | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const lastFocusedRef = useRef<HTMLElement | null>(null);
 
   const showFeedback = useCallback((next: ActionFeedbackRequest) => {
+    if (next.kind === 'success') setSuccessSequence(sequence => sequence + 1);
     if (!feedbackRef.current) {
       const active = document.activeElement;
       const dialog = dialogRef.current;
@@ -91,7 +94,7 @@ export function ActionFeedbackProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  return <ActionFeedbackContext.Provider value={{ showFeedback }}>
+  return <ActionFeedbackContext.Provider value={{ showFeedback, successSequence }}>
     {children}
     <dialog
       ref={dialogRef}

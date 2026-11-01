@@ -39,8 +39,13 @@ export function Dialog({ title, children, onClose, className = 'goal-dialog' }: 
   </dialog>;
 }
 
-function GoalEditor({ goal, session, onDelete }: { goal: Goal; session: DraftSession; onDelete: (goal: Goal) => void }) {
-  return <article className="goal-editor" aria-label={`Learning goal ${goal.ref}`}>
+function GoalEditor({ goal, session, onDelete, revealed, onRevealEnd }: {
+  goal: Goal; session: DraftSession; onDelete: (goal: Goal) => void; revealed: boolean; onRevealEnd: () => void;
+}) {
+  return <article className={`goal-editor${revealed ? ' record-reveal' : ''}`} aria-label={`Learning goal ${goal.ref}`}
+    onAnimationEnd={event => {
+      if (event.target === event.currentTarget && event.animationName === 'swcc-record-reveal') onRevealEnd();
+    }}>
     <div className="goal-editor-top"><span className="goal-reference">{goal.ref}</span>
       <button type="button" className="icon-button" aria-label={`Delete goal ${goal.ref}`} onClick={() => onDelete(goal)}><Trash2 size={16} /></button>
     </div>
@@ -52,12 +57,13 @@ function GoalEditor({ goal, session, onDelete }: { goal: Goal; session: DraftSes
   </article>;
 }
 
-export function GoalCreateDialog({ source, session, onClose, activityId, flushEdits }: {
+export function GoalCreateDialog({ source, session, onClose, activityId, flushEdits, onCreated }: {
   source: 'assessment' | 'plan';
   session: DraftSession;
   onClose: () => void;
   activityId?: string;
   flushEdits: () => Promise<void>;
+  onCreated?: (goalId: string) => void;
 }) {
   const state = useSyncSession(session);
   const [title, setTitle] = useState('');
@@ -65,11 +71,18 @@ export function GoalCreateDialog({ source, session, onClose, activityId, flushEd
   const [validationError, setValidationError] = useState('');
   const [submitted, setSubmitted] = useState(false);
   const pending = state.pendingGoalCreation !== null;
+  const submittedGoalIds = useRef<Set<string>>(new Set());
+  const creationHandled = useRef(false);
   const titleText = source === 'plan' ? 'Create a learning goal' : 'Add a learning goal';
   const actionText = source === 'plan' ? 'Create goal' : 'Add goal';
   useEffect(() => {
-    if (submitted && !state.pendingGoalCreation && state.status === 'Saved') onClose();
-  }, [onClose, state.pendingGoalCreation, state.status, submitted]);
+    if (!submitted || state.pendingGoalCreation || state.status !== 'Saved' || creationHandled.current) return;
+    const createdGoal = state.record?.goals.find(goal => !submittedGoalIds.current.has(goal.id));
+    if (!createdGoal) return;
+    creationHandled.current = true;
+    onCreated?.(createdGoal.id);
+    onClose();
+  }, [onClose, onCreated, state.pendingGoalCreation, state.record, state.status, submitted]);
   function close() {
     if (pending) {
       setValidationError('This goal is waiting to be saved. Retry saving before closing.');
@@ -83,6 +96,7 @@ export function GoalCreateDialog({ source, session, onClose, activityId, flushEd
     setValidationError('');
     try {
       await flushEdits();
+      submittedGoalIds.current = new Set(session.getSnapshot().record?.goals.map(goal => goal.id));
       setSubmitted(true);
       await session.createGoal(title, description, activityId);
     }
@@ -183,16 +197,21 @@ function ReadinessPanel({ pkg, complete, busy }: { pkg: YearPackage; complete: (
   </section>;
 }
 
-export function AssessmentScreen({ pkg, session, operations, complete, busy, flushEdits }: {
+export function AssessmentScreen({ pkg, session, operations, complete, busy, flushEdits, motionDisabled }: {
   pkg: YearPackage;
   session: DraftSession;
   operations: ApplicationOperations;
   complete: () => void;
   busy: boolean;
   flushEdits: () => Promise<void>;
+  motionDisabled: boolean;
 }) {
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState<Goal | null>(null);
+  const [revealingGoalId, setRevealingGoalId] = useState<string | null>(null);
+  useEffect(() => {
+    if (motionDisabled) setRevealingGoalId(null);
+  }, [motionDisabled]);
   return <>
     <div className="page-heading"><h1>Self-assessment</h1></div>
     <div className="assessment-flow">
@@ -217,7 +236,8 @@ export function AssessmentScreen({ pkg, session, operations, complete, busy, flu
         </fieldset>
         <section className="goals-section" aria-labelledby="assessment-goals-title">
           <div className="section-heading"><h2 id="assessment-goals-title">Learning goals</h2><button type="button" className="text-button" onClick={() => setCreating(true)}><Plus size={15} />Add goal</button></div>
-          {pkg.goals.map(goal => <GoalEditor key={goal.id} goal={goal} session={session} onDelete={setDeleting} />)}
+          {pkg.goals.map(goal => <GoalEditor key={goal.id} goal={goal} session={session} onDelete={setDeleting}
+            revealed={revealingGoalId === goal.id} onRevealEnd={() => setRevealingGoalId(null)} />)}
           {!pkg.goals.length && <p className="empty">No learning goals yet.</p>}
         </section>
       </section>
@@ -225,7 +245,9 @@ export function AssessmentScreen({ pkg, session, operations, complete, busy, flu
         <ReadinessPanel pkg={pkg} complete={complete} busy={busy} />
       </aside>
     </div>
-    {creating && <GoalCreateDialog source="assessment" session={session} flushEdits={flushEdits} onClose={() => setCreating(false)} />}
+    {creating && <GoalCreateDialog source="assessment" session={session} flushEdits={flushEdits}
+      onClose={() => setCreating(false)}
+      onCreated={id => { if (!motionDisabled) setRevealingGoalId(id); }} />}
     {deleting && <GoalDeleteDialog goal={deleting} session={session} operations={operations} flushEdits={flushEdits} onClose={() => setDeleting(null)} />}
   </>;
 }

@@ -278,7 +278,7 @@
 }
 .goal-node {
   background: var(--leaf);
-  border-radius: 8px;
+  border-radius: 12px;
   padding: 20px;
   color: #303b25;
 }
@@ -304,6 +304,12 @@
   padding: 18px;
   text-align: left;
   width: 100%;
+}
+.activity-node:is(:hover, :focus-visible, .associated) {
+  background: #f2f4eb;
+  border-color: #526332;
+  box-shadow: inset 0 0 0 1px #526332;
+  filter: brightness(.94);
 }
 .activity-node > div {
   display: flex;

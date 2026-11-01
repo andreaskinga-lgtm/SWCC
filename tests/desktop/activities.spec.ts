@@ -43,6 +43,51 @@ function failWrites(enabled: boolean) {
 async function navigate(name: string) {
   await page.getByRole('navigation').getByRole('button', { name, exact: true }).click();
 }
+async function interceptMotionStarts() {
+  await page.evaluate(() => {
+    type TestStats = { native: number; fallback: number };
+    type NativeViewTransition = {
+      ready: Promise<void>;
+      updateCallbackDone: Promise<void>;
+      finished: Promise<void>;
+      skipTransition: () => void;
+    };
+    type TransitionDocument = { startViewTransition?: (update: () => void) => NativeViewTransition };
+    type InstrumentedWindow = Window & { __swccTransitionStats?: TestStats };
+    const target = window as InstrumentedWindow;
+    const stats: TestStats = { native: 0, fallback: 0 };
+    target.__swccTransitionStats = stats;
+    const documentPrototype = Document.prototype as unknown as TransitionDocument;
+    Object.defineProperty(documentPrototype, 'startViewTransition', {
+      configurable: true,
+      value(update: () => void) {
+        stats.native++;
+        update();
+        return {
+          ready: Promise.resolve(),
+          updateCallbackDone: Promise.resolve(),
+          finished: Promise.resolve(),
+          skipTransition: () => {},
+        };
+      },
+    });
+    const elementPrototype = Element.prototype as unknown as {
+      animate: (frames: Keyframe[], options: KeyframeAnimationOptions) => Animation;
+    };
+    const originalAnimate = elementPrototype.animate;
+    Object.defineProperty(elementPrototype, 'animate', {
+      configurable: true,
+      value: function (this: Element, frames: Keyframe[], options: KeyframeAnimationOptions) {
+        if (this.matches('.page-transition-scope, .activity-editor')) stats.fallback++;
+        return originalAnimate.call(this, frames, options);
+      },
+    });
+  });
+}
+async function motionStartCounts() {
+  return page.evaluate(() => (window as Window & { __swccTransitionStats?: { native: number; fallback: number } })
+    .__swccTransitionStats ?? { native: 0, fallback: 0 });
+}
 async function addActivity(title: string) {
   await page.getByRole('button', { name: 'Add activity', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Record an activity' });
@@ -269,6 +314,16 @@ test('a missing Completed date stays pending without a write error and protects 
 test('a missing completion date keeps Retry beside its inline message without an error panel or modal', async () => {
   await navigate('Development plan');
   await addActivity('Inline date recovery');
+  await addActivity('Second activity');
+  const first = page.getByRole('button', { name: 'Select activity A1', exact: true });
+  await first.click();
+  await expect(first).toHaveAttribute('aria-pressed', 'true');
+  await page.waitForFunction(() => {
+    const active = [...document.querySelectorAll('.page-transition-scope, .activity-editor')]
+      .some(element => element.getAnimations().some(animation => animation.playState === 'running'));
+    return !active && !document.documentElement.dataset.swccTransition;
+  });
+  await interceptMotionStarts();
   const editor = page.getByRole('article', { name: 'Activity editor A1' });
   const date = editor.getByLabel('Completion date');
   const status = page.getByRole('status', { name: 'Save status' });
@@ -282,6 +337,10 @@ test('a missing completion date keeps Retry beside its inline message without an
     await expect(page.locator('.error-panel')).toHaveCount(0);
     const retry = page.getByRole('button', { name: 'Retry save', exact: true });
     await expect(retry).toBeVisible();
+    await page.getByRole('button', { name: 'Select activity A2', exact: true }).click();
+    await expect(first).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('alert')).toContainText('Completed activities require an actual completion date.');
+    expect(await motionStartCounts()).toEqual({ native: 0, fallback: 0 });
     await retry.click();
     await expect(status).toHaveText('Not saved');
     await expect(editor.getByText('Completed activities require an actual completion date.', { exact: true })).toBeVisible();
@@ -339,7 +398,15 @@ test('failed activity edits and creations remain visible, block navigation and c
   await navigate('Development plan');
   await addActivity('Original activity');
   await addActivity('Another saved activity');
-  await page.getByRole('button', { name: 'Select activity A1', exact: true }).click();
+  const first = page.getByRole('button', { name: 'Select activity A1', exact: true });
+  await first.click();
+  await expect(first).toHaveAttribute('aria-pressed', 'true');
+  await page.waitForFunction(() => {
+    const active = [...document.querySelectorAll('.page-transition-scope, .activity-editor')]
+      .some(element => element.getAnimations().some(animation => animation.playState === 'running'));
+    return !active && !document.documentElement.dataset.swccTransition;
+  });
+  await interceptMotionStarts();
   const editor = page.getByRole('article', { name: 'Activity editor A1' });
   failWrites(true);
   await editor.getByLabel('Activity title', { exact: true }).fill('Unsaved activity title');
@@ -350,8 +417,10 @@ test('failed activity edits and creations remain visible, block navigation and c
   await expect(editor.getByLabel('Activity title', { exact: true })).toHaveValue('Unsaved activity title');
   await page.getByRole('button', { name: 'Select activity A2', exact: true }).click();
   await expect(editor.getByLabel('Activity title', { exact: true })).toHaveValue('Unsaved activity title');
+  await expect(first).toHaveAttribute('aria-pressed', 'true');
   await navigate('All years');
   await expect(editor.getByLabel('Activity title', { exact: true })).toHaveValue('Unsaved activity title');
+  expect(await motionStartCounts()).toEqual({ native: 0, fallback: 0 });
   await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
   await expect(page.getByRole('alert')).toContainText('disk full');
   expect(desktop.windows()).toHaveLength(1);
@@ -429,4 +498,400 @@ test('explicit retry of an invalid evidence link shows failure feedback and keep
     await links.fill('https://example.org/notes');
     await expect(page.getByRole('status', { name: 'Save status' })).toHaveText('Saved');
   }
+});
+
+test('goal references highlight their stable activity record and restore keyboard focus after pointer exit', async () => {
+  const activityIds = await page.evaluate(async () => {
+    const state = await window.swcc.getState();
+    if (!state.ok || !state.value.selectedPackage) throw new Error('No selected package');
+    let pkg = state.value.selectedPackage;
+    const goalIds: string[] = [];
+    for (const title of ['First goal', 'Second goal', 'Third goal']) {
+      const result = await window.swcc.createGoal({
+        packageId: pkg.id, expectedRevision: pkg.contentRevision, title,
+      });
+      if (!result.ok) throw new Error(result.error.message);
+      pkg = result.value;
+      goalIds.push(pkg.goals.at(-1)!.id);
+    }
+    const shared = await window.swcc.createActivity({
+      packageId: pkg.id, expectedRevision: pkg.contentRevision, title: 'Same activity title',
+      goalIds: goalIds.slice(0, 2),
+    });
+    if (!shared.ok) throw new Error(shared.error.message);
+    pkg = shared.value;
+    const linked = await window.swcc.createActivity({
+      packageId: pkg.id, expectedRevision: pkg.contentRevision, title: 'Another linked activity',
+      goalIds: [goalIds[2]],
+    });
+    if (!linked.ok) throw new Error(linked.error.message);
+    pkg = linked.value;
+    const supplementary = await window.swcc.createActivity({
+      packageId: pkg.id, expectedRevision: pkg.contentRevision, title: 'Same activity title', goalIds: [],
+    });
+    if (!supplementary.ok) throw new Error(supplementary.error.message);
+    return {
+      shared: shared.value.activities[0].id,
+      linked: linked.value.activities[1].id,
+      supplementary: supplementary.value.activities[2].id,
+    };
+  });
+  await page.reload();
+
+  const card = (id: string) => page.locator(`.activity-node[data-activity-id="${id}"]`);
+  const style = (id: string) => card(id).evaluate(element => {
+    const computed = getComputedStyle(element);
+    return {
+      background: computed.backgroundColor,
+      border: computed.borderColor,
+      inset: computed.boxShadow.includes('inset'),
+      filter: computed.filter,
+    };
+  });
+  const firstGoal = page.getByRole('button', { name: 'Open A1 from G1', exact: true });
+  const secondGoal = page.getByRole('button', { name: 'Open A1 from G2', exact: true });
+  const otherGoal = page.getByRole('button', { name: 'Open A2 from G3', exact: true });
+
+  await firstGoal.hover();
+  await expect.poll(() => style(activityIds.shared)).toEqual({
+    background: 'rgb(242, 244, 235)', border: 'rgb(82, 99, 50)', inset: true, filter: 'brightness(0.94)',
+  });
+  expect(await style(activityIds.linked)).not.toEqual(await style(activityIds.shared));
+  expect(await style(activityIds.supplementary)).not.toEqual(await style(activityIds.shared));
+
+  await card(activityIds.shared).hover();
+  const directHover = await style(activityIds.shared);
+  await firstGoal.hover();
+  await expect.poll(() => style(activityIds.shared)).toEqual(directHover);
+
+  await secondGoal.focus();
+  await otherGoal.hover();
+  await expect.poll(() => style(activityIds.linked)).toEqual(directHover);
+  expect(await style(activityIds.shared)).not.toEqual(directHover);
+  const board = await page.locator('.relationship-board').boundingBox();
+  expect(board).not.toBeNull();
+  await page.mouse.move(board!.x + board!.width / 2, board!.y + board!.height - 5);
+  await expect.poll(() => style(activityIds.linked)).not.toEqual(directHover);
+  await expect.poll(() => style(activityIds.shared)).toEqual(directHover);
+
+  await page.getByRole('button', { name: 'View development plan', exact: true }).focus();
+  await expect.poll(() => style(activityIds.shared)).not.toEqual(directHover);
+  await secondGoal.click();
+  await expect(page.getByRole('heading', { name: 'Development plan', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Select activity A1', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('article', { name: 'Activity editor A1' })).toBeVisible();
+});
+
+test('activity index and goal references swap one live editor with incoming-only motion', async () => {
+  await page.evaluate(async () => {
+    const state = await window.swcc.getState();
+    if (!state.ok || !state.value.selectedPackage) throw new Error('No selected package');
+    let pkg = state.value.selectedPackage;
+    const goalResult = await window.swcc.createGoal({
+      packageId: pkg.id, expectedRevision: pkg.contentRevision, title: 'Linked goal',
+    });
+    if (!goalResult.ok) throw new Error(goalResult.error.message);
+    pkg = goalResult.value;
+    for (const [title, status, completionDate] of [
+      ['First activity', 'Planned', ''],
+      ['Completed activity', 'Completed', '2024-01-15'],
+      ['Third activity', 'Planned', ''],
+    ]) {
+      const result = await window.swcc.createActivity({
+        packageId: pkg.id, expectedRevision: pkg.contentRevision, title, status: status as 'Planned' | 'Completed',
+        completionDate, goalIds: [goalResult.value.goals[0].id],
+      });
+      if (!result.ok) throw new Error(result.error.message);
+      pkg = result.value;
+    }
+  });
+  await page.reload();
+  await page.evaluate(() => {
+    Object.defineProperty(Document.prototype, 'startViewTransition', { configurable: true, value: undefined });
+  });
+  await navigate('Development plan');
+  await expect(page.getByRole('article', { name: 'Activity editor A1' })).toBeVisible();
+  await page.waitForFunction(() => document.querySelector('.page-transition-scope')
+    ?.getAnimations().some(animation => animation.playState === 'running'));
+  await page.waitForFunction(() => !document.querySelector('.page-transition-scope')
+    ?.getAnimations().some(animation => animation.playState === 'running'));
+
+  const sidebar = page.locator('.map-plan-body > aside');
+  const goalStrip = page.locator('.goal-connection-strip');
+  const planDate = page.getByLabel('Plan date');
+  const readiness = page.locator('.readiness-panel');
+  const scrollBefore = await page.evaluate(() => ({ x: window.scrollX, y: window.scrollY }));
+  const before = await Promise.all([sidebar, goalStrip, planDate, readiness].map(element => element.boundingBox()));
+  const second = page.getByRole('button', { name: 'Select activity A2', exact: true });
+  await second.click();
+  await expect(second).toHaveAttribute('aria-pressed', 'true');
+  const editor = page.getByRole('article', { name: 'Activity editor A2', exact: true });
+  await expect(editor).toBeVisible();
+  await expect(editor.getByLabel('Activity title')).toHaveValue('Completed activity');
+  await expect(editor.getByLabel('Completion date')).toHaveValue('2024-01-15');
+  await expect(editor.getByLabel('Completion date')).not.toBeFocused();
+  await expect(page.getByRole('article', { name: /^Activity editor/ })).toHaveCount(1);
+  await page.waitForFunction(() => {
+    const element = document.querySelector('.activity-editor');
+    if (!element) return false;
+    const style = getComputedStyle(element);
+    const offset = style.transform === 'none' ? 0 : new DOMMatrixReadOnly(style.transform).m41;
+    return Number(style.opacity) < 1 && offset > 0;
+  }, null, { polling: 'raf' });
+  await expect.poll(async () => {
+    const after = await Promise.all([sidebar, goalStrip, planDate, readiness].map(element => element.boundingBox()));
+    const scrollAfter = await page.evaluate(() => ({ x: window.scrollX, y: window.scrollY }));
+    return before.map((box, index) => box && after[index] ? {
+      x: Math.round(box.x + scrollBefore.x - after[index]!.x - scrollAfter.x),
+      y: Math.round(box.y + scrollBefore.y - after[index]!.y - scrollAfter.y),
+      width: Math.round(box.width - after[index]!.width),
+      height: Math.round(box.height - after[index]!.height),
+    } : null);
+  }).toEqual(Array.from({ length: 4 }, () => ({ x: 0, y: 0, width: 0, height: 0 })));
+
+  const thirdReference = page.getByRole('button', { name: 'Edit A3 from G1', exact: true });
+  await thirdReference.click();
+  await expect(page.getByRole('button', { name: 'Select activity A3', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('article', { name: 'Activity editor A3', exact: true })).toBeVisible();
+  await expect(page.getByRole('article', { name: /^Activity editor/ })).toHaveCount(1);
+
+  const thirdIndex = page.getByRole('button', { name: 'Select activity A3', exact: true });
+  await thirdIndex.click();
+  await expect(thirdIndex).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('article', { name: 'Activity editor A3', exact: true })).toBeVisible();
+  const editorTransform = await page.locator('.activity-editor').evaluate(element => ({
+    opacity: getComputedStyle(element).opacity,
+    transform: getComputedStyle(element).transform,
+  }));
+  expect(editorTransform).toEqual({ opacity: '1', transform: 'none' });
+});
+
+test('micro-feedback follows real saves, focused writing, and records added to the visible plan', async () => {
+  await navigate('Development plan');
+  const status = page.getByRole('status', { name: 'Save status' });
+  const pill = status.locator('.save-status-content');
+  await expect(status).toHaveText('Saved');
+  await expect(pill).not.toHaveAttribute('data-response', 'true');
+  await expect(pill).toHaveCSS('background-color', 'rgb(242, 244, 235)');
+  await page.evaluate(() => {
+    const target = window as Window & { __swccMotionEvents?: string[] };
+    target.__swccMotionEvents = [];
+    document.addEventListener('animationstart', event => {
+      const element = event.target;
+      if (!(element instanceof Element)) return;
+      const label = element.getAttribute('aria-label') ?? element.getAttribute('class') ?? element.tagName;
+      target.__swccMotionEvents?.push(`${event.animationName}:${label}`);
+    });
+  });
+  await expect(status.locator('svg')).toHaveCount(1);
+  expect(await pill.evaluate(element => {
+    const style = getComputedStyle(element);
+    return {
+      background: style.backgroundColor,
+      radius: style.borderRadius,
+      padding: style.padding,
+      gap: style.gap,
+      minWidth: style.minWidth,
+    };
+  })).toEqual({
+    background: 'rgb(242, 244, 235)', radius: '20px', padding: '6px 9px', gap: '6px', minWidth: '80px',
+  });
+  await expect(pill).not.toHaveAttribute('data-response', 'true');
+
+  const addActivityButton = page.getByRole('button', { name: 'Add activity', exact: true });
+  const addActivityBounds = await addActivityButton.boundingBox();
+  expect(addActivityBounds).not.toBeNull();
+  await page.mouse.move(addActivityBounds!.x + addActivityBounds!.width / 2, addActivityBounds!.y + addActivityBounds!.height / 2);
+  await page.mouse.down();
+  await expect.poll(() => addActivityButton.evaluate(element => {
+    const transform = getComputedStyle(element).transform;
+    return transform === 'none' ? 1 : new DOMMatrixReadOnly(transform).a;
+  })).toBeLessThan(0.99);
+  await page.mouse.up();
+
+  const createActivity = page.getByRole('dialog', { name: 'Record an activity' });
+  await expect(createActivity).toBeVisible();
+  expect(await createActivity.evaluate(element => getComputedStyle(element).animationName)).toBe('swcc-dialog-open');
+  await createActivity.getByLabel('Activity title', { exact: true }).fill('Friendly movement');
+  await createActivity.getByRole('button', { name: 'Save activity', exact: true }).click();
+  await expect(createActivity).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Select activity A1', exact: true })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (window as Window & { __swccMotionEvents?: string[] })
+    .__swccMotionEvents ?? [])).toContain('swcc-record-reveal:Select activity A1');
+  await expect.poll(() => pill.getAttribute('data-response')).toBeNull();
+
+  const editor = page.getByRole('article', { name: 'Activity editor A1' });
+  const title = editor.getByLabel('Activity title', { exact: true });
+  await title.focus();
+  await expect(title).toHaveCSS('background-color', 'rgb(251, 252, 248)');
+  await expect(title).toHaveCSS('border-color', 'rgb(82, 99, 50)');
+  await title.fill('Updated activity title');
+  await expect(status).toHaveText('Saving');
+  await expect(status.locator('svg')).toHaveCount(0);
+  await expect(pill).not.toHaveAttribute('data-response', 'true');
+  await expect(status).toHaveText('Saved');
+  await expect(status.locator('svg')).toHaveCount(1);
+  await expect.poll(() => page.evaluate(() => (window as Window & { __swccMotionEvents?: string[] })
+    .__swccMotionEvents?.filter(event => event.startsWith('save-status-response:')).length ?? 0)).toBeGreaterThan(0);
+  await expect(pill).not.toHaveAttribute('data-response', 'true');
+
+  const createGoalButton = editor.getByRole('button', { name: 'Create and link a goal', exact: true });
+  await createGoalButton.scrollIntoViewIfNeeded();
+  const createGoalBounds = await createGoalButton.boundingBox();
+  expect(createGoalBounds).not.toBeNull();
+  await page.mouse.move(createGoalBounds!.x + createGoalBounds!.width / 2, createGoalBounds!.y + createGoalBounds!.height / 2);
+  await page.mouse.down();
+  expect(await createGoalButton.evaluate(element => getComputedStyle(element).transform)).toBe('none');
+  await page.mouse.up();
+  const createGoal = page.getByRole('dialog', { name: 'Create a learning goal' });
+  await createGoal.getByLabel('Goal title').fill('Goal reveal');
+  await createGoal.getByRole('button', { name: 'Create goal', exact: true }).click();
+  await expect(createGoal).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => (window as Window & { __swccMotionEvents?: string[] })
+    .__swccMotionEvents ?? [])).toContain('swcc-record-reveal:G1 Goal reveal');
+});
+
+test('latest rapid activity and page intents cancel stale native callbacks without blocking future motion', async () => {
+  await page.evaluate(() => {
+    Object.defineProperty(Document.prototype, 'startViewTransition', { configurable: true, value: undefined });
+  });
+  await navigate('Development plan');
+  await page.waitForFunction(() => document.querySelector('.page-transition-scope')
+    ?.getAnimations().some(animation => animation.playState === 'running'));
+  await page.waitForFunction(() => !document.querySelector('.page-transition-scope')
+    ?.getAnimations().some(animation => animation.playState === 'running'));
+  await addActivity('First activity');
+  await addActivity('Second activity');
+  await addActivity('Third activity');
+  await page.getByRole('button', { name: 'Select activity A1', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('.activity-editor')
+    ?.getAnimations().some(animation => animation.playState === 'running'));
+  await page.waitForFunction(() => !document.querySelector('.activity-editor')
+    ?.getAnimations().some(animation => animation.playState === 'running'));
+
+  const pageErrors: string[] = [];
+  page.on('pageerror', failure => pageErrors.push(failure.message));
+  await page.evaluate(() => {
+    type TestTransition = { invoke: () => void };
+    type TestHooks = { scopes: string[]; pending: TestTransition[]; skipped: number };
+    type NativeViewTransition = {
+      ready: Promise<void>;
+      updateCallbackDone: Promise<void>;
+      finished: Promise<void>;
+      skipTransition: () => void;
+    };
+    type TransitionDocument = {
+      startViewTransition?: (update: () => void) => NativeViewTransition;
+    };
+    type InstrumentedWindow = Window & { __swccTransitionTest?: TestHooks };
+    const target = window as InstrumentedWindow;
+    const hooks: TestHooks = { scopes: [], pending: [], skipped: 0 };
+    target.__swccTransitionTest = hooks;
+    const prototype = Document.prototype as unknown as TransitionDocument;
+    Object.defineProperty(prototype, 'startViewTransition', {
+      configurable: true,
+      value: function (this: Document, update: () => void): NativeViewTransition {
+        hooks.scopes.push(document.documentElement.dataset.swccTransition ?? '');
+        let resolveUpdate: (() => void) | undefined;
+        let rejectUpdate: ((failure: unknown) => void) | undefined;
+        let resolveFinished: (() => void) | undefined;
+        let rejectFinished: ((failure: unknown) => void) | undefined;
+        const updateCallbackDone = new Promise<void>((resolve, reject) => {
+          resolveUpdate = resolve;
+          rejectUpdate = reject;
+        });
+        const finished = new Promise<void>((resolve, reject) => {
+          resolveFinished = resolve;
+          rejectFinished = reject;
+        });
+        hooks.pending.push({
+          invoke: () => {
+            try {
+              update();
+              resolveUpdate?.();
+              resolveFinished?.();
+            } catch (failure) {
+              rejectUpdate?.(failure);
+              rejectFinished?.(failure);
+              throw failure;
+            }
+          },
+        });
+        return {
+          ready: Promise.resolve(),
+          updateCallbackDone,
+          finished,
+          skipTransition: () => {
+            hooks.skipped++;
+            const failure = new DOMException('Transition skipped', 'AbortError');
+            rejectUpdate?.(failure);
+            rejectFinished?.(failure);
+          },
+        };
+      },
+    });
+  });
+
+  await page.evaluate(() => {
+    document.querySelector<HTMLButtonElement>('[aria-label="Select activity A2"]')?.click();
+    document.querySelector<HTMLButtonElement>('[aria-label="Select activity A1"]')?.click();
+  });
+  await expect.poll(() => page.evaluate(() => (window as Window & { __swccTransitionTest?: { scopes: string[] } })
+    .__swccTransitionTest?.scopes.length ?? 0)).toBe(1);
+  await expect(page.getByRole('button', { name: 'Select activity A1', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  expect(await page.evaluate(() => (window as Window & { __swccTransitionTest?: { skipped: number } })
+    .__swccTransitionTest?.skipped)).toBe(1);
+  await page.evaluate(() => (window as Window & { __swccTransitionTest?: { pending: Array<{ invoke: () => void }> } })
+    .__swccTransitionTest?.pending[0]?.invoke());
+  await expect(page.getByRole('article', { name: 'Activity editor A1', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Select activity A2', exact: true })).not.toHaveAttribute('aria-pressed', 'true');
+
+  await page.evaluate(() => {
+    document.querySelector<HTMLButtonElement>('[aria-label="Select activity A2"]')?.click();
+    document.querySelector<HTMLButtonElement>('[aria-label="Select activity A3"]')?.click();
+  });
+  await expect.poll(() => page.evaluate(() => (window as Window & { __swccTransitionTest?: { scopes: string[] } })
+    .__swccTransitionTest?.scopes.length ?? 0)).toBe(3);
+  expect(await page.evaluate(() => (window as Window & { __swccTransitionTest?: { skipped: number } })
+    .__swccTransitionTest?.skipped)).toBe(2);
+  await page.evaluate(() => {
+    const pending = (window as Window & { __swccTransitionTest?: { pending: Array<{ invoke: () => void }> } })
+      .__swccTransitionTest?.pending ?? [];
+    pending[1]?.invoke();
+    pending[2]?.invoke();
+  });
+  await expect(page.getByRole('button', { name: 'Select activity A3', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('article', { name: 'Activity editor A3', exact: true })).toBeVisible();
+
+  await page.evaluate(() => document.querySelector<HTMLButtonElement>('[aria-label="Select activity A2"]')?.click());
+  await expect.poll(() => page.evaluate(() => (window as Window & { __swccTransitionTest?: { scopes: string[] } })
+    .__swccTransitionTest?.scopes.length ?? 0)).toBe(4);
+  await page.evaluate(() => (window as Window & { __swccTransitionTest?: { pending: Array<{ invoke: () => void }> } })
+    .__swccTransitionTest?.pending[3]?.invoke());
+  await expect(page.getByRole('button', { name: 'Select activity A2', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('article', { name: 'Activity editor A2', exact: true })).toBeVisible();
+
+  const review = page.getByRole('navigation').getByRole('button', { name: 'Review', exact: true });
+  const assessment = page.getByRole('navigation').getByRole('button', { name: 'Self-assessment', exact: true });
+  await review.click();
+  await expect(review).toBeEnabled();
+  await expect.poll(() => page.evaluate(() => (window as Window & { __swccTransitionTest?: { scopes: string[] } })
+    .__swccTransitionTest?.scopes.length ?? 0)).toBe(5);
+  await assessment.click();
+  await expect(assessment).toBeEnabled();
+  await expect.poll(() => page.evaluate(() => (window as Window & { __swccTransitionTest?: { scopes: string[] } })
+    .__swccTransitionTest?.scopes.length ?? 0)).toBe(6);
+  expect(await page.evaluate(() => (window as Window & { __swccTransitionTest?: { skipped: number } })
+    .__swccTransitionTest?.skipped)).toBe(3);
+  await page.evaluate(() => {
+    const pending = (window as Window & { __swccTransitionTest?: { pending: Array<{ invoke: () => void }> } })
+      .__swccTransitionTest?.pending ?? [];
+    pending[4]?.invoke();
+    pending[5]?.invoke();
+  });
+  await expect(assessment).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByRole('heading', { name: 'Self-assessment', exact: true })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (window as Window & { __swccTransitionTest?: { scopes: string[] } })
+    .__swccTransitionTest?.scopes)).toEqual(['activity', 'activity', 'activity', 'activity', 'page', 'page']);
+  await expect.poll(() => pageErrors).toEqual([]);
 });

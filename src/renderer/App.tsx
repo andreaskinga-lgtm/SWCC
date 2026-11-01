@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { ComponentType, ReactNode } from 'react';
-import { BookOpen, ClipboardList, Home, Layers, HardDrive, Sprout, Network } from 'lucide-react';
+import { BookOpen, Check, ClipboardList, Home, Layers, HardDrive, Sprout, Network } from 'lucide-react';
 import type { AppState, DesktopOperations, EvidenceAttachment, Result, YearPackage } from '../shared/application.js';
 import { localDate } from '../shared/application.js';
 import { hasSubstantiveAssessmentContent } from '../shared/assessment.js';
@@ -21,8 +21,11 @@ import type { RestorePreview, RestoreProgress } from '../shared/restore.js';
 import { RestorePreviewDialog } from './backup-screen.js';
 import { useProgressMonitor } from './operation-progress.js';
 import { useActionFeedback } from './action-feedback.js';
+import { useMotionCoordinator } from './motion.js';
 
 type Screen = 'years' | 'overview' | 'assessment' | 'plan' | 'review' | 'backup';
+type RailMarker = { left: number; top: number; width: number; height: number; moving: boolean };
+const movingDestinations = new Set<Screen>(['overview', 'review', 'assessment', 'plan']);
 export interface PrototypeOverviewProps {
   children: ReactNode;
   pkg: YearPackage;
@@ -46,12 +49,12 @@ const destinations = [
   { screen: 'backup', name: 'Backup and restore', icon: HardDrive },
 ] as const;
 
-export function App({ operations, prototypeOverview: Overview = OverviewContent, prototypeTransition }: {
+export function App({ operations, prototypeOverview: Overview = OverviewContent }: {
   operations: DesktopOperations;
   prototypeOverview?: ComponentType<PrototypeOverviewProps>;
   prototypeTransition?: PrototypeTransition;
 }) {
-  const { showFeedback } = useActionFeedback();
+  const { showFeedback, successSequence } = useActionFeedback();
   const [session] = useState(() => new DraftSession(operations));
   const [reviewSession] = useState(() => new ReviewSession(operations));
   const flushEdits = useCallback(async () => {
@@ -77,8 +80,43 @@ export function App({ operations, prototypeOverview: Overview = OverviewContent,
   }, [review.failureEvent, showFeedback]);
   const [state, setState] = useState<AppState | null>(null);
   const [screen, setScreen] = useState<Screen>('years');
+  const screenRef = useRef(screen);
+  const navigationRef = useRef<HTMLElement | null>(null);
+  const markerScreenRef = useRef<Screen | null>(null);
+  const [railMarker, setRailMarker] = useState<RailMarker | null>(null);
   const [year, setYear] = useState(localDate().slice(0, 4));
   const [error, setError] = useState<string | null>(null);
+  const reportMotionFailure = useCallback((failure: unknown) => {
+    const message = failure instanceof Error ? failure.message : String(failure);
+    setError(message);
+    showFeedback({ title: 'Visual transition could not be completed', message, kind: 'error' });
+  }, [showFeedback]);
+  const motion = useMotionCoordinator(reportMotionFailure);
+  const [sproutSequence, setSproutSequence] = useState(0);
+  const [sproutAnimating, setSproutAnimating] = useState(false);
+  const handledSuccessSequence = useRef(successSequence);
+  useLayoutEffect(() => {
+    if (handledSuccessSequence.current === successSequence) return;
+    handledSuccessSequence.current = successSequence;
+    if (motion.disabled) return;
+    setSproutSequence(sequence => sequence + 1);
+    setSproutAnimating(true);
+  }, [motion.disabled, successSequence]);
+  const saveStatus = state
+    ? [draft.status, review.status].includes('Not saved') ? 'Not saved'
+      : [draft.status, review.status].includes('Saving') ? 'Saving' : 'Saved'
+    : error ? 'Unavailable' : 'Opening records';
+  const [saveResponseSequence, setSaveResponseSequence] = useState(0);
+  const [saveResponseActive, setSaveResponseActive] = useState(false);
+  const previousSaveStatus = useRef(saveStatus);
+  useLayoutEffect(() => {
+    const previous = previousSaveStatus.current;
+    previousSaveStatus.current = saveStatus;
+    if (previous === 'Saving' && saveStatus === 'Saved' && !motion.disabled) {
+      setSaveResponseSequence(sequence => sequence + 1);
+      setSaveResponseActive(true);
+    }
+  }, [motion.disabled, saveStatus]);
   const [busy, setBusy] = useState(false);
   const [backupRunning, setBackupRunning] = useState(false);
   const [backupProgress, setBackupProgress] = useState<BackupProgress>({
@@ -91,6 +129,7 @@ export function App({ operations, prototypeOverview: Overview = OverviewContent,
   });
   const [restorePreview, setRestorePreview] = useState<RestorePreview | null>(null);
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
+  const selectedActivityIdRef = useRef<string | null>(null);
   const [recordRequested, setRecordRequested] = useState(false);
   const [deletingYear, setDeletingYear] = useState<{ id: string; year: number } | null>(null);
   const [declaring, setDeclaring] = useState(false);
@@ -102,7 +141,63 @@ export function App({ operations, prototypeOverview: Overview = OverviewContent,
   });
   const [evidenceByPackage, setEvidenceByPackage] = useState<Record<string, EvidenceAttachment[]>>({});
   const [evidenceErrors, setEvidenceErrors] = useState<Record<string, string>>({});
+  const [hoveredActivityId, setHoveredActivityId] = useState<string | null>(null);
+  const [focusedActivityId, setFocusedActivityId] = useState<string | null>(null);
   const pkg = draft.record;
+  const linkedActivityId = hoveredActivityId ?? focusedActivityId;
+  function updateSelectedActivity(id: string | null) {
+    selectedActivityIdRef.current = id;
+    setSelectedActivityId(id);
+  }
+  function clearActivityAssociation() {
+    setHoveredActivityId(null);
+    setFocusedActivityId(null);
+  }
+  const measureRailMarker = useCallback((target: Screen, moving = false) => {
+    if (!movingDestinations.has(target)) {
+      setRailMarker(null);
+      return;
+    }
+    const navigation = navigationRef.current;
+    const button = navigation?.querySelector<HTMLButtonElement>(`button[data-screen="${target}"]`);
+    if (!navigation || !button) return;
+    setRailMarker({
+      left: button.offsetLeft,
+      top: button.offsetTop,
+      width: button.offsetWidth,
+      height: button.offsetHeight,
+      moving,
+    });
+  }, []);
+  useLayoutEffect(() => {
+    const previous = markerScreenRef.current;
+    markerScreenRef.current = screen;
+    const moving = previous !== null && previous !== screen
+      && movingDestinations.has(previous) && movingDestinations.has(screen) && !motion.disabled;
+    measureRailMarker(screen, moving);
+  }, [screen, motion.disabled, measureRailMarker]);
+  useEffect(() => {
+    const navigation = navigationRef.current;
+    if (!navigation) return;
+    const snapMarker = () => {
+      const current = markerScreenRef.current;
+      if (current) measureRailMarker(current);
+    };
+    const observer = new ResizeObserver(snapMarker);
+    observer.observe(navigation);
+    navigation.querySelectorAll('button').forEach(button => observer.observe(button));
+    window.addEventListener('resize', snapMarker);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', snapMarker);
+    };
+  }, [measureRailMarker]);
+  useEffect(() => {
+    if (screen !== 'overview') {
+      setHoveredActivityId(null);
+      setFocusedActivityId(null);
+    }
+  }, [screen]);
   function hasInvalidActivityDate() {
     return Boolean(session.getSnapshot().record?.activities.some(activity => activityDateError(activity)));
   }
@@ -133,7 +228,10 @@ export function App({ operations, prototypeOverview: Overview = OverviewContent,
         kind: 'info',
       });
       session.open(result.value.selectedPackage);
-      if (result.value.selectedPackage) setScreen('overview');
+      if (result.value.selectedPackage) {
+        screenRef.current = 'overview';
+        setScreen('overview');
+      }
     }).catch(() => {
       const message = 'Cannot connect to local records. Preserve your storage folder and restart SWCC.';
       setError(message);
@@ -259,8 +357,9 @@ export function App({ operations, prototypeOverview: Overview = OverviewContent,
         const outcome = unwrap(result);
         setState(outcome.state);
         session.open(outcome.state.selectedPackage);
-        setSelectedActivityId(null);
+        updateSelectedActivity(null);
         setRecordRequested(false);
+        clearActivityAssociation();
         setEvidenceByPackage({});
         setEvidenceErrors({});
         await reviewSession.open(outcome.state.selectedPackage?.id ?? null);
@@ -307,27 +406,35 @@ export function App({ operations, prototypeOverview: Overview = OverviewContent,
     }
     finally { setBusy(false); }
   }
-  function switchScreen(next: Screen) {
-    if (prototypeTransition) prototypeTransition('page', () => setScreen(next), next !== screen);
-    else setScreen(next);
+  function switchScreen(next: Screen, intent: number, beforeCommit?: () => void) {
+    motion.transition(intent, 'page', () => {
+      beforeCommit?.();
+      if (next !== 'overview') clearActivityAssociation();
+      screenRef.current = next;
+      setScreen(next);
+    }, next !== screenRef.current);
   }
   function navigate(next: Screen) {
+    const intent = motion.beginIntent();
     void run(async () => {
-      if (!pkg && !['years', 'backup'].includes(next)) { setScreen('years'); return; }
+      if (!pkg && !['years', 'backup'].includes(next)) { switchScreen('years', intent); return; }
       if (next === 'years' || next === 'backup') setState(unwrap(await operations.getState()));
-      switchScreen(next);
+      switchScreen(next, intent);
     });
   }
   function open(id: string) {
+    const intent = motion.beginIntent();
     void run(async () => {
       session.open(unwrap(await operations.openYear(id)));
-      setSelectedActivityId(null);
+      updateSelectedActivity(null);
       setRecordRequested(false);
+      clearActivityAssociation();
       setState(unwrap(await operations.getState()));
-      switchScreen('overview');
+      switchScreen('overview', intent);
     });
   }
   async function create() {
+    const intent = motion.beginIntent();
     await run(async () => {
       const result = await operations.createYear(Number(year));
       if (!result.ok) {
@@ -345,11 +452,12 @@ export function App({ operations, prototypeOverview: Overview = OverviewContent,
       }
       session.open(result.value);
       setState(unwrap(await operations.getState()));
-      switchScreen('overview');
+      switchScreen('overview', intent);
     });
   }
   async function deleteYear() {
     if (!deletingYear || busy) return;
+    const intent = motion.beginIntent();
     setBusy(true);
     try {
       await flushEdits();
@@ -365,10 +473,11 @@ export function App({ operations, prototypeOverview: Overview = OverviewContent,
           if (refreshed.ok) {
             setState(refreshed.value);
             session.open(refreshed.value.selectedPackage);
-            setSelectedActivityId(null);
-            setRecordRequested(false);
             if (refreshed.value.selectedPackage) await reviewSession.open(refreshed.value.selectedPackage.id);
-            setScreen(refreshed.value.selectedPackage ? 'overview' : 'years');
+            switchScreen(refreshed.value.selectedPackage ? 'overview' : 'years', intent, () => {
+              updateSelectedActivity(null);
+              setRecordRequested(false);
+            });
             setDeletingYear(null);
             setError(result.error.message);
             showFeedback({ title: 'Year deletion needs attention', message: result.error.message, kind: 'error' });
@@ -379,11 +488,12 @@ export function App({ operations, prototypeOverview: Overview = OverviewContent,
       }
       setState(result.value);
       session.open(result.value.selectedPackage);
-      setSelectedActivityId(null);
-      setRecordRequested(false);
       if (result.value.selectedPackage) await reviewSession.open(result.value.selectedPackage.id);
       setDeletingYear(null);
-      setScreen(result.value.selectedPackage ? 'overview' : 'years');
+      switchScreen(result.value.selectedPackage ? 'overview' : 'years', intent, () => {
+        updateSelectedActivity(null);
+        setRecordRequested(false);
+      });
     } catch (failure) {
       const message = failure instanceof Error ? failure.message : String(failure);
       setError(message);
@@ -391,10 +501,26 @@ export function App({ operations, prototypeOverview: Overview = OverviewContent,
     } finally { setBusy(false); }
   }
   function activityEntry(id: string | null) {
+    const intent = motion.beginIntent();
     void run(async () => {
-      setSelectedActivityId(id);
-      setRecordRequested(!id);
-      switchScreen('plan');
+      switchScreen('plan', intent, () => {
+        updateSelectedActivity(id);
+        setRecordRequested(!id);
+      });
+    });
+  }
+  function reportActivityError(message: string) {
+    if (session.getSnapshot().error) return;
+    setError(message);
+    if (!hasInvalidActivityDate()) showFeedback({ title: 'Activity record needs attention', message, kind: 'error' });
+  }
+  function selectPlanActivity(id: string) {
+    const intent = motion.beginIntent();
+    void flushEdits().then(() => {
+      const currentId = selectedActivityIdRef.current ?? pkg?.activities[0]?.id ?? null;
+      motion.transition(intent, 'activity', () => updateSelectedActivity(id), id !== currentId);
+    }).catch(failure => {
+      reportActivityError(failure instanceof Error ? failure.message : String(failure));
     });
   }
   function complete(step: AnnualStep) {
@@ -532,8 +658,23 @@ export function App({ operations, prototypeOverview: Overview = OverviewContent,
   }
   return <div className="map-layout">
     <aside className="map-rail" aria-label="Portfolio navigation">
-      <div className="map-mark"><Sprout size={29} aria-hidden="true" /><span className="sr-only">SWCC</span></div>
-      <nav>{destinations.map(({ screen: destination, name, icon: Icon }) => <button type="button" key={destination} aria-label={name}
+      <div className="map-mark">
+        <Sprout key={sproutSequence} className={sproutAnimating ? 'sprout-response' : undefined} size={29} aria-hidden="true"
+          onAnimationEnd={event => {
+            if (event.animationName === 'swcc-sprout-response') setSproutAnimating(false);
+          }} />
+        <span className="sr-only">SWCC</span>
+      </div>
+      <nav ref={navigationRef}>
+        {railMarker && <span aria-hidden="true" className="rail-selection-marker" data-moving={railMarker.moving}
+          style={{ transform: `translate3d(${railMarker.left}px, ${railMarker.top}px, 0)`,
+            width: `${railMarker.width}px`, height: `${railMarker.height}px` }}
+          onTransitionEnd={event => {
+            if (event.target === event.currentTarget && event.propertyName === 'transform') {
+              setRailMarker(current => current ? { ...current, moving: false } : current);
+            }
+          }} />}
+        {destinations.map(({ screen: destination, name, icon: Icon }) => <button type="button" key={destination} data-screen={destination} aria-label={name}
         aria-current={screen === destination ? 'page' : undefined} disabled={busy} onClick={() => navigate(destination)}>
         <Icon size={22} aria-hidden="true" /><span>{name}</span>
       </button>)}</nav>
@@ -544,7 +685,15 @@ export function App({ operations, prototypeOverview: Overview = OverviewContent,
         {!pkg && <option value="">Choose a year</option>}
         {state?.years.map(row => <option key={row.id} value={row.id}>{row.year}</option>)}
       </select></label>
-      <span className={`save-status ${draft.status === 'Not saved' || review.status === 'Not saved' ? 'warning' : ''}`} role="status" aria-label="Save status">{state ? [draft.status, review.status].includes('Not saved') ? 'Not saved' : [draft.status, review.status].includes('Saving') ? 'Saving' : 'Saved' : error ? 'Unavailable' : 'Opening records'}</span>
+      <span className={`save-status ${saveStatus === 'Not saved' ? 'warning' : ''}`} role="status" aria-label="Save status">
+        <span key={saveResponseSequence} className="save-status-content" data-response={saveResponseActive ? 'true' : undefined}
+          onAnimationEnd={event => {
+            if (event.animationName === 'save-status-response') setSaveResponseActive(false);
+          }}>
+          {saveStatus}
+          {saveStatus === 'Saved' && <Check size={14} aria-hidden="true" />}
+        </span>
+      </span>
     </header>
     <main id="main-content" tabIndex={-1}>
       {state && !state.acknowledgedAt && <section className="storage-note" aria-labelledby="local-storage-title">
@@ -563,6 +712,7 @@ export function App({ operations, prototypeOverview: Overview = OverviewContent,
         {review.status === 'Not saved' && <button disabled={busy} onClick={retryReviewSave}>Retry review save</button>}
       </section>}
       {!state && !error && <p role="status">Opening local records…</p>}
+      <div className="page-transition-scope">
       {screen === 'years' && <><div className="page-heading"><h1>Your year packages</h1><p>One portfolio per calendar year. Earlier years stay open for editing.</p></div>
         <section className="surface">
           <form className="create-year" onSubmit={event => { event.preventDefault(); void create(); }}>
@@ -580,12 +730,17 @@ export function App({ operations, prototypeOverview: Overview = OverviewContent,
           {workflow && <AnnualWorkflowPanel pkg={pkg} workflow={workflow} busy={busy} navigate={navigate}
             declare={openDeclaration} exportForms={() => openExport('forms')} exportPortfolio={() => openExport('portfolio')} />}
           <Overview pkg={pkg} navigate={navigate} openActivity={activityEntry}>
-          <section className="relationship-board surface"><div className="relationship-columns">
+          <section className="relationship-board surface" onPointerLeave={() => setHoveredActivityId(null)}><div className="relationship-columns">
           <div className="overview-column"><h2>Learning goals</h2><div className="goal-nodes">
             {pkg.goals.map(goal => <article className="goal-node" key={goal.id}><span className="goal-reference">{goal.ref}</span><h3>{goal.title}</h3>
               {goal.description && <p>{goal.description}</p>}
               <div className="goal-activity-refs">{pkg.activities.filter(activity => activity.goalIds.includes(goal.id)).map(activity =>
-                <button type="button" key={activity.id} data-activity-id={activity.id} aria-label={`Open ${activity.ref} from ${goal.ref}`} onClick={() => activityEntry(activity.id)}>{activity.ref}</button>)}</div>
+                <button type="button" key={activity.id} data-activity-id={activity.id} aria-label={`Open ${activity.ref} from ${goal.ref}`}
+                  onPointerEnter={() => setHoveredActivityId(activity.id)}
+                  onPointerLeave={() => setHoveredActivityId(current => current === activity.id ? null : current)}
+                  onFocus={() => setFocusedActivityId(activity.id)}
+                  onBlur={() => setFocusedActivityId(current => current === activity.id ? null : current)}
+                  onClick={() => activityEntry(activity.id)}>{activity.ref}</button>)}</div>
               {!pkg.activities.some(activity => activity.goalIds.includes(goal.id)) && <small>No supporting activity yet</small>}
             </article>)}
             {!pkg.goals.length && <p>No goals yet. Add one from self-assessment or development plan.</p>}
@@ -595,7 +750,8 @@ export function App({ operations, prototypeOverview: Overview = OverviewContent,
             </button>
           </div>
           <div className="overview-column"><h2>Activities</h2><div className="activity-nodes">{pkg.activities.map(activity => <button type="button" key={activity.id}
-            className="activity-node" data-activity-id={activity.id} aria-label={`Open activity ${activity.ref}: ${activity.title}`} onClick={() => activityEntry(activity.id)}>
+            className={`activity-node${linkedActivityId === activity.id ? ' associated' : ''}`} data-activity-id={activity.id}
+            aria-label={`Open activity ${activity.ref}: ${activity.title}`} onClick={() => activityEntry(activity.id)}>
             <div><span className="goal-reference">{activity.ref}</span><span className="activity-state">{activity.status}</span></div><h3>{activity.title}</h3>
             <span className="goal-link-chips">{activity.goalIds.length ? pkg.goals.filter(goal => activity.goalIds.includes(goal.id)).map(goal => <span key={goal.id}>{goal.ref}</span>)
               : <small>No linked goal · supplementary</small>}</span>
@@ -606,19 +762,15 @@ export function App({ operations, prototypeOverview: Overview = OverviewContent,
           </div></>}
       {screen === 'assessment' && pkg && <AssessmentScreen pkg={pkg} session={session} operations={operations}
         flushEdits={flushEdits}
-        complete={() => complete('assessment')} busy={busy} />}
+        complete={() => complete('assessment')} busy={busy} motionDisabled={motion.disabled} />}
       {screen === 'plan' && pkg && <PlanScreen key={pkg.id} pkg={pkg} session={session} operations={operations}
         flushEdits={flushEdits}
-        prototypeSelectActivity={prototypeTransition ? (commit, animate) => prototypeTransition('activity', commit, animate) : undefined}
-        selectedId={selectedActivityId} select={setSelectedActivityId} recordRequested={recordRequested} clearRecordRequest={() => setRecordRequested(false)}
+        selectedId={selectedActivityId} select={updateSelectedActivity} onSelectActivity={selectPlanActivity}
+        recordRequested={recordRequested} clearRecordRequest={() => setRecordRequested(false)}
         evidence={packageEvidence} evidenceError={evidenceErrors[pkg.id] ?? ''}
-        evidenceLoaded={Object.hasOwn(evidenceByPackage, pkg.id)} refreshEvidence={() => refreshEvidence(pkg.id)} reportError={message => {
-          if (!session.getSnapshot().error) {
-            setError(message);
-            if (!hasInvalidActivityDate()) showFeedback({ title: 'Activity record needs attention', message, kind: 'error' });
-          }
-        }}
-        complete={() => complete('plan')} busy={busy} />}
+        evidenceLoaded={Object.hasOwn(evidenceByPackage, pkg.id)} refreshEvidence={() => refreshEvidence(pkg.id)}
+        reportError={reportActivityError}
+        complete={() => complete('plan')} busy={busy} motionDisabled={motion.disabled} />}
       {screen === 'review' && pkg && workflow && <Review packageId={pkg.id} year={pkg.year} operations={operations} session={reviewSession}
         feedback={workflow.steps.review} complete={() => complete('review')} busy={busy} />}
       {screen === 'backup' && state && <BackupScreen state={state} busy={busy} running={backupRunning} progress={backupProgress}
@@ -630,6 +782,7 @@ export function App({ operations, prototypeOverview: Overview = OverviewContent,
           }
         })}
         inspect={inspectBackup} inspecting={restoreRunning} replacing={restoreReplacing} restoreProgress={restoreProgress} cancelInspection={() => void cancelInspection()} />}
+      </div>
       {restorePreview && <RestorePreviewDialog preview={restorePreview} busy={busy} replacing={restoreReplacing} progress={restoreProgress}
         monitor={restoreMonitor}
         replace={replaceBackup} cancel={() => void cancelInspection()} />}

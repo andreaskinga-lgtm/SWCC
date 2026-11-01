@@ -422,35 +422,44 @@ function CompletionCalendar({ id, value, month, onMonthChange, onSelect, onClose
   </div>;
 }
 
-export function PlanScreen({ pkg, session, operations, selectedId, select, recordRequested, clearRecordRequest, evidence, evidenceError, evidenceLoaded, refreshEvidence, reportError, complete, busy, flushEdits, prototypeSelectActivity }: {
+export function PlanScreen({ pkg, session, operations, selectedId, select, onSelectActivity, recordRequested, clearRecordRequest, evidence, evidenceError, evidenceLoaded, refreshEvidence, reportError, complete, busy, flushEdits, motionDisabled }: {
   pkg: YearPackage; session: DraftSession; operations: ApplicationOperations; selectedId: string | null;
-  select: (id: string | null) => void; recordRequested: boolean; clearRecordRequest: () => void;
+  select: (id: string | null) => void; onSelectActivity: (id: string) => void;
+  recordRequested: boolean; clearRecordRequest: () => void;
   evidence: EvidenceAttachment[]; evidenceError: string; evidenceLoaded: boolean; refreshEvidence: () => Promise<EvidenceAttachment[]>;
   complete: () => void; busy: boolean;
   reportError: (message: string) => void;
   flushEdits: () => Promise<void>;
-  prototypeSelectActivity?: (commit: () => void, animate: boolean) => void;
+  motionDisabled: boolean;
 }) {
   const [creating, setCreating] = useState(recordRequested);
   const [creatingGoal, setCreatingGoal] = useState<{ activityId?: string } | null>(null);
   const [deletingGoal, setDeletingGoal] = useState<Goal | null>(null);
+  const [revealingActivityId, setRevealingActivityId] = useState<string | null>(null);
+  const [revealingGoalId, setRevealingGoalId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!motionDisabled) return;
+    setRevealingActivityId(null);
+    setRevealingGoalId(null);
+  }, [motionDisabled]);
   const activity = pkg.activities.find(item => item.id === selectedId) ?? pkg.activities[0];
-  async function selectActivity(id: string) {
-    try {
-      await flushEdits();
-      if (prototypeSelectActivity) prototypeSelectActivity(() => select(id), id !== activity?.id);
-      else select(id);
-    }
-    catch (failure) { reportError(failure instanceof Error ? failure.message : String(failure)); }
-  }
+  function selectActivity(id: string) { onSelectActivity(id); }
   function closeCreate() { setCreating(false); clearRecordRequest(); }
-  function created(id: string) { select(id); closeCreate(); }
+  function created(id: string) {
+    if (!motionDisabled) setRevealingActivityId(id);
+    select(id);
+    closeCreate();
+  }
   return <>
     <div className="page-heading map-heading"><h1>Development plan</h1>
       <button type="button" onClick={() => setCreating(true)}>Add activity</button></div>
     <section className="goal-connection-strip" aria-labelledby="plan-goals-title">
       <div className="section-heading"><h2 id="plan-goals-title">Goal connections</h2><button type="button" className="text-button" onClick={() => setCreatingGoal({})}>Add goal</button></div>
-      <div className="plan-goal-list">{pkg.goals.map(goal => <article key={goal.id} className="plan-goal" aria-label={`${goal.ref} ${goal.title}`}>
+      <div className="plan-goal-list">{pkg.goals.map(goal => <article key={goal.id}
+        className={`plan-goal${revealingGoalId === goal.id ? ' record-reveal' : ''}`} aria-label={`${goal.ref} ${goal.title}`}
+        onAnimationEnd={event => {
+          if (event.target === event.currentTarget && event.animationName === 'swcc-record-reveal') setRevealingGoalId(null);
+        }}>
         <span className="goal-reference">{goal.ref}</span><div><h3>{goal.title}</h3>{goal.description && <p>{goal.description}</p>}
           <div className="goal-activity-refs">{pkg.activities.filter(item => item.goalIds.includes(goal.id)).map(item => <button type="button" key={item.id}
             className={activity?.id === item.id ? 'chosen' : 'secondary'} aria-label={`Edit ${item.ref} from ${goal.ref}`} onClick={() => void selectActivity(item.id)}>{item.ref}</button>)}</div></div>
@@ -461,7 +470,10 @@ export function PlanScreen({ pkg, session, operations, selectedId, select, recor
     </section>
     <div className="map-plan-body"><aside><h2>Activity records</h2><div className="activity-index">
       {pkg.activities.map(item => <button type="button" key={item.id} aria-label={`Select activity ${item.ref}`} aria-pressed={activity?.id === item.id}
-        className={activity?.id === item.id ? 'selected' : ''} onClick={() => void selectActivity(item.id)}>
+        className={`${activity?.id === item.id ? 'selected' : ''}${revealingActivityId === item.id ? ' record-reveal' : ''}`}
+        onAnimationEnd={event => {
+          if (event.target === event.currentTarget && event.animationName === 'swcc-record-reveal') setRevealingActivityId(null);
+        }} onClick={() => void selectActivity(item.id)}>
         <span className="goal-reference">{item.ref}</span><strong>{item.title}</strong><small>{item.status}</small>
         <small>{item.goalIds.length ? pkg.goals.filter(goal => item.goalIds.includes(goal.id)).map(goal => goal.ref).join(', ') : 'No linked goal · supplementary'}</small>
       </button>)}</div>
@@ -475,7 +487,9 @@ export function PlanScreen({ pkg, session, operations, selectedId, select, recor
         : <section className="surface empty-editor"><h2>No activities yet</h2><p>Select Add activity to record learning and attach evidence.</p></section>}
     </div>
     {creating && <ActivityCreateDialog pkg={pkg} session={session} flushEdits={flushEdits} onClose={closeCreate} onCreated={created} />}
-    {creatingGoal && <GoalCreateDialog source="plan" session={session} flushEdits={flushEdits} activityId={creatingGoal.activityId} onClose={() => setCreatingGoal(null)} />}
+    {creatingGoal && <GoalCreateDialog source="plan" session={session} flushEdits={flushEdits}
+      activityId={creatingGoal.activityId} onClose={() => setCreatingGoal(null)}
+      onCreated={id => { if (!motionDisabled) setRevealingGoalId(id); }} />}
     {deletingGoal && <GoalDeleteDialog goal={deletingGoal} session={session} operations={operations} flushEdits={flushEdits} onClose={() => setDeletingGoal(null)} />}
   </>;
 }
