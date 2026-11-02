@@ -123,6 +123,7 @@ async function heldTransitionCounts() {
 async function addActivity(title: string) {
   await page.getByRole('button', { name: 'Add activity', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Record an activity' });
+  await expect(dialog.getByLabel('Activity title')).toHaveAttribute('spellcheck', 'true');
   await dialog.getByLabel('Activity title').fill(title);
   await dialog.getByRole('button', { name: 'Save activity', exact: true }).click();
   await expect(dialog).toHaveCount(0);
@@ -156,10 +157,12 @@ test('C learning map edits one shared activity from either goal, keeps supplemen
   await navigate('Development plan');
   await page.getByRole('button', { name: 'Add activity', exact: true }).click();
   const create = page.getByRole('dialog', { name: 'Record an activity' });
+  await expect(create.getByLabel('Activity title')).toHaveAttribute('spellcheck', 'true');
   await create.getByLabel('Activity title').fill('Shared consultation');
   await create.getByRole('button', { name: 'Save activity', exact: true }).click();
   let editor = page.getByRole('article', { name: 'Activity editor A1' });
   await expect(editor).toBeVisible();
+  await expect(editor.getByLabel('Activity title')).toHaveAttribute('spellcheck', 'true');
   await expect(editor.getByLabel('Completion date')).toHaveCount(0);
   await editor.getByRole('button', { name: 'Create and link a goal', exact: true }).click();
   const goal = page.getByRole('dialog', { name: 'Create a learning goal' });

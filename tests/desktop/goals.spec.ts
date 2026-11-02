@@ -110,17 +110,20 @@ test('assessment readiness and shared goals persist across both views and restar
   await page.getByLabel('Learning needs and interests').fill('I want to deepen reflective supervision.');
   await page.getByRole('button', { name: 'Add goal', exact: true }).click();
   const assessmentDialog = page.getByRole('dialog', { name: 'Add a learning goal' });
+  await expect(assessmentDialog.getByLabel('Goal title')).toHaveAttribute('spellcheck', 'true');
   await assessmentDialog.getByLabel('Goal title').fill('Build reflective supervision practice');
   await assessmentDialog.getByLabel('Description (optional)').fill('Seek structured consultation after complex cases.');
   await assessmentDialog.getByRole('button', { name: 'Add goal', exact: true }).click();
   await expect(status).toHaveText('Ready');
   await expect(page.getByLabel('Goal title G1')).toHaveValue('Build reflective supervision practice');
+  await expect(page.getByLabel('Goal title G1')).toHaveAttribute('spellcheck', 'true');
 
   await page.getByRole('navigation').getByRole('button', { name: 'Development plan', exact: true }).click();
   const planDate = await page.getByLabel('Plan date').inputValue();
   await expect(page.getByRole('article', { name: /G1 Build reflective supervision practice/ })).toBeVisible();
   await page.getByRole('button', { name: 'Add goal', exact: true }).click();
   const planDialog = page.getByRole('dialog', { name: 'Create a learning goal' });
+  await expect(planDialog.getByLabel('Goal title')).toHaveAttribute('spellcheck', 'true');
   await planDialog.getByLabel('Goal title').fill('Explore trauma-informed approaches');
   await planDialog.getByRole('button', { name: 'Create goal', exact: true }).click();
   await expect(page.getByRole('article', { name: /G2 Explore trauma-informed approaches/ })).toBeVisible();

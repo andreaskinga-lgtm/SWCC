@@ -50,7 +50,7 @@ function GoalEditor({ goal, session, onDelete, revealed, onRevealEnd }: {
     <div className="goal-editor-top"><span className="goal-reference">{goal.ref}</span>
       <button type="button" className="icon-button" aria-label={`Delete goal ${goal.ref}`} onClick={() => onDelete(goal)}><Trash2 size={16} /></button>
     </div>
-    <label className="field"><span>Goal title</span><input aria-label={`Goal title ${goal.ref}`} value={goal.title}
+    <label className="field"><span>Goal title</span><input spellCheck aria-label={`Goal title ${goal.ref}`} value={goal.title}
       onChange={event => session.editGoal(goal.id, { title: event.target.value })} /></label>
     {!goal.title.trim() && <small className="goal-validation">A learning-goal title is required before this edit can be saved.</small>}
     <label className="field"><span>Description <small>Optional</small></span><textarea aria-label={`Goal description ${goal.ref}`} rows={2} value={goal.description}
@@ -111,7 +111,7 @@ export function GoalCreateDialog({ source, session, onClose, activityId, flushEd
   return <Dialog title={titleText} onClose={close}>
     <p className="goal-dialog-copy">Goals appear in both your self-assessment and development plan.</p>
     <form onSubmit={event => void submit(event)}>
-      <label className="field"><span>Goal title</span><input autoFocus aria-label="Goal title" value={pending ? state.pendingGoalCreation?.title ?? title : title}
+      <label className="field"><span>Goal title</span><input autoFocus spellCheck aria-label="Goal title" value={pending ? state.pendingGoalCreation?.title ?? title : title}
         disabled={pending} onChange={event => setTitle(event.target.value)} /></label>
       <label className="field"><span>Description <small>(optional)</small></span><textarea aria-label="Description (optional)" rows={3}
         value={pending ? state.pendingGoalCreation?.description ?? description : description}
