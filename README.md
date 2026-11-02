@@ -6,7 +6,7 @@ The offline Electron app includes durable annual assessment drafts, independent 
 
 Use npm and a compatible Node release (22.12+, or 24+). Dependencies are pinned in `package-lock.json`.
 
-Current delivery is **development-first**: run and walk through the functional app before deployment. Installer builds, installed-target acceptance and cross-platform transfer checks remain deferred; they are not required to run the app in development.
+Development does not require installer builds. The [Release workflow](.github/workflows/release.yml) builds Windows and macOS downloads; see [Publishing releases](#publishing-releases). Installed-target acceptance and cross-platform transfer checks are still separate from automated packaged-app smoke tests.
 
 ```sh
 npm ci
@@ -18,12 +18,56 @@ npm run test:desktop # production file:// renderer in real Electron, no Vite ser
 npm run build
 npm start            # production assets; build first
 npm run package:dir
-npm run package:mac  # unsigned arm64 DMG on macOS
+npm run package:mac  # DMG for the current Mac architecture; signing credentials below
+npm run package:win  # unsigned x64 NSIS installer on Windows
 ```
 
 `postinstall` rebuilds better-sqlite3 for the locked Electron version. `npm test` runs Vitest under Electron's Node runtime, using the **same SQLite native ABI as the application**. Do not alternate Node/Electron native rebuilds. Desktop tests launch actual windows; a usable graphical macOS/Windows session is required. Test datasets and failure fixtures are isolated in ignored `.work/`, not system temporary directories.
 
 For isolated manual checks, `npm run dev -- --user-data-dir="/absolute/path"` or `npm start -- --user-data-dir="/absolute/path"` chooses a separate storage root. This is a launch option, never an operation exposed to renderer content.
+
+## Publishing releases
+
+Commit and push `.github/workflows/release.yml` and the packaging changes to `main` first. GitHub Actions must be enabled in the repository's **Settings → Actions → General**. Only the release job uses GitHub's automatic token with `contents: write`; no personal access token is needed by the workflow.
+
+Before building releases, configure these **SWCC repository secrets** at **Settings → Secrets and variables → Actions → New repository secret**, using the same names as POTool. GitHub cannot reveal or copy another repository's secret values; reuse the original certificate/password from your secure storage or export it again.
+
+| Secret | Value |
+| --- | --- |
+| `CSC_LINK` | Base64-encoded `.p12` export of your **Developer ID Application** certificate, including its private key |
+| `CSC_KEY_PASSWORD` | Password protecting that `.p12` export |
+| `APPLE_ID` | Apple Account login used for the developer membership |
+| `APPLE_APP_SPECIFIC_PASSWORD` | App-specific password generated at [account.apple.com](https://account.apple.com), not your normal account password |
+| `APPLE_TEAM_ID` | Team ID shown in your [Apple Developer account](https://developer.apple.com/account/) membership details |
+
+The Developer ID Application certificate can sign both apps; SWCC keeps its own stable app ID. In Keychain Access, find the certificate under **My Certificates**, expand it to check that its private key is present, then export it as a password-protected `.p12`. Encode the export with `base64 -i "/absolute/path/certificate.p12"` and paste its output into `CSC_LINK`. Do not commit the certificate, passwords or base64 data, or paste them into issues/chat. Use a separate app-specific password labeled SWCC so it can be revoked independently of POTool.
+
+For a build without publishing, open **Actions → Release → Run workflow** on `main`. The workflow checks types, lint and real-SQLite operations, then builds on native Windows, Intel Mac and Apple Silicon Mac runners. Missing macOS credentials fail the build instead of silently producing unsigned downloads. macOS builds use hardened runtime, a Developer ID signature and Apple notarization; signature, stapled ticket and Gatekeeper assessments must pass. Each packaged executable must also pass offline creation/restart, PDF review, forms export and full-backup smoke tests before its installer is uploaded. Download the three `installer-*` artifacts from the run; these expire after 14 days. Failure traces appear in `diagnostics-*` artifacts.
+
+To prepare the first public version, after merging this setup:
+
+```sh
+git switch main
+git pull --ff-only
+git tag -a v0.1.0 -m "SWCC 0.1.0"
+git push origin v0.1.0
+```
+
+For subsequent versions, run `npm version patch --no-git-tag-version` (or `minor` / `major`), commit and push both `package.json` and `package-lock.json`, then create and push the matching `v<version>` tag. The workflow rejects mismatched versions/tags. Tags containing a prerelease version, such as `v0.2.0-beta.1`, create prerelease drafts.
+
+A successful tag build creates a **draft**, not an immediately public release, with all three installers, `SHA256SUMS.txt`, installation notes and generated change notes. Open **Releases**, review the draft, install and check each target you intend to support, then select **Publish release**. Users can download without Node/npm from [the latest published release](https://github.com/andreaskinga-lgtm/SWCC/releases/latest); prereleases are listed on [the releases page](https://github.com/andreaskinga-lgtm/SWCC/releases).
+
+| Download | Target |
+| --- | --- |
+| `SWCC-<version>-win-x64.exe` | Windows 11, x64, per-user NSIS installer |
+| `SWCC-<version>-mac-arm64.dmg` | Apple Silicon Mac, macOS 14+ |
+| `SWCC-<version>-mac-x64.dmg` | Intel Mac, macOS 14+ |
+
+If a job fails, fix the reported cause and rerun it, or release a new version for code changes. An existing release is never overwritten: if creation failed after leaving an incomplete draft, delete only that draft before rerunning the release job. Keep published tags immutable. Checksum verification uses `shasum -a 256 <download>` on macOS or `Get-FileHash <download> -Algorithm SHA256` in Windows PowerShell and the corresponding value in `SHA256SUMS.txt`.
+
+macOS release apps are **Developer ID signed and Apple-notarized**, not Mac App Store submissions. The entitlement file grants Electron JIT support without the legacy unsigned-executable-memory permission. The Apple Developer account does not sign Windows applications: Windows downloads remain **unsigned** and may show SmartScreen warnings or managed-policy blocks. Windows publisher signing requires a separate trusted code-signing certificate or signing service.
+
+Updates are manual replacement installs, not automatic updates. Keep `org.swcc.desktop` and the `SWCC` storage directory unchanged, and create a full-app backup before upgrading. Packaged smoke tests do not certify the quarantined-download flow, installation/uninstallation, older supported macOS versions, cross-platform restore or installer upgrades.
 
 ## Storage and upgrades
 
@@ -275,7 +319,7 @@ Treat these as data, never executable content or editable dataset files. The sup
 
 macOS: open the DMG and copy SWCC to Applications. Launch only a trusted build. If Gatekeeper blocks an unsigned app, use **System Settings → Privacy & Security → Open Anyway** when offered, then confirm. Managed policy may prohibit that override. Do not disable Gatekeeper globally.
 
-Windows: the planned NSIS installer is per-user. SmartScreen may offer **More info → Run anyway** for trusted unsigned builds, but Smart App Control or managed policy can block installation/launch without that option. Windows installed behavior has **not** been exercised here.
+Windows: the NSIS installer is per-user. SmartScreen may offer **More info → Run anyway** for trusted unsigned builds, but Smart App Control or managed policy can block installation/launch without that option. Windows installed behavior has **not** been exercised here.
 
 Initial foundation verification on **macOS 26.6.2 / arm64**, October 31, 2026:
 
