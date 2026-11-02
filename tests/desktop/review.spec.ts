@@ -97,15 +97,16 @@ test('local real PDF display checks only visited pages; jumps, years and restart
   page.on('request', request => { if (/^https?:/.test(request.url())) remoteRequests.push(request.url()); });
   await expect(page.getByRole('img', { name: 'Supplied Code of Ethics, physical page 1', exact: true })).toBeVisible();
   expect(page.workers().some(worker => /^file:.*pdf\.worker/.test(worker.url()))).toBe(true);
-  expect(await page.locator('canvas').evaluate(element => {
+  await expect.poll(() => page.locator('canvas').evaluate(element => {
     const canvas = element as HTMLCanvasElement;
+    if (canvas.hidden || !canvas.width || !canvas.height) return 0;
     const pixels = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data;
     let dark = 0;
     for (let index = 0; index < pixels.length; index += 4) {
-      if (pixels[index] < 100 && pixels[index + 1] < 100 && pixels[index + 2] < 100) dark++;
+      if (pixels[index + 3] > 0 && pixels[index] < 100 && pixels[index + 1] < 100 && pixels[index + 2] < 100) dark++;
     }
-    return dark;
-  })).toBeGreaterThan(1000);
+    return dark / (pixels.length / 4);
+  })).toBeGreaterThan(0.001);
   await goTo(11);
   await expect.poll(async () => (await review()).visitedPages).toContain(11);
   expect((await review()).readiness.sections.find(section => section.id === 'principle-ii')?.checked).toBe(false);
