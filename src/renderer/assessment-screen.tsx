@@ -6,6 +6,7 @@ import { ANNUAL_STANDARDS, dateWarning } from '../shared/application.js';
 import { evaluateAssessmentReadiness } from '../shared/assessment.js';
 import { currentCompletion } from '../shared/workflow.js';
 import { DraftSession } from './draft-session.js';
+import { useDialogBackdropDismiss } from './dialog-dismissal.js';
 import { isRecordRevealAnimationEnd } from './record-reveal.js';
 import './assessment.css';
 
@@ -27,6 +28,7 @@ export function Dialog({ title, children, onClose, className = 'goal-dialog' }: 
   title: string; children: ReactNode; onClose: () => void; className?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const backdropDismiss = useDialogBackdropDismiss(onClose);
   useEffect(() => {
     const dialog = ref.current;
     if (dialog && !dialog.open) dialog.showModal();
@@ -34,7 +36,7 @@ export function Dialog({ title, children, onClose, className = 'goal-dialog' }: 
   }, []);
   return <dialog ref={ref} className={className} aria-label={title}
     onCancel={event => { event.preventDefault(); onClose(); }}
-    onClick={event => { if (event.target === ref.current) onClose(); }}>
+    {...backdropDismiss}>
     <div className="goal-dialog-header"><h2>{title}</h2><button type="button" className="icon-button" aria-label="Close dialog" onClick={onClose}><X size={19} /></button></div>
     {children}
   </dialog>;
