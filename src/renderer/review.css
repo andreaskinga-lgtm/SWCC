@@ -19,7 +19,7 @@
 .reader-icon { display: flex; padding: 6px; border: 0; background: white; color: var(--accent); }
 .page-input { display: flex; align-items: center; gap: 6px; }
 .page-input input { width: 52px; padding: 5px; border: 1px solid #bac6a7; border-radius: 4px; color: #303b25; background: white; }
-.pdf-viewport { height: min(72vh, 830px); min-height: 420px; overflow: auto; padding: 24px; background: #e3e5e8; display: flex; align-items: flex-start; flex-direction: column; }
+.pdf-viewport { height: min(72vh, 830px); min-height: 420px; overflow: auto; scrollbar-gutter: stable; padding: 24px; background: #e3e5e8; display: flex; align-items: flex-start; flex-direction: column; }
 .pdf-viewport canvas { background: white; box-shadow: 0 3px 14px #23304418; margin: 0 auto; flex-shrink: 0; }
 .reader-message { font-size: 13px; color: #4e5867; margin: 10px auto; }
 .reader-note { padding: 12px 17px; font-size: 11px; line-height: 1.6; color: var(--muted); margin: 0; }
