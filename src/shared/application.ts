@@ -1,8 +1,6 @@
 export const SOURCE_SET_ID = 'swcc-supplied-2018-2026-v1';
 export const SOURCE_DOCUMENTS = [
   { id: 'ethics-2018', file: 'ethics-2018.pdf', title: 'Code of Ethics and Standards of Practice — Second Edition, amended September 2018' },
-  { id: 'step-one', file: 'step-one.pdf', title: 'Step One review checklist' },
-  { id: 'assessment-2026', file: 'assessment-2026.pdf', title: '2026 assessment tool — references Third Edition / 2023' },
 ] as const;
 
 export const ANNUAL_STANDARDS = [

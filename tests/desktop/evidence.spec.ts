@@ -51,7 +51,7 @@ test.afterEach(async () => {
 test('a PDF import is managed independently from its source and previews offline in SWCC', async () => {
   const source = resolve(root, 'certificate.pdf');
   const moved = resolve(root, 'moved-certificate.pdf');
-  copyFileSync(resolve('Step One SWCC.pdf'), source);
+  copyFileSync(resolve('resources/templates/annual-forms.pdf'), source);
   await chooseFile(source);
 
   const editor = page.getByRole('article', { name: 'Activity editor A1' });

@@ -51,17 +51,41 @@
   "build": {
     "appId": "org.swcc.desktop",
     "productName": "SWCC",
-    "directories": { "output": "release" },
-    "files": ["dist/**/*", "package.json"],
-    "extraResources": [
-      { "from": "resources/sources/Code-of-Ethics-and-Standards-of-Practice-September-7-2018.pdf", "to": "sources/ethics-2018.pdf" },
-      { "from": "Step One SWCC.pdf", "to": "sources/step-one.pdf" },
-      { "from": "OCSWSSW-CCP-Assess-Tool-2026-English.pdf", "to": "sources/assessment-2026.pdf" },
-      { "from": "resources/fonts", "to": "fonts" }
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
     ],
-    "asarUnpack": ["node_modules/better-sqlite3/**/*"],
-    "mac": { "target": "dmg", "category": "public.app-category.productivity", "minimumSystemVersion": "14.0", "identity": null },
-    "win": { "target": "nsis" },
-    "nsis": { "perMachine": false }
+    "extraResources": [
+      {
+        "from": "resources/sources/Code-of-Ethics-and-Standards-of-Practice-September-7-2018.pdf",
+        "to": "sources/ethics-2018.pdf"
+      },
+      {
+        "from": "resources/templates/annual-forms.pdf",
+        "to": "templates/annual-forms.pdf"
+      },
+      {
+        "from": "resources/fonts",
+        "to": "fonts"
+      }
+    ],
+    "asarUnpack": [
+      "node_modules/better-sqlite3/**/*"
+    ],
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.productivity",
+      "minimumSystemVersion": "14.0",
+      "identity": null
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "perMachine": false
+    }
   }
 }

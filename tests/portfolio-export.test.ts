@@ -22,8 +22,7 @@ function storage() {
 }
 const templates = {
   chooseDestination: async () => null,
-  readChecklist: () => readFileSync('Step One SWCC.pdf'),
-  readAssessment: () => readFileSync('OCSWSSW-CCP-Assess-Tool-2026-English.pdf'),
+  readTemplate: () => readFileSync('resources/templates/annual-forms.pdf'),
   readFont: () => readFileSync('resources/fonts/NotoSans-Regular.ttf'),
 };
 afterEach(() => {

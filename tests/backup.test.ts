@@ -151,8 +151,7 @@ test('backup drains an admitted real forms export and keeps annual PDF output se
   const selected = new Promise<string>(resolveSelection => { release = resolveSelection; });
   const app = openApplication(root, {}, undefined, undefined, {
     chooseDestination: () => selected,
-    readChecklist: () => readFileSync('Step One SWCC.pdf'),
-    readAssessment: () => readFileSync('OCSWSSW-CCP-Assess-Tool-2026-English.pdf'),
+    readTemplate: () => readFileSync('resources/templates/annual-forms.pdf'),
     readFont: () => readFileSync('resources/fonts/NotoSans-Regular.ttf'),
   }, { chooseDestination: async () => backupDestination });
   apps.push(app);

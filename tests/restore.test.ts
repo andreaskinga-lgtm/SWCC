@@ -71,8 +71,7 @@ async function fixture() {
   const portfolioSystem: PortfolioSystem = { chooseDestination: async () => resolve(output, 'annual-portfolio.zip') };
   const app = openApplication(root, {}, { openExternal: async () => {}, readDocument: () => readFileSync('resources/sources/Code-of-Ethics-and-Standards-of-Practice-September-7-2018.pdf') }, evidenceSystem, {
     chooseDestination: async () => resolve(output, 'annual.pdf'),
-    readChecklist: () => readFileSync('Step One SWCC.pdf'),
-    readAssessment: () => readFileSync('OCSWSSW-CCP-Assess-Tool-2026-English.pdf'),
+    readTemplate: () => readFileSync('resources/templates/annual-forms.pdf'),
     readFont: () => readFileSync('resources/fonts/NotoSans-Regular.ttf'),
   }, { chooseDestination: async () => archive }, system, portfolioSystem);
   apps.push(app);

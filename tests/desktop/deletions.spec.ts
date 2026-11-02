@@ -107,7 +107,7 @@ test('cancelling goal, activity, and year confirmations leaves each record intac
 
 test('goal deletion flushes activity edits, preserves evidence, and leaves the activity supplementary', async () => {
   const evidenceFile = resolve(root, 'shared.pdf');
-  writeFileSync(evidenceFile, readFileSync(resolve('Step One SWCC.pdf')));
+  writeFileSync(evidenceFile, readFileSync(resolve('resources/templates/annual-forms.pdf')));
   await addGoal('Goal one');
   await addGoal('Goal two');
   await addActivity('One shared activity', ['G1', 'G2']);

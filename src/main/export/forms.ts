@@ -13,8 +13,7 @@ import { exportDestination } from './destination.js';
 
 export interface FormsSystem {
   chooseDestination(selection: { defaultName: string }): Promise<string | null>;
-  readChecklist(): Uint8Array;
-  readAssessment(): Uint8Array;
+  readTemplate(): Uint8Array;
   readFont(): Uint8Array;
 }
 export interface AnnualFormsSnapshot {
@@ -115,10 +114,10 @@ export async function generateAnnualForms(snapshot: AnnualFormsSnapshot, system:
 
 async function generateForms(snapshot: AnnualFormsSnapshot, system: FormsSystem): Promise<{ bytes: Uint8Array; pageCount: number }> {
   const output = await PDFDocument.create();
-  const checklist = await PDFDocument.load(system.readChecklist());
-  const [checklistPage] = await output.copyPages(checklist, [0]);
+  const template = system.readTemplate();
+  const sourceTemplate = await PDFDocument.load(template);
+  const [checklistPage] = await output.copyPages(sourceTemplate, [0]);
   output.addPage(checklistPage);
-  const template = system.readAssessment();
   const fontBytes = system.readFont();
   output.registerFontkit(fontkit);
   const checklistFont = await output.embedFont(fontBytes, { subset: true });
@@ -151,10 +150,10 @@ async function generateForms(snapshot: AnnualFormsSnapshot, system: FormsSystem)
     ],
   }));
   const layouts: { page: number; kind: string; dateField: string; date: string; fields: Record<string, TextRecord[]> }[] = [
-    { page: 7, kind: 'SAT', dateField: 'Date44_af_date', date: pkg.assessmentDate,
+    { page: 1, kind: 'SAT', dateField: 'Date44_af_date', date: pkg.assessmentDate,
       fields: { Text35: [{ text: pkg.strengths }], Text36: [{ text: pkg.peerFeedback }],
         Text37: [{ text: pkg.learningNeeds }], Text38: goals } },
-    { page: 10, kind: 'PDP', dateField: 'Date43_af_date', date: pkg.planDate,
+    { page: 2, kind: 'PDP', dateField: 'Date43_af_date', date: pkg.planDate,
       fields: { Text39: goals, ...Object.fromEntries(['Text40', 'Text41', 'Text42']
         .map((name, index) => [name, activities.map(activity => ({ text: activity.texts[index] }))])) } },
   ];
@@ -182,7 +181,7 @@ async function generateForms(snapshot: AnnualFormsSnapshot, system: FormsSystem)
       const form = source.getForm();
       ANNUAL_STANDARDS.forEach((standard, standardIndex) => {
         const field = form.getCheckBox(`Check Box ${standardIndex + 14}`);
-        if (layout.page === 7 && !index && pkg.annualStandards.includes(standard.id)) field.check();
+        if (layout.kind === 'SAT' && !index && pkg.annualStandards.includes(standard.id)) field.check();
         else field.uncheck();
       });
       form.updateFieldAppearances(font);

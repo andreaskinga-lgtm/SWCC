@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { createCanvas } from '@napi-rs/canvas';
+import { PDFDict, PDFDocument, PDFName } from 'pdf-lib';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { REVIEW_SECTIONS } from '../src/shared/review.js';
 import { openApplication } from '../src/main/data/application.js';
@@ -24,8 +25,7 @@ function storage() {
 function formsSystem(destination: string) {
   return {
     chooseDestination: async () => destination,
-    readChecklist: () => readFileSync('Step One SWCC.pdf'),
-    readAssessment: () => readFileSync('OCSWSSW-CCP-Assess-Tool-2026-English.pdf'),
+    readTemplate: () => readFileSync('resources/templates/annual-forms.pdf'),
     readFont: () => readFileSync('resources/fonts/NotoSans-Regular.ttf'),
   };
 }
@@ -33,7 +33,7 @@ test('forms destinations cannot overwrite managed evidence, including symbolic-l
   const root = storage();
   const data = resolve(root, 'storage');
   const source = resolve(root, 'certificate.pdf');
-  const original = readFileSync('Step One SWCC.pdf');
+  const original = readFileSync('resources/templates/annual-forms.pdf');
   writeFileSync(source, original);
   let destination = resolve(root, 'annual.pdf');
   const app = openApplication(data, {}, undefined, { chooseFile: async () => source }, {
@@ -77,12 +77,41 @@ async function render(pdf: PDFDocumentProxy, number: number) {
   return canvas;
 }
 
-async function sourceRender(number: number) {
-  const source = await getDocument({ data: new Uint8Array(readFileSync('OCSWSSW-CCP-Assess-Tool-2026-English.pdf')),
+async function templateRender(number: number) {
+  const source = await getDocument({ data: new Uint8Array(readFileSync('resources/templates/annual-forms.pdf')),
     useSystemFonts: true }).promise;
   try { return await render(source, number); }
   finally { await source.destroy(); }
 }
+
+test('export-only template contains exactly the three required pages and their usable fields without unused pages or scripting', async () => {
+  const bytes = readFileSync('resources/templates/annual-forms.pdf');
+  const document = await PDFDocument.load(bytes);
+  const pages = document.getPages();
+  expect(pages).toHaveLength(3);
+  const pageObjects = document.context.enumerateIndirectObjects().filter(([, object]) =>
+    object instanceof PDFDict && object.get(PDFName.of('Type')) === PDFName.of('Page'));
+  expect(pageObjects).toHaveLength(3);
+  const expectedFields = [
+    ...Array.from({ length: 12 }, (_, index) => [`Check Box ${index + 14}`, 1] as const),
+    ...['Text35', 'Text36', 'Text37', 'Text38', 'Date44_af_date'].map(name => [name, 1] as const),
+    ...['Text39', 'Text40', 'Text41', 'Text42', 'Date43_af_date'].map(name => [name, 2] as const),
+  ];
+  const form = document.getForm();
+  expect(form.getFields().map(field => field.getName()).sort()).toEqual(expectedFields.map(([name]) => name).sort());
+  for (const [name, page] of expectedFields) {
+    expect(form.getField(name).acroField.getWidgets().map(widget => widget.P())).toEqual([pages[page].ref]);
+  }
+  const template = await getDocument({ data: new Uint8Array(bytes), useSystemFonts: true }).promise;
+  try {
+    expect(template.numPages).toBe(3);
+    expect(await template.getJSActions()).toBeNull();
+    for (let page = 1; page <= 3; page++) {
+      expect(await (await template.getPage(page)).getJSActions()).toBeNull();
+      await render(template, page);
+    }
+  } finally { await template.destroy(); }
+});
 
 async function inspectLayout(pdf: PDFDocumentProxy, number: number, source: Awaited<ReturnType<typeof render>>,
   rects: readonly (readonly number[])[], extra: readonly (readonly number[])[] = []) {
@@ -197,14 +226,8 @@ test('annual forms retain only authored narratives and filenames, with natural i
     value(await app.operations.launchReviewResources(pkg.id));
     expect(value(await app.operations.getWorkflow(pkg.id)).steps.review.status).toBe('Ready');
     value(await app.operations.exportForms({ packageId: pkg.id, confirmDraft: true }));
-    const source = await getDocument({ data: new Uint8Array(readFileSync('Step One SWCC.pdf')), useSystemFonts: true }).promise;
-    const original = await render(source, 1);
-    await source.destroy();
-    const assessmentSource = await getDocument({
-      data: new Uint8Array(readFileSync('OCSWSSW-CCP-Assess-Tool-2026-English.pdf')), useSystemFonts: true,
-    }).promise;
-    const originalSat = await render(assessmentSource, 8);
-    await assessmentSource.destroy();
+    const original = await templateRender(1);
+    const originalSat = await templateRender(2);
     const pdf = await getDocument({ data: new Uint8Array(readFileSync(destination)), useSystemFonts: true }).promise;
     try {
       const sat = await text(pdf, 2);
@@ -241,7 +264,7 @@ test('annual forms retain only authored narratives and filenames, with natural i
       expect(reflectionGap).toBeGreaterThan(15);
       expect(reflectionGap).toBeLessThan(25);
       expect(await pdf.getAttachments()).toBeNull();
-      await inspectLayout(pdf, 3, await sourceRender(11), pdpRects, [[111.273, 88.3613, 208.146, 105.38]]);
+      await inspectLayout(pdf, 3, await templateRender(3), pdpRects, [[111.273, 88.3613, 208.146, 105.38]]);
       const renderedSat = await render(pdf, 2);
       const satBefore = originalSat.getContext('2d').getImageData(0, 0, originalSat.width, originalSat.height).data;
       const satAfter = renderedSat.getContext('2d').getImageData(0, 0, renderedSat.width, renderedSat.height).data;
@@ -368,7 +391,7 @@ test('SAT continuations carry each full annual narrative and goal once at readab
     }));
     const result = value(await app.operations.exportForms({ packageId: pkg.id, confirmDraft: true }));
     expect(result.cancelled).toBe(false);
-    const original = await sourceRender(8);
+    const original = await templateRender(2);
     const pdf = await getDocument({ data: new Uint8Array(readFileSync(destination)), useSystemFonts: true }).promise;
     try {
       const pages: number[] = [];
@@ -453,7 +476,7 @@ test('PDP fields continue independently without labels, alignment gaps or repeat
       }
     }
     const result = value(await app.operations.exportForms({ packageId: pkg.id, confirmDraft: true }));
-    const original = await sourceRender(11);
+    const original = await templateRender(3);
     const pdf = await getDocument({ data: new Uint8Array(readFileSync(destination)), useSystemFonts: true }).promise;
     try {
       const pages: number[] = [];
@@ -624,7 +647,7 @@ test('destination cancellation, missing templates and failed publication never r
       if (failedDialog) throw new Error('Destination dialog unavailable');
       return selected;
     },
-    readAssessment: () => brokenTemplate ? new Uint8Array([1, 2, 3]) : readFileSync('OCSWSSW-CCP-Assess-Tool-2026-English.pdf'),
+    readTemplate: () => brokenTemplate ? new Uint8Array([1, 2, 3]) : readFileSync('resources/templates/annual-forms.pdf'),
   });
   try {
     const pkg = value(await app.operations.createYear(2024));

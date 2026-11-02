@@ -228,7 +228,7 @@ Choose **Export Forms PDF** beside the annual workflow, review the missing readi
 
 The renderer flushes both draft and review sessions before opening export and again before generation. A failed flush retains edits and prevents consuming stale records. Main captures the package, review, evidence metadata/integrity and warning state **synchronously in one SQLite read transaction, before any asynchronous work**. Later edits, resets or evidence deletions do not mix revisions into that forms snapshot. Forms only reference evidence metadata; they do not collect attachment bytes. The full-backup gate rejects new forms exports while collecting a backup and drains an already-admitted export before snapshotting. Main prevents overlapping Forms PDF requests and waits for an active forms write before approving normal close.
 
-`pdf-lib` and `@pdf-lib/fontkit` use byte-identical local templates: checklist physical page 1, SAT assessment-tool page 8, and PDP page 11. The checklist's thirteen checkbox centers were measured on the actual 612 × 792 pt image background; generated X glyphs are centered using local font glyph bounds, independent of Step 1 confirmation. Annual standards use the twelve SAT checkboxes independently of review progress and goals. SAT/PDP dates remain separate date-only strings.
+`pdf-lib` and `@pdf-lib/fontkit` use the dedicated three-page `resources/templates/annual-forms.pdf` for both Forms PDF and Complete Portfolio ZIP exports. It contains only checklist physical page 1, SAT assessment-tool page 8, and PDP page 11, in that order, with their original layouts and required editable fields preserved. Unused assessment pages and field scripting are excluded. The original checklist and full assessment-tool PDFs are no longer stored or packaged; the standalone template is the maintained export resource. The checklist's thirteen checkbox centers were measured on the actual 612 × 792 pt image background; generated X glyphs are centered using local font glyph bounds, independent of Step 1 confirmation. Annual standards use the twelve SAT checkboxes independently of review progress and goals. SAT/PDP dates remain separate date-only strings.
 
 Each selected page is filled in an isolated template document, its appearances updated, and the form flattened **before** page copying/merging. Output has no interactive form widgets or scripting. Each annual narrative and goal occurs once within its logical form. SAT/PDP contain authored goal/activity titles and descriptions, evidence notes/links/original filenames, and reflections, without generated G/A/E labels, statuses, activity dates, goal-link annotations or record-association headings. Reference-like user text is retained unchanged. Shared and supplementary activities each appear once. Stable references and relationships remain in the application and technical portfolio index/manifest. Missing or corrupt evidence raises an explicit repair error before PDF publication, not a printed repair annotation.
 
@@ -260,13 +260,14 @@ Tickets 08/11 integration verification on October 31, 2026, macOS / arm64: merge
 
 ## Fixed read-only source set
 
-All years store source identity `swcc-supplied-2018-2026-v1`. Packaged resources contain byte-identical originals:
+All years retain source identity `swcc-supplied-2018-2026-v1` for existing dataset and backup compatibility. Packaged PDF resources are:
 
-| Packaged path | Original |
+| Packaged path | Repository resource |
 | --- | --- |
 | `sources/ethics-2018.pdf` | `resources/sources/Code-of-Ethics-and-Standards-of-Practice-September-7-2018.pdf` |
-| `sources/step-one.pdf` | `Step One SWCC.pdf` |
-| `sources/assessment-2026.pdf` | `OCSWSSW-CCP-Assess-Tool-2026-English.pdf` |
+| `templates/annual-forms.pdf` | `resources/templates/annual-forms.pdf` |
+
+The ethics PDF remains unchanged for the in-app review reader. The export-only template preserves the selected checklist and assessment layouts without retaining the full originals.
 
 Treat these as data, never executable content or editable dataset files. The supplied ethics document is **Second Edition / September 2018**; the assessment tool references **Third Edition / 2023**. This fixed baseline is not a guarantee of current-year College regulatory compliance.
 

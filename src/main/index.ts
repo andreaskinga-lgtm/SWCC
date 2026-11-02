@@ -80,10 +80,8 @@ if (startupFailure) {
           const result = window ? await dialog.showSaveDialog(window, options) : await dialog.showSaveDialog(options);
           return result.canceled ? null : result.filePath ?? null;
         },
-        readChecklist: () => readFileSync(app.isPackaged
-          ? join(process.resourcesPath, 'sources', 'step-one.pdf') : join(directory, '../../Step One SWCC.pdf')),
-        readAssessment: () => readFileSync(app.isPackaged
-          ? join(process.resourcesPath, 'sources', 'assessment-2026.pdf') : join(directory, '../../OCSWSSW-CCP-Assess-Tool-2026-English.pdf')),
+        readTemplate: () => readFileSync(app.isPackaged
+          ? join(process.resourcesPath, 'templates', 'annual-forms.pdf') : join(directory, '../../resources/templates/annual-forms.pdf')),
         readFont: () => readFileSync(app.isPackaged
           ? join(process.resourcesPath, 'fonts', 'NotoSans-Regular.ttf') : join(directory, '../../resources/fonts/NotoSans-Regular.ttf')),
       }, {
@@ -118,6 +116,8 @@ if (startupFailure) {
         for (const document of SOURCE_DOCUMENTS) {
           if (!existsSync(join(process.resourcesPath, 'sources', document.file))) throw new Error(`Bundled source document ${document.file} is missing. Reinstall SWCC; your dataset has not been replaced.`);
         }
+        if (!existsSync(join(process.resourcesPath, 'templates', 'annual-forms.pdf')))
+          throw new Error('Bundled export template annual-forms.pdf is missing. Reinstall SWCC; your dataset has not been replaced.');
       }
       window = new BrowserWindow({
         title: 'SWCC — My learning portfolio',
