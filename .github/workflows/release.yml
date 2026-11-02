@@ -17,9 +17,6 @@ defaults:
   run:
     shell: bash
 
-env:
-  CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-
 jobs:
   verify:
     name: Verify version and application
