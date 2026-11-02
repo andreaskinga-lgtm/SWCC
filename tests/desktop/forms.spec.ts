@@ -7,6 +7,7 @@ import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { dismissActionFeedback, expectActionFeedback } from './feedback-helpers.js';
+import { desktopEnvironment } from './environment.js';
 
 let desktop: ElectronApplication;
 let page: Page;
@@ -16,7 +17,7 @@ test.beforeEach(async () => {
   mkdirSync(root, { recursive: true });
   desktop = await electron.launch({ executablePath: process.env.SWCC_PACKAGED_EXECUTABLE,
     args: [...(process.env.SWCC_PACKAGED_EXECUTABLE ? [] : ['.']), `--user-data-dir=${resolve(root, 'storage')}`],
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: '' } });
+    env: desktopEnvironment() });
   page = await desktop.firstWindow();
   await page.context().setOffline(true);
   await page.getByRole('button', { name: 'I understand' }).click();

@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { dismissActionFeedback, expectActionFeedback } from './feedback-helpers.js';
+import { desktopEnvironment } from './environment.js';
 
 const electronExecutable = createRequire(import.meta.url)('electron') as string;
 
@@ -16,7 +17,7 @@ async function launch(timezone = 'America/Toronto') {
   desktop = await electron.launch({
     executablePath: process.env.SWCC_PACKAGED_EXECUTABLE,
     args: [...(process.env.SWCC_PACKAGED_EXECUTABLE ? [] : ['.']), `--user-data-dir=${root}`],
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: '', TZ: timezone },
+    env: desktopEnvironment({ TZ: timezone }),
   });
   page = await desktop.firstWindow();
   await page.context().setOffline(true);
@@ -211,7 +212,7 @@ test('keystrokes during a real SQLite busy write remain visible and are saved in
 test('a second launch of the same OS-user dataset exits without creating a competing window', async () => {
   const second = spawn(process.env.SWCC_PACKAGED_EXECUTABLE || electronExecutable, [
     ...(process.env.SWCC_PACKAGED_EXECUTABLE ? [] : ['.']), `--user-data-dir=${root}`,
-  ], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '' }, stdio: 'ignore' });
+  ], { env: desktopEnvironment(), stdio: 'ignore' });
   const status = await new Promise<number | null>((resolve, reject) => { second.once('exit', resolve); second.once('error', reject); });
   expect(status).toBe(0);
   expect(desktop.windows()).toHaveLength(1);
