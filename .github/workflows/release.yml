@@ -125,7 +125,7 @@ jobs:
             tests/desktop/forms.spec.ts \
             tests/desktop/backup.spec.ts \
             --forbid-only \
-            --grep 'keyboard creation, duplicate recovery|local real PDF display|C dashboard export|C backup screen'
+            --grep 'keyboard creation, duplicate recovery|local real PDF display|classic scrollbars|C dashboard export|C backup screen'
       - name: Upload installer
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:

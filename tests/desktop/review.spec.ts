@@ -141,6 +141,25 @@ test('local real PDF display checks only visited pages; jumps, years and restart
   expect(remoteRequests).toEqual([]);
 });
 
+test('classic scrollbars do not repeatedly hide a rendered PDF page', async () => {
+  await page.addStyleTag({ content: '.pdf-viewport::-webkit-scrollbar { width: 16px; height: 16px; }' });
+  await page.getByRole('region', { name: 'PDF page viewport' }).evaluate(element => {
+    const viewport = element as HTMLElement;
+    viewport.style.width = '500px';
+    viewport.style.height = '300px';
+    viewport.style.minHeight = '300px';
+  });
+  await goTo(14);
+  const stayedVisible = await page.getByRole('img', { name: 'Supplied Code of Ethics, physical page 14', exact: true }).evaluate(async element => {
+    for (let frame = 0; frame < 10; frame++) {
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      if ((element as HTMLCanvasElement).hidden) return false;
+    }
+    return true;
+  });
+  expect(stayedVisible).toBe(true);
+});
+
 test('only exact half-smaller-height displays qualify, not slivers or inactive/offscreen rendering', async () => {
   await expect(page.getByRole('img', { name: 'Supplied Code of Ethics, physical page 1', exact: true })).toBeVisible();
   // Render while a different real window owns OS focus, then position the page before reactivation.
