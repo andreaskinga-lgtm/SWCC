@@ -16,7 +16,8 @@
     "test": "node scripts/test.mjs",
     "test:desktop": "npm run build && playwright test",
     "package:dir": "npm run build && electron-builder --dir",
-    "package:mac": "npm run build && electron-builder --mac dmg --arm64",
+    "package:mac": "npm run build && electron-builder --mac dmg",
+    "package:win": "npm run build && electron-builder --win nsis --x64",
     "postinstall": "electron-builder install-app-deps"
   },
   "main": "dist/main/index.js",
@@ -51,6 +52,7 @@
   "build": {
     "appId": "org.swcc.desktop",
     "productName": "SWCC",
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "directories": {
       "output": "release"
     },
@@ -79,7 +81,10 @@
       "target": "dmg",
       "category": "public.app-category.productivity",
       "minimumSystemVersion": "14.0",
-      "identity": null
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "notarize": true
     },
     "win": {
       "target": "nsis"

@@ -1,0 +1,186 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+jobs:
+  verify:
+    name: Verify version and application
+    runs-on: macos-15
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Check release version
+        id: version
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync, readFileSync } from 'node:fs';
+          const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
+          const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
+          if (version !== lock.version || version !== lock.packages[''].version) {
+            throw new Error('package.json and package-lock.json versions must match.');
+          }
+          if (process.env.GITHUB_EVENT_NAME === 'push' && process.env.GITHUB_REF_NAME !== `v${version}`) {
+            throw new Error(`Release tag must be v${version}, not ${process.env.GITHUB_REF_NAME}.`);
+          }
+          appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\n`);
+          NODE
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+
+  build:
+    name: Build ${{ matrix.platform }} ${{ matrix.arch }}
+    needs: verify
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: mac
+            arch: arm64
+            runner: macos-15
+            command: npm run package:mac -- --arm64 --publish never --config.forceCodeSigning=true
+            executable: release/mac-arm64/SWCC.app/Contents/MacOS/SWCC
+            installer: release/*-mac-arm64.dmg
+          - platform: mac
+            arch: x64
+            runner: macos-15-intel
+            command: npm run package:mac -- --x64 --publish never --config.forceCodeSigning=true
+            executable: release/mac/SWCC.app/Contents/MacOS/SWCC
+            installer: release/*-mac-x64.dmg
+          - platform: win
+            arch: x64
+            runner: windows-2022
+            command: npm run package:win -- --publish never
+            executable: release/win-unpacked/SWCC.exe
+            installer: release/*-win-x64.exe
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Package installer
+        env:
+          CSC_LINK: ${{ matrix.platform == 'mac' && secrets.CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.platform == 'mac' && secrets.CSC_KEY_PASSWORD || '' }}
+          APPLE_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_ID || '' }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.platform == 'mac' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_TEAM_ID || '' }}
+        run: |
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            node --input-type=module <<'NODE'
+          const required = ['CSC_LINK', 'CSC_KEY_PASSWORD', 'APPLE_ID', 'APPLE_APP_SPECIFIC_PASSWORD', 'APPLE_TEAM_ID'];
+          const missing = required.filter(name => !process.env[name]?.trim());
+          if (missing.length) {
+            throw new Error(`Configure these SWCC Actions secrets before releasing: ${missing.join(', ')}`);
+          }
+          NODE
+          fi
+          ${{ matrix.command }}
+      - name: Verify Developer ID signature and stapled notarization
+        if: matrix.platform == 'mac'
+        env:
+          PACKAGED_EXECUTABLE: ${{ matrix.executable }}
+        run: |
+          app="${PACKAGED_EXECUTABLE%/Contents/MacOS/SWCC}"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          xcrun stapler validate "$app"
+          spctl --assess --type execute --verbose=2 "$app"
+      - name: Smoke-test packaged app, SQLite, PDFs, fonts and backup
+        env:
+          SWCC_PACKAGED_EXECUTABLE: ${{ github.workspace }}/${{ matrix.executable }}
+        run: |
+          npx playwright test \
+            tests/desktop/drafts.spec.ts \
+            tests/desktop/review.spec.ts \
+            tests/desktop/forms.spec.ts \
+            tests/desktop/backup.spec.ts \
+            --forbid-only \
+            --grep 'keyboard creation, duplicate recovery|local real PDF display|C dashboard export|C backup screen'
+      - name: Upload installer
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: installer-${{ matrix.platform }}-${{ matrix.arch }}
+          path: ${{ matrix.installer }}
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: diagnostics-${{ matrix.platform }}-${{ matrix.arch }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  release:
+    name: Create draft GitHub release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [verify, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          pattern: installer-*
+          merge-multiple: true
+          path: installers
+      - name: Verify downloads and generate checksums
+        run: |
+          shopt -s nullglob
+          files=(installers/*.dmg installers/*.exe)
+          if [[ ${#files[@]} -ne 3 ]]; then
+            echo "::error::Expected two macOS DMGs and one Windows installer."
+            exit 1
+          fi
+          cd installers
+          sha256sum *.dmg *.exe > SHA256SUMS.txt
+      - name: Create draft with all downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          flags=()
+          if [[ "$VERSION" == *-* ]]; then
+            flags+=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            installers/*.dmg installers/*.exe installers/SHA256SUMS.txt \
+            --verify-tag --draft --title "SWCC $VERSION" --generate-notes \
+            --notes "Choose mac-arm64 for Apple Silicon, mac-x64 for Intel Macs (macOS 14+), or win-x64 for Windows 11. macOS apps are Developer ID signed and Apple-notarized: open the DMG and drag SWCC to Applications. Windows uses an unsigned per-user installer; SmartScreen may warn or managed policy may block it. Only override warnings for a trusted download, and never disable system protections globally. Back up existing SWCC data before upgrading. SHA256SUMS.txt lists download checksums." \
+            "${flags[@]}"
