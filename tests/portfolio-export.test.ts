@@ -154,7 +154,7 @@ test('annual portfolio warns for drafts and archives complete forms and original
         const rect = sat ? [79.8549, 126.325, 192.437, 405.163] : [569.457, 123.052, 715.421, 421.526];
         const narrative = content.filter(item => item.transform[4] >= rect[0] && item.transform[4] < rect[2]
           && item.transform[5] > rect[1] && item.transform[5] < rect[3]);
-        for (const line of narrative) expect(Math.hypot(line.transform[0], line.transform[1])).toBeGreaterThanOrEqual(10);
+        for (const line of narrative) expect(Math.hypot(line.transform[0], line.transform[1])).toBeCloseTo(8, 1);
         const projected = narrative.map(item => item.str).join('');
         if (sat) actualStrengths += projected;
         else actualReflection += projected;

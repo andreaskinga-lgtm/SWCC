@@ -6,6 +6,7 @@ import { ANNUAL_STANDARDS, dateWarning } from '../shared/application.js';
 import { evaluateAssessmentReadiness } from '../shared/assessment.js';
 import { currentCompletion } from '../shared/workflow.js';
 import { DraftSession } from './draft-session.js';
+import { useDialogBackdropDismiss } from './dialog-dismissal.js';
 import { isRecordRevealAnimationEnd } from './record-reveal.js';
 import './assessment.css';
 
@@ -27,6 +28,7 @@ export function Dialog({ title, children, onClose, className = 'goal-dialog' }: 
   title: string; children: ReactNode; onClose: () => void; className?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const backdropDismiss = useDialogBackdropDismiss(onClose);
   useEffect(() => {
     const dialog = ref.current;
     if (dialog && !dialog.open) dialog.showModal();
@@ -34,7 +36,7 @@ export function Dialog({ title, children, onClose, className = 'goal-dialog' }: 
   }, []);
   return <dialog ref={ref} className={className} aria-label={title}
     onCancel={event => { event.preventDefault(); onClose(); }}
-    onClick={event => { if (event.target === ref.current) onClose(); }}>
+    {...backdropDismiss}>
     <div className="goal-dialog-header"><h2>{title}</h2><button type="button" className="icon-button" aria-label="Close dialog" onClick={onClose}><X size={19} /></button></div>
     {children}
   </dialog>;
@@ -50,10 +52,10 @@ function GoalEditor({ goal, session, onDelete, revealed, onRevealEnd }: {
     <div className="goal-editor-top"><span className="goal-reference">{goal.ref}</span>
       <button type="button" className="icon-button" aria-label={`Delete goal ${goal.ref}`} onClick={() => onDelete(goal)}><Trash2 size={16} /></button>
     </div>
-    <label className="field"><span>Goal title</span><input aria-label={`Goal title ${goal.ref}`} value={goal.title}
+    <label className="field"><span>Goal title</span><input spellCheck aria-label={`Goal title ${goal.ref}`} value={goal.title}
       onChange={event => session.editGoal(goal.id, { title: event.target.value })} /></label>
     {!goal.title.trim() && <small className="goal-validation">A learning-goal title is required before this edit can be saved.</small>}
-    <label className="field"><span>Description <small>Optional</small></span><textarea aria-label={`Goal description ${goal.ref}`} rows={2} value={goal.description}
+    <label className="field"><span>Description <small>(optional - will not be included in exports)</small></span><textarea aria-label={`Goal description ${goal.ref} (optional - will not be included in exports)`} rows={2} value={goal.description}
       onChange={event => session.editGoal(goal.id, { description: event.target.value })} /></label>
   </article>;
 }
@@ -111,9 +113,9 @@ export function GoalCreateDialog({ source, session, onClose, activityId, flushEd
   return <Dialog title={titleText} onClose={close}>
     <p className="goal-dialog-copy">Goals appear in both your self-assessment and development plan.</p>
     <form onSubmit={event => void submit(event)}>
-      <label className="field"><span>Goal title</span><input autoFocus aria-label="Goal title" value={pending ? state.pendingGoalCreation?.title ?? title : title}
+      <label className="field"><span>Goal title</span><input autoFocus spellCheck aria-label="Goal title" value={pending ? state.pendingGoalCreation?.title ?? title : title}
         disabled={pending} onChange={event => setTitle(event.target.value)} /></label>
-      <label className="field"><span>Description <small>(optional)</small></span><textarea aria-label="Description (optional)" rows={3}
+      <label className="field"><span>Description <small>(optional - will not be included in exports)</small></span><textarea aria-label="Description (optional - will not be included in exports)" rows={3}
         value={pending ? state.pendingGoalCreation?.description ?? description : description}
         disabled={pending} onChange={event => setDescription(event.target.value)} /></label>
       {validationError && <p className="goal-validation" role="alert">{validationError}</p>}

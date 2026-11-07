@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { X } from 'lucide-react';
+import { useDialogBackdropDismiss } from './dialog-dismissal.js';
 import './action-feedback.css';
 
 export interface ActionFeedbackRequest {
@@ -67,6 +68,7 @@ export function ActionFeedbackProvider({ children }: { children: ReactNode }) {
     dismiss();
     action?.onClick();
   }, [dismiss]);
+  const backdropDismiss = useDialogBackdropDismiss(dismiss);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -103,7 +105,7 @@ export function ActionFeedbackProvider({ children }: { children: ReactNode }) {
       aria-labelledby="action-feedback-title"
       data-kind={feedback?.kind}
       onCancel={event => { event.preventDefault(); dismiss(); }}
-      onClick={event => { if (event.target === event.currentTarget) dismiss(); }}
+      {...backdropDismiss}
     >
       {feedback && <>
         <div className="action-feedback-header">
