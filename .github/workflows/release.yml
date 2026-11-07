@@ -88,6 +88,11 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci
+      - name: Work around CloudKit HTTP/3 failures on Intel Macs
+        if: matrix.platform == 'mac' && matrix.arch == 'x64'
+        run: |
+          echo "block return out quick proto udp from any to any port 443" | sudo pfctl -f -
+          sudo pfctl -E
       - name: Package installer
         env:
           CSC_LINK: ${{ matrix.platform == 'mac' && secrets.CSC_LINK || '' }}
