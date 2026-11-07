@@ -62,7 +62,7 @@ function ActivityCreateDialog({ pkg, session, onClose, onCreated, flushEdits }: 
   return <Dialog title="Record an activity" onClose={close}>
     <form onSubmit={event => { event.preventDefault(); void save(); }}>
       <label className="field"><span>Activity title</span><input autoFocus spellCheck aria-label="Activity title" value={title} disabled={pending} onChange={event => setTitle(event.target.value)} /></label>
-      <label className="field"><span>Description (optional)</span><textarea aria-label="Activity description" value={description} disabled={pending} onChange={event => setDescription(event.target.value)} /></label>
+      <label className="field"><span>Description (optional - will not be included in exports)</span><textarea aria-label="Activity description (optional - will not be included in exports)" value={description} disabled={pending} onChange={event => setDescription(event.target.value)} /></label>
       <fieldset className="goal-link-editor"><legend>Linked goals (optional)</legend>
         {pkg.goals.map(goal => <label key={goal.id}><input type="checkbox" disabled={pending} checked={goalIds.includes(goal.id)}
           onChange={event => setGoalIds(event.target.checked ? [...goalIds, goal.id] : goalIds.filter(id => id !== goal.id))} /><span>{goal.ref} {goal.title}</span></label>)}
@@ -269,7 +269,7 @@ function ActivityEditor({ activity, pkg, session, operations, addGoal, evidence,
     <label className="field activity-title"><span>Activity title</span><input spellCheck value={activity.title}
       onChange={event => session.editActivity(activity.id, { title: event.target.value })} /></label>
     {!activity.title.trim() && <p className="goal-validation">An activity title is required before saving.</p>}
-    <label className="field"><span>Description <small>Optional</small></span><textarea aria-label="Activity description" rows={3} value={activity.description}
+    <label className="field"><span>Description <small>(optional - will not be included in exports)</small></span><textarea aria-label="Activity description (optional - will not be included in exports)" rows={3} value={activity.description}
       onChange={event => session.editActivity(activity.id, { description: event.target.value })} /></label>
     <div className="activity-dates">
       <label className="field"><span>Activity status</span><select aria-label="Activity status" value={activity.status}

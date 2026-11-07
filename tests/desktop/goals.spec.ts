@@ -57,7 +57,7 @@ async function expectAssessmentTabOrder(goalRefs: string[]) {
     await page.keyboard.press('Tab');
     await expect(page.getByLabel(`Goal title ${ref}`)).toBeFocused();
     await page.keyboard.press('Tab');
-    await expect(page.getByLabel(`Goal description ${ref}`)).toBeFocused();
+    await expect(page.getByLabel(`Goal description ${ref} (optional - will not be included in exports)`)).toBeFocused();
   }
   await page.keyboard.press('Tab');
   await expect(page.getByRole('button', { name: 'Complete Step 2', exact: true })).toBeFocused();
@@ -112,7 +112,7 @@ test('assessment readiness and shared goals persist across both views and restar
   const assessmentDialog = page.getByRole('dialog', { name: 'Add a learning goal' });
   await expect(assessmentDialog.getByLabel('Goal title')).toHaveAttribute('spellcheck', 'true');
   await assessmentDialog.getByLabel('Goal title').fill('Build reflective supervision practice');
-  await assessmentDialog.getByLabel('Description (optional)').fill('Seek structured consultation after complex cases.');
+  await assessmentDialog.getByLabel('Description (optional - will not be included in exports)').fill('Seek structured consultation after complex cases.');
   await assessmentDialog.getByRole('button', { name: 'Add goal', exact: true }).click();
   await expect(status).toHaveText('Ready');
   await expect(page.getByLabel('Goal title G1')).toHaveValue('Build reflective supervision practice');

@@ -189,7 +189,7 @@ test('long edited narratives export through the same desktop action with readabl
         actualReflection += narrative;
         pdp += content.map(item => item.str).join(' ');
       }
-      for (const line of lines) expect(Math.hypot(line.transform[0], line.transform[1])).toBeGreaterThanOrEqual(10);
+      for (const line of lines) expect(Math.hypot(line.transform[0], line.transform[1])).toBeCloseTo(8, 1);
       expect(await (await pdf.getPage(n)).getAnnotations()).toEqual([]);
     }
     const compact = (text: string) => text.replace(/\s/gu, '');

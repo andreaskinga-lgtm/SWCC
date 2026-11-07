@@ -55,7 +55,7 @@ function GoalEditor({ goal, session, onDelete, revealed, onRevealEnd }: {
     <label className="field"><span>Goal title</span><input spellCheck aria-label={`Goal title ${goal.ref}`} value={goal.title}
       onChange={event => session.editGoal(goal.id, { title: event.target.value })} /></label>
     {!goal.title.trim() && <small className="goal-validation">A learning-goal title is required before this edit can be saved.</small>}
-    <label className="field"><span>Description <small>Optional</small></span><textarea aria-label={`Goal description ${goal.ref}`} rows={2} value={goal.description}
+    <label className="field"><span>Description <small>(optional - will not be included in exports)</small></span><textarea aria-label={`Goal description ${goal.ref} (optional - will not be included in exports)`} rows={2} value={goal.description}
       onChange={event => session.editGoal(goal.id, { description: event.target.value })} /></label>
   </article>;
 }
@@ -115,7 +115,7 @@ export function GoalCreateDialog({ source, session, onClose, activityId, flushEd
     <form onSubmit={event => void submit(event)}>
       <label className="field"><span>Goal title</span><input autoFocus spellCheck aria-label="Goal title" value={pending ? state.pendingGoalCreation?.title ?? title : title}
         disabled={pending} onChange={event => setTitle(event.target.value)} /></label>
-      <label className="field"><span>Description <small>(optional)</small></span><textarea aria-label="Description (optional)" rows={3}
+      <label className="field"><span>Description <small>(optional - will not be included in exports)</small></span><textarea aria-label="Description (optional - will not be included in exports)" rows={3}
         value={pending ? state.pendingGoalCreation?.description ?? description : description}
         disabled={pending} onChange={event => setDescription(event.target.value)} /></label>
       {validationError && <p className="goal-validation" role="alert">{validationError}</p>}

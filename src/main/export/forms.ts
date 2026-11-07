@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { basename, dirname, join } from 'node:path';
 import { open, rename, rm } from 'node:fs/promises';
 import fontkit from '@pdf-lib/fontkit';
-import { degrees, drawLinesOfText, PDFDocument, PDFName, rgb } from 'pdf-lib';
+import { degrees, drawLinesOfText, PDFDocument, PDFName, rgb, StandardFonts } from 'pdf-lib';
 import { ANNUAL_STANDARDS } from '../../shared/application.js';
 import type { PDFFont } from 'pdf-lib';
 import type { EvidenceAttachment, OperationError, YearPackage } from '../../shared/application.js';
@@ -23,6 +23,7 @@ export interface AnnualFormsSnapshot {
 }
 type Fail = (code: OperationError['code'], message: string) => never;
 class FormsOverflow extends Error {}
+const fieldFontSize = 8;
 const fieldLabels: Record<string, string> = {
   Text35: 'SAT strengths', Text36: 'SAT peer feedback', Text37: 'SAT learning needs/interests', Text38: 'SAT goals',
   Text39: 'PDP goals', Text40: 'PDP activities', Text41: 'PDP evidence', Text42: 'PDP application to practice',
@@ -44,9 +45,9 @@ function fieldLines(text: string, width: number, font: PDFFont, label: string): 
     let offset = 0;
     while (offset < characters.length) {
       let count = 1;
-      if (font.widthOfTextAtSize(characters[offset], 10) > width)
-        throw new FormsOverflow(`${label} contains a grapheme that cannot fit the source field at 10 pt. No output was published.`);
-      while (offset + count < characters.length && font.widthOfTextAtSize(characters.slice(offset, offset + count + 1).join(''), 10) <= width) count++;
+      if (font.widthOfTextAtSize(characters[offset], fieldFontSize) > width)
+        throw new FormsOverflow(`${label} contains a grapheme that cannot fit the source field at ${fieldFontSize} pt. No output was published.`);
+      while (offset + count < characters.length && font.widthOfTextAtSize(characters.slice(offset, offset + count + 1).join(''), fieldFontSize) <= width) count++;
       if (offset + count < characters.length) {
         let whitespace = -1;
         for (let index = 0; index < count; index++) if (/\s/u.test(characters[offset + index])) whitespace = index;
@@ -115,33 +116,61 @@ export async function generateAnnualForms(snapshot: AnnualFormsSnapshot, system:
 async function generateForms(snapshot: AnnualFormsSnapshot, system: FormsSystem): Promise<{ bytes: Uint8Array; pageCount: number }> {
   const output = await PDFDocument.create();
   const template = system.readTemplate();
-  const sourceTemplate = await PDFDocument.load(template);
-  const [checklistPage] = await output.copyPages(sourceTemplate, [0]);
-  output.addPage(checklistPage);
   const fontBytes = system.readFont();
   output.registerFontkit(fontkit);
   const checklistFont = await output.embedFont(fontBytes, { subset: true });
+  const labelFont = await output.embedFont(StandardFonts.Helvetica);
+  const titleFont = await output.embedFont(StandardFonts.HelveticaBold);
+  const headingFont = await output.embedFont(StandardFonts.TimesRomanBold);
+  const checklistPage = output.addPage([612, 792]);
+  checklistPage.drawText('Step One. Review code of ethics', {
+    font: titleFont, size: 11, x: 72, y: 709.682,
+  });
+  checklistPage.drawText('Checklist:', { font: headingFont, size: 12, x: 91, y: 676 });
+  checklistPage.drawText('Please mark each box with an “x” once you have reviewed the associated section.', {
+    font: labelFont, size: 11, x: 91, y: 659.5,
+  });
   const metrics = fontkit.create(fontBytes);
   const xGlyph = metrics.glyphForCodePoint(88).bbox;
   const units = metrics.unitsPerEm;
-  const checks = [...reviewReadiness(snapshot.review).sections.map(section => section.checked), Boolean(snapshot.review.resourcesLaunchedAt)];
-  // Centers measured on the actual image-based source at 1.5 px per PDF point.
-  const rows = [227, 260, 294, 328, 399, 433, 467, 501, 535, 569, 602, 637, 671];
-  checks.forEach((checked, index) => {
-    if (!checked) return;
-    checklistPage.drawText('X', {
+  const rows = [
+    ...reviewReadiness(snapshot.review).sections.map(section => ({
+      label: section.id === 'social-work' ? 'Scope of Practice for the Profession of Social Work'
+        : section.id === 'social-service-work' ? 'Scope of Practice for the Profession of Social Service Work'
+        : section.label,
+      checked: section.checked, resource: false,
+    })),
+    { label: 'Other required resources', checked: Boolean(snapshot.review.resourcesLaunchedAt), resource: true },
+  ];
+  const boxSize = 10.5;
+  rows.forEach((row, index) => {
+    const centerY = 640.5 - index * 22.5;
+    checklistPage.drawRectangle({
+      x: 101, y: centerY - boxSize / 2, width: boxSize, height: boxSize,
+      color: rgb(224 / 255, 229 / 255, 1), borderColor: rgb(0, 0, 0), borderWidth: 0.5,
+    });
+    const color = row.resource ? rgb(78 / 255, 136 / 255, 201 / 255) : rgb(0, 0, 0);
+    checklistPage.drawText(row.label, {
+      font: labelFont, size: 11, x: 119, y: centerY - 3.5, color,
+    });
+    if (row.resource) checklistPage.drawLine({
+      start: { x: 119, y: centerY - 4.5 },
+      end: { x: 119 + labelFont.widthOfTextAtSize(row.label, 11), y: centerY - 4.5 },
+      thickness: 0.5, color,
+    });
+    if (row.checked) checklistPage.drawText('X', {
       font: checklistFont, size: 10,
-      x: (index < 4 ? 159 : 165) / 1.5 - (xGlyph.minX + xGlyph.maxX) * 10 / units / 2,
-      y: 792 - rows[index] / 1.5 - (xGlyph.minY + xGlyph.maxY) * 10 / units / 2,
+      x: 101 + boxSize / 2 - (xGlyph.minX + xGlyph.maxX) * 10 / units / 2,
+      y: centerY - (xGlyph.minY + xGlyph.maxY) * 10 / units / 2,
     });
   });
   const pkg = snapshot.package;
   const goals = pkg.goals.map(goal => ({
-    text: [goal.title, goal.description].filter(text => text.trim()).join('\n'),
+    text: goal.title,
   }));
   const activities = pkg.activities.map(activity => ({
     texts: [
-      [activity.title, activity.description].filter(text => text.trim()).join('\n'),
+      activity.title,
       [activity.evidenceDescription, ...activity.evidenceLinks,
         ...snapshot.attachments.filter(entry => entry.activityId === activity.id).map(entry =>
           entry.originalName.replace(/\p{Cc}|\p{Cf}/gu, character => `\\u{${character.codePointAt(0)!.toString(16)}}`)),
@@ -165,9 +194,9 @@ async function generateForms(snapshot: AnnualFormsSnapshot, system: FormsSystem)
     for (const name of [...Object.keys(layout.fields), layout.dateField]) {
       const { width, height } = measurement.getForm().getTextField(name).acroField.getWidgets()[0].getRectangle();
       const padding = name.startsWith('Date') ? 1 : 2;
-      const lineHeight = measuredFont.heightAtSize(10) * 1.1;
+      const lineHeight = measuredFont.heightAtSize(fieldFontSize) * 1.1;
       geometry[name] = { width, height, padding, lineHeight,
-        capacity: Math.floor((height - padding * 2 - measuredFont.heightAtSize(10)) / lineHeight) + 1 };
+        capacity: Math.floor((height - padding * 2 - measuredFont.heightAtSize(fieldFontSize)) / lineHeight) + 1 };
     }
     const columns = Object.fromEntries(Object.entries(layout.fields).map(([name, records]) =>
       [name, paginate(records, geometry[name], measuredFont, fieldLabels[name])]));
@@ -181,7 +210,7 @@ async function generateForms(snapshot: AnnualFormsSnapshot, system: FormsSystem)
       const form = source.getForm();
       ANNUAL_STANDARDS.forEach((standard, standardIndex) => {
         const field = form.getCheckBox(`Check Box ${standardIndex + 14}`);
-        if (layout.kind === 'SAT' && !index && pkg.annualStandards.includes(standard.id)) field.check();
+        if (layout.kind === 'SAT' && pkg.annualStandards.includes(standard.id)) field.check();
         else field.uncheck();
       });
       form.updateFieldAppearances(font);
@@ -190,12 +219,12 @@ async function generateForms(snapshot: AnnualFormsSnapshot, system: FormsSystem)
       for (const [name, lines] of Object.entries(fields)) {
         const field = form.getTextField(name);
         field.setText('');
-        field.setFontSize(10);
+        field.setFontSize(fieldFontSize);
         field.updateAppearances(font, () => {
           const { height, padding, lineHeight } = geometry[name];
           return lines.flatMap(line => drawLinesOfText([font.encodeText(line.text)], {
-            color: rgb(0, 0, 0), font: font.name, size: 10, lineHeight,
-            x: padding, y: height - padding - font.heightAtSize(10, { descender: false }) - line.row * lineHeight,
+            color: rgb(0, 0, 0), font: font.name, size: fieldFontSize, lineHeight,
+            x: padding, y: height - padding - font.heightAtSize(fieldFontSize, { descender: false }) - line.row * lineHeight,
             rotate: degrees(0), xSkew: degrees(0), ySkew: degrees(0),
           }));
         });

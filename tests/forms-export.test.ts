@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
+import { getDocument, OPS } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { createCanvas } from '@napi-rs/canvas';
 import { PDFDict, PDFDocument, PDFName } from 'pdf-lib';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
@@ -179,6 +179,90 @@ test('empty drafts require acknowledgement then export a real flattened checklis
   } finally { app.close(); }
 });
 
+test('review checklist uses native text with evenly aligned rows and centered marks only for reviewed sections', async () => {
+  const root = storage();
+  const destination = resolve(root, 'checklist.pdf');
+  const app = openApplication(resolve(root, 'storage'), {},
+    { openExternal: async () => {}, readDocument: () => new Uint8Array() },
+    undefined, formsSystem(destination));
+  try {
+    const pkg = value(await app.operations.createYear(2024));
+    value(await app.operations.exportForms({ packageId: pkg.id, confirmDraft: true }));
+    const blank = await getDocument({ data: new Uint8Array(readFileSync(destination)), useSystemFonts: true }).promise;
+    try {
+      const page = await blank.getPage(1);
+      expect(page.view).toEqual([0, 0, 612, 792]);
+      const content = (await page.getTextContent()).items.flatMap(item => 'str' in item ? [item] : []);
+      const labels = [
+        'Code of Ethics', 'Meaning of Client',
+        'Scope of Practice for the Profession of Social Work',
+        'Scope of Practice for the Profession of Social Service Work',
+        ...REVIEW_SECTIONS.slice(4).map(section => section.label), 'Other required resources',
+      ].map(label => {
+        const matches = content.filter(item => item.str === label);
+        expect(matches, label).toHaveLength(1);
+        return matches[0];
+      });
+      expect(await text(blank, 1)).toContain('Step One. Review code of ethics');
+      expect(await text(blank, 1)).toContain('Checklist:');
+      expect(await text(blank, 1)).toContain('Please mark each box with an “x” once you have reviewed the associated section.');
+      expect(content.filter(item => item.str === 'X')).toEqual([]);
+      const rowGap = labels[0].transform[5] - labels[1].transform[5];
+      expect(rowGap).toBeGreaterThan(labels[0].height * 1.5);
+      expect(rowGap).toBeLessThan(30);
+      for (const [index, label] of labels.entries()) {
+        expect(label.transform[4]).toBeCloseTo(labels[0].transform[4], 3);
+        expect(label.transform[5]).toBeCloseTo(labels[0].transform[5] - index * rowGap, 3);
+        expect(label.transform[4] + label.width).toBeLessThan(540);
+      }
+      const operators = (await page.getOperatorList()).fnArray;
+      for (const image of [OPS.paintImageXObject, OPS.paintInlineImageXObject, OPS.paintImageXObjectRepeat])
+        expect(operators).not.toContain(image);
+
+      // Principle II is only partially visited; its box must stay empty.
+      value(await app.operations.recordReviewVisits({ packageId: pkg.id, pages: [2, 4, 7, 9, 10, 11, 48] }));
+      value(await app.operations.launchReviewResources(pkg.id));
+      value(await app.operations.exportForms({ packageId: pkg.id, confirmDraft: true }));
+      const checked = await getDocument({ data: new Uint8Array(readFileSync(destination)), useSystemFonts: true }).promise;
+      try {
+        const checkedPage = await checked.getPage(1);
+        const marks = (await checkedPage.getTextContent()).items.filter(item => 'str' in item && item.str === 'X');
+        const checkedRows = [0, 1, 2, 4, 12];
+        expect(marks).toHaveLength(checkedRows.length);
+        const before = await render(blank, 1);
+        const after = await render(checked, 1);
+        const beforeContext = before.getContext('2d');
+        const afterContext = after.getContext('2d');
+        for (const [index, label] of labels.entries()) {
+          const x = Math.round(101 * 1.5);
+          const y = Math.round((792 - label.transform[5] - 3.5 - 5.25) * 1.5);
+          const width = 16;
+          const original = beforeContext.getImageData(x, y, width, width).data;
+          const generated = afterContext.getImageData(x, y, width, width).data;
+          let changed = 0;
+          let minX = width;
+          let maxX = 0;
+          let minY = width;
+          let maxY = 0;
+          for (let py = 0; py < width; py++) for (let px = 0; px < width; px++) {
+            const at = (py * width + px) * 4;
+            if (Math.abs(original[at] - generated[at]) <= 40) continue;
+            changed++;
+            minX = Math.min(minX, px); maxX = Math.max(maxX, px);
+            minY = Math.min(minY, py); maxY = Math.max(maxY, py);
+          }
+          if (checkedRows.includes(index)) {
+            expect(changed, label.str).toBeGreaterThan(15);
+            expect(Math.abs((minX + maxX) / 2 - (width - 1) / 2), label.str).toBeLessThanOrEqual(1);
+            expect(Math.abs((minY + maxY) / 2 - (width - 1) / 2), label.str).toBeLessThanOrEqual(1);
+          } else expect(changed, label.str).toBe(0);
+        }
+        expect(await checkedPage.getAnnotations()).toEqual([]);
+      } finally { await checked.destroy(); }
+    } finally { await blank.destroy(); }
+  } finally { app.close(); }
+});
+
 test('annual forms retain only authored narratives and filenames, with natural independent field flow and intact checklist marks', async () => {
   const root = storage();
   const destination = resolve(root, 'annual.pdf');
@@ -226,7 +310,6 @@ test('annual forms retain only authored narratives and filenames, with natural i
     value(await app.operations.launchReviewResources(pkg.id));
     expect(value(await app.operations.getWorkflow(pkg.id)).steps.review.status).toBe('Ready');
     value(await app.operations.exportForms({ packageId: pkg.id, confirmDraft: true }));
-    const original = await templateRender(1);
     const originalSat = await templateRender(2);
     const pdf = await getDocument({ data: new Uint8Array(readFileSync(destination)), useSystemFonts: true }).promise;
     try {
@@ -234,13 +317,16 @@ test('annual forms retain only authored narratives and filenames, with natural i
       const pdp = await text(pdf, 3);
       for (const narrative of ['Empathie café', '“Très bien.”', 'Développer la réflexion.'])
         expect(compact(sat).split(compact(narrative)), sat).toHaveLength(2);
-      for (const narrative of ['Objectif G44 Supervision.', 'Objectif Consultation.']) {
-        expect(compact(sat).split(compact(narrative))).toHaveLength(2);
-        expect(compact(pdp).split(compact(narrative))).toHaveLength(2);
+      for (const goal of pkg.goals) {
+        expect(compact(sat).split(compact(goal.title))).toHaveLength(2);
+        expect(compact(pdp).split(compact(goal.title))).toHaveLength(2);
+        expect(compact(sat)).not.toContain(compact(goal.description));
+        expect(compact(pdp)).not.toContain(compact(goal.description));
       }
-      for (const narrative of ['A55 Séminaire partagé', 'Atelier unique.', 'E33 Notes conservées.', 'A22 Écouter autrement.',
+      for (const narrative of ['A55 Séminaire partagé', 'E33 Notes conservées.', 'A22 Écouter autrement.',
         'Sans preuve ni réflexion', 'Lecture supplémentaire', 'Livre personnel.', 'Prendre du recul.',
         'https://example.org/A99/G98/E97/café']) expect(compact(pdp).split(compact(narrative)), narrative).toHaveLength(2);
+      expect(compact(pdp)).not.toContain(compact('Atelier unique.'));
       expect(compact(pdp).split('E88-A77-G66-présence.txt')).toHaveLength(3);
       for (const generated of [/\b[AGE][123]\b/u, /Linked goals|No linked goal|\(continued\)/u,
         /Completed|Planned|2024-03-01/u]) {
@@ -255,14 +341,14 @@ test('annual forms retain only authored narratives and filenames, with natural i
       const supplementaryReflection = reflections.find(line => line.str.includes('Prendre du recul.'))!;
       const missingActivity = activities.find(line => line.str.includes('Sans preuve'))!;
       const activityGap = missingActivity.transform[5] - supplementaryActivity.transform[5];
-      expect(activityGap).toBeGreaterThan(15);
-      expect(activityGap).toBeLessThan(25);
+      expect(activityGap).toBeGreaterThan(16);
+      expect(activityGap).toBeLessThan(20);
       // Unequal fields flow independently; an empty record leaves no evidence/reflection slot.
       expect(supplementaryEvidence.transform[5]).toBeLessThan(supplementaryActivity.transform[5] - 5);
       expect(supplementaryReflection.transform[5]).toBeGreaterThan(supplementaryActivity.transform[5] + 5);
       const reflectionGap = reflections[0].transform[5] - supplementaryReflection.transform[5];
-      expect(reflectionGap).toBeGreaterThan(15);
-      expect(reflectionGap).toBeLessThan(25);
+      expect(reflectionGap).toBeGreaterThan(16);
+      expect(reflectionGap).toBeLessThan(20);
       expect(await pdf.getAttachments()).toBeNull();
       await inspectLayout(pdf, 3, await templateRender(3), pdpRects, [[111.273, 88.3613, 208.146, 105.38]]);
       const renderedSat = await render(pdf, 2);
@@ -281,18 +367,8 @@ test('annual forms retain only authored narratives and filenames, with natural i
         else expect(changed, `unselected standard ${index + 1}`).toBeLessThan(4);
       }
       const generated = await render(pdf, 1);
-      const before = original.getContext('2d').getImageData(0, 0, original.width, original.height).data;
-      const after = generated.getContext('2d').getImageData(0, 0, generated.width, generated.height).data;
-      const rows = [227, 260, 294, 328, 399, 433, 467, 501, 535, 569, 602, 637, 671];
-      for (const [index, y] of rows.entries()) {
-        const x = index < 4 ? 159 : 165;
-        let changed = 0;
-        for (let py = y - 8; py <= y + 8; py++) for (let px = x - 7; px <= x + 7; px++) {
-          const at = (py * original.width + px) * 4;
-          if (Math.abs(before[at] - after[at]) > 40) changed++;
-        }
-        expect(changed, `checklist row ${index + 1}`).toBeGreaterThan(15);
-      }
+      const checklist = (await (await pdf.getPage(1)).getTextContent()).items;
+      expect(checklist.filter(item => 'str' in item && item.str === 'X')).toHaveLength(13);
       if (process.env.SWCC_EXPORT_INSPECT === '1') {
         const directory = resolve('.work/forms-inspection');
         mkdirSync(directory, { recursive: true });
@@ -305,7 +381,7 @@ test('annual forms retain only authored narratives and filenames, with natural i
   } finally { app.close(); }
 });
 
-test('long words and URLs wrap completely within the measured source fields at 10 pt', async () => {
+test('long words and URLs wrap completely within the measured source fields at 8 pt', async () => {
   const root = storage();
   const destination = resolve(root, 'wrapped.pdf');
   const app = openApplication(resolve(root, 'storage'), {}, undefined, undefined, formsSystem(destination));
@@ -338,7 +414,7 @@ test('long words and URLs wrap completely within the measured source fields at 1
           if (!('str' in item)) continue;
           expect(item.transform[4]).toBeGreaterThanOrEqual(rect[0] + 1.9);
           expect(item.transform[4] + item.width).toBeLessThanOrEqual(rect[2] - 1.9);
-          expect(Math.hypot(item.transform[0], item.transform[1])).toBeGreaterThanOrEqual(10);
+          expect(Math.hypot(item.transform[0], item.transform[1])).toBeCloseTo(8, 1);
           expect(item.transform[5]).toBeGreaterThan(rect[1] + 2);
           expect(item.transform[5] + item.height).toBeLessThan(rect[3] - 1);
         }
@@ -373,7 +449,41 @@ function narrative(lines: { str: string }[]) {
   return lines.map(line => line.str).join('');
 }
 
-test('SAT continuations carry each full annual narrative and goal once at readable size in the original layout', async () => {
+test('SAT continuations retain selected annual standards', async () => {
+  const root = storage();
+  const destination = resolve(root, 'sat-checkbox.pdf');
+  const app = openApplication(resolve(root, 'storage'), {}, undefined, undefined, formsSystem(destination));
+  const strengths = Array.from({ length: 31 }, (_, index) => `Strength ${index + 1}`).join('\n');
+  try {
+    let pkg = value(await app.operations.createYear(2024));
+    pkg = value(await app.operations.saveDraft({ packageId: pkg.id, expectedRevision: pkg.contentRevision,
+      draft: { assessmentDate: '2024-01-20', planDate: '', strengths, peerFeedback: '',
+        learningNeeds: '', annualStandards: ['principle-viii'] } }));
+    value(await app.operations.exportForms({ packageId: pkg.id, confirmDraft: true }));
+    const original = await templateRender(2);
+    const pdf = await getDocument({ data: new Uint8Array(readFileSync(destination)), useSystemFonts: true }).promise;
+    try {
+      const pages: number[] = [];
+      for (let n = 1; n <= pdf.numPages; n++) if ((await text(pdf, n)).includes('Self-Assessment')) pages.push(n);
+      expect(pages).toHaveLength(2);
+      const before = original.getContext('2d').getImageData(0, 0, original.width, original.height).data;
+      const x = Math.round(448.53 * 1.5);
+      const y = Math.round((612 - 216.108 - 3.75) * 1.5);
+      for (const n of pages) {
+        const rendered = await render(pdf, n);
+        const after = rendered.getContext('2d').getImageData(0, 0, rendered.width, rendered.height).data;
+        let changed = 0;
+        for (let py = y - 3; py <= y + 3; py++) for (let px = x - 3; px <= x + 3; px++) {
+          const at = (py * original.width + px) * 4;
+          if (Math.abs(before[at] - after[at]) > 40) changed++;
+        }
+        expect(changed, `Principle VIII checkbox on SAT page ${n}`).toBeGreaterThan(4);
+      }
+    } finally { await pdf.destroy(); }
+  } finally { app.close(); }
+});
+
+test('SAT continuations carry each full annual narrative and goal title once at readable size in the original layout', async () => {
   const root = storage();
   const destination = resolve(root, 'sat-stress.pdf');
   const app = openApplication(resolve(root, 'storage'), {}, undefined, undefined, formsSystem(destination));
@@ -398,8 +508,7 @@ test('SAT continuations carry each full annual narrative and goal once at readab
       for (let n = 2; n <= pdf.numPages; n++) if ((await text(pdf, n)).includes('Self-Assessment')) pages.push(n);
       expect(pages.length).toBeGreaterThan(2);
       if (!result.cancelled) expect(result.pageCount).toBe(pdf.numPages);
-      const expected = [strengths, feedback, needs,
-        pkg.goals.map(goal => `${goal.title}\n${goal.description}`).join('\n')];
+      const expected = [strengths, feedback, needs, pkg.goals.map(goal => goal.title).join('\n')];
       for (const [index, rect] of satRects.entries()) {
         let actual = '';
         for (const n of pages) {
@@ -407,7 +516,7 @@ test('SAT continuations carry each full annual narrative and goal once at readab
           actual += narrative(lines);
           for (const line of lines) {
             expect(line.transform[4] + line.width).toBeLessThanOrEqual(rect[2] - 1.9);
-            expect(Math.hypot(line.transform[0], line.transform[1])).toBeGreaterThanOrEqual(10);
+            expect(Math.hypot(line.transform[0], line.transform[1])).toBeCloseTo(8, 1);
             expect(line.transform[5] + line.height).toBeLessThan(rect[3] - 1);
             expect(line.transform[5]).toBeGreaterThan(rect[1] + 2);
           }
@@ -422,7 +531,8 @@ test('SAT continuations carry each full annual narrative and goal once at readab
       expect(await pdf.getFieldObjects()).toBeNull();
       expect(await pdf.getJSActions()).toBeNull();
       const firstFeedback = await column(pdf, pages[0], satRects[1]);
-      expect(firstFeedback[0].transform[5] - firstFeedback[1].transform[5]).toBeGreaterThan(25);
+      expect(firstFeedback[0].transform[5] - firstFeedback[1].transform[5]).toBeGreaterThan(16);
+      const standardCheckbox = [444.78, 216.108, 452.28, 223.608] as const;
       const directory = resolve('.work/forms-continuation-inspection');
       if (process.env.SWCC_EXPORT_INSPECT === '1') {
         mkdirSync(directory, { recursive: true });
@@ -430,8 +540,7 @@ test('SAT continuations carry each full annual narrative and goal once at readab
         writeFileSync(resolve(directory, 'sat-source.png'), original.toBuffer('image/png'));
       }
       for (const n of pages) {
-        const rendered = await inspectLayout(pdf, n, original, satRects,
-          [[106.037, 88.3613, 204.874, 105.38], ...(n === pages[0] ? [[444.78, 216.108, 452.28, 223.608]] : [])]);
+        const rendered = await inspectLayout(pdf, n, original, satRects, [[106.037, 88.3613, 204.874, 105.38], standardCheckbox]);
         if (process.env.SWCC_EXPORT_INSPECT === '1')
           writeFileSync(resolve(directory, `sat-${n - 1}.png`), rendered.toBuffer('image/png'));
       }
@@ -484,8 +593,8 @@ test('PDP fields continue independently without labels, alignment gaps or repeat
       expect(pages.length).toBeGreaterThan(2);
       if (!result.cancelled) expect(result.pageCount).toBe(pdf.numPages);
       const expected = [
-        Array.from({ length: 14 }, (_, i) => `But distinct ${i + 1}\nRécit du but ${i + 1}.`).join('\n'),
-        inputs.map(input => `${input.title}\n${input.description}`).join('\n'),
+        Array.from({ length: 14 }, (_, i) => `But distinct ${i + 1}`).join('\n'),
+        inputs.map(input => input.title).join('\n'),
         inputs.map((input, i) => [input.evidenceDescription, ...input.evidenceLinks,
           ...(i === 0 ? ['attestation-présence.txt'] : [])].join('\n')).join('\n'),
         inputs.map(input => input.applicationToPractice).join('\n'),
@@ -498,7 +607,7 @@ test('PDP fields continue independently without labels, alignment gaps or repeat
           for (const line of lines) {
             expect(line.transform[4]).toBeGreaterThanOrEqual(rect[0] + 1.9);
             expect(line.transform[4] + line.width).toBeLessThanOrEqual(rect[2] - 1.9);
-            expect(Math.hypot(line.transform[0], line.transform[1])).toBeGreaterThanOrEqual(10);
+            expect(Math.hypot(line.transform[0], line.transform[1])).toBeCloseTo(8, 1);
             expect(line.transform[5]).toBeGreaterThan(rect[1] + 2);
             expect(line.transform[5] + line.height).toBeLessThan(rect[3] - 1);
           }
